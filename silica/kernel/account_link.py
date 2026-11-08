@@ -133,13 +133,25 @@ def _post(url: str, at: str, **kw):
         return httpx.post(url, follow_redirects=False, **kw)
     except httpx.HTTPError as exc:
         # Its words name the address at most, and still never reach the page or the log: the class
-        # is enough to tell a refused connection from a timeout. `from None`, so no traceback a
-        # route prints carries the request the exception holds.
+        # is enough to tell a refused connection from a timeout.
         logger.warning("account link: %s not reached (%s)", url.split("?", 1)[0], type(exc).__name__)
-        raise ValueError(f"{_named(at)} could not be reached. Check the connection and try again.") from None
+    # Raised out here and not inside the except: there it would keep the httpx error as its
+    # __context__, and that error holds the request, Authorization header included.
+    raise ValueError(f"{_named(at)} could not be reached. Check the connection and try again.")
 
 
-def _body(r) -> dict:
+# The gateway's and the tenant's answers are a few hundred bytes; JSON grows as it parses (9 MB of
+# [] held 192 MiB, 06c69d5), so a longer one is refused before the parse.
+_ANSWER_MAX = 64 * 1024
+# a code's life on the gateway (LINK_TTL): the page polls no longer than that, whatever is said
+_CODE_LIFE = 600
+
+
+def _body(r, at: str) -> dict:
+    # shortcut: httpx has read the body whole before this check; stream the response if a gateway
+    # ever answers megabytes, which no answer of bin/gateway or a tenant does (2026-11-08)
+    if len(r.content) > _ANSWER_MAX:
+        raise ValueError(f"{_named(at)} answered with more than an answer of its holds. Try again in a minute.")
     try:
         out = r.json()
     except ValueError:
@@ -164,12 +176,13 @@ def start() -> dict:
         wait = r.headers.get("retry-after", "")
         when = f"in {max(1, -(-int(wait) // 60))} minutes" if wait.isdigit() else "later"
         raise ValueError(f"Too many link codes from this network. Try again {when}.")
-    got = _body(r)
+    got = _body(r, at)
     code, poll, ttl = got.get("code"), got.get("poll"), got.get("expires_in")
     if r.status_code != 200 or not (isinstance(code, str) and _CODE.fullmatch(code) and isinstance(poll, str)
                                     and poll and type(ttl) is int and ttl > 0):
         raise ValueError(f"{_named(at)} gave no link code (it answered {r.status_code}). Try again in a minute.")
-    return {"code": code, "poll": poll, "expires_in": ttl, "url": f"{at}/link/confirm?code={quote(code)}"}
+    return {"code": code, "poll": poll, "expires_in": min(ttl, _CODE_LIFE),
+            "url": f"{at}/link/confirm?code={quote(code)}"}
 
 
 def poll(poll: str) -> dict:
@@ -180,7 +193,7 @@ def poll(poll: str) -> dict:
 
     at = _gateway()
     r = _post(f"{at}/link/poll", at, json={"poll": poll}, timeout=15)
-    got = _body(r)
+    got = _body(r, at)
     said = got.get("state")
     if r.status_code != 200 or said not in ("pending", "linked", "gone"):
         raise ValueError(f"{_named(at)} did not say whether the code was confirmed "
@@ -209,8 +222,9 @@ def _take_handle(handle: str) -> None:
         return  # no vault open: nothing to name, and "." would put a vault.yaml in the working folder
     try:
         set_block_key(CONFIG.vault_path, PUBLIC_KEY, "handle", handle)
-    except OSError as exc:
-        # The link is kept and works: only the handle overlay asks again, until vault.yaml is writable
+    except (OSError, ValueError) as exc:
+        # A vault.yaml not writable, or not UTF-8 (UnicodeDecodeError is a ValueError): the link is
+        # kept and works, and only the handle overlay asks again until vault.yaml is fixed
         logger.warning("account link: @%s not written into vault.yaml (%s)", handle, type(exc).__name__)
 
 
@@ -365,13 +379,14 @@ def _refusal(status: int, detail: str, at: str) -> str:
     return f"{_named(at)} answered {status}. Try again in a minute."
 
 
-def send(slug: str, vault: Path | None = None) -> dict:
+def send(slug: str, vault: Path | None = None, visibility: str | None = None) -> dict:
     """Publish one wiki through the linked account: the notes that go out, as written, their images
     and the author's answers (ADR-0157 points 10 and 11); the account publishes them with its
-    own renderer, in the visibility the wiki has here. An Off wiki is sent Off, which takes it off
-    its address on the account. Returns {"vault", "notes", "url", "published_at", "sent", "off"},
-    the account's count and address. ValueError with a sentence for anything the person must
-    read, the account's refusals included."""
+    own renderer, in the visibility the wiki has here, or `visibility`, which the row takes only
+    once the account has taken the wiki, so a refusal here or there leaves the row as it was. An
+    Off wiki is sent Off, which takes it off its address on the account. Returns {"vault",
+    "notes", "url", "published_at", "sent", "off"}, the account's count and address. ValueError
+    with a sentence for anything the person must read, the account's refusals included."""
     import httpx
 
     from silica.kernel import publish
@@ -382,7 +397,8 @@ def send(slug: str, vault: Path | None = None) -> dict:
     if got is None:
         raise ValueError(NOT_LINKED)
     vault = vault or publish._vault()
-    conf = publish.find(slug, vault)
+    row = publish.find(slug, vault)
+    conf = {**row, "visibility": visibility or row["visibility"]}
     name = _hosted_folder(conf["folder"])
     # The account replaces a folder any linked computer sent (Task 10), so A/Notes and B/Notes
     # would overwrite each other there, each Publish taking the other's place.
@@ -402,19 +418,21 @@ def send(slug: str, vault: Path | None = None) -> dict:
         # A wiki of 100 MB, then the account builds its pages before it answers
         r = _post(f"{at}/link/publish", at, content=f, timeout=httpx.Timeout(600, connect=15),
                   headers={"Authorization": f"Bearer {got['token']}", "Content-Type": "application/zip"})
-    out = _body(r)
     if r.status_code == 401:
         # The account no longer knows this token: removed in its Settings, or signed out
         # everywhere. Kept, it would read as linked while every Publish fails.
         unlink()
         logger.info("account link: %s refused the token; this computer is unlinked", at)
         raise ValueError("Your account no longer knows this computer. Link it again to publish.")
+    out = _body(r, at)
     if r.status_code != 200:
         logger.info("account link: %s answered %s to a Publish of %s", at, r.status_code, slug)
         raise ValueError(_refusal(r.status_code, out.get("detail") if isinstance(out.get("detail"), str) else "", at))
     url = out.get("url") if isinstance(out.get("url"), str) and out["url"].startswith("https://") else ""
     notes = out.get("notes") if type(out.get("notes")) is int else 0
     off = conf["visibility"] == "off"
+    if conf["visibility"] != row["visibility"]:
+        publish.set_visibility(slug, conf["visibility"], vault)
     if not off:
         items = publish.vaults(vault)
         for v in items:

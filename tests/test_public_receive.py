@@ -123,8 +123,11 @@ def test_the_computer_s_readers_and_listing_request_are_the_row_s_and_the_review
     m = json.loads((tmp / "public" / "marta" / "live" / "memoria" / "vault.json").read_text(encoding="utf-8"))
     assert m["listed"] is True
     assert publish.host_reviews().get("memoria") is None  # asked, not in: the host's review reads it next
-    assert send(tc, package(readers=[], listed=False)).status_code == 200
-    assert (publish.find("memoria")["readers"], publish.find("memoria")["listed"]) == ([], False)
+    # the computer owns the request: a package that does not carry it leaves the row's as it is
+    assert send(tc, package(readers=[])).status_code == 200
+    assert (publish.find("memoria")["readers"], publish.find("memoria")["listed"]) == ([], True)
+    assert send(tc, package(listed=False)).status_code == 200
+    assert publish.find("memoria")["listed"] is False
 
 
 def test_a_wiki_the_computer_turned_off_leaves_its_address_and_keeps_its_notes(host):
@@ -295,6 +298,7 @@ def _symlink_package() -> bytes:
     (package(readers=["x" * 31]), "wiki.json"),
     (package(readers=[f"r{i}" for i in range(101)]), "wiki.json"),
     (package(listed="yes"), "wiki.json"),
+    (package(listed=None), "wiki.json"),
     (package(title=None), "wiki.json"),
     (package(license="mine"), "license"),
     (package(folder="../Elsewhere"), "cannot be"),
@@ -305,7 +309,7 @@ def _symlink_package() -> bytes:
     (b"not a zip", "zip"),
 ], ids=["slip", "absolute", "backslash", "symlink", "html note", "html page", "script", "svg",
         "dot folder", "file and folder", "long path", "long name", "folder type", "answers type", "answer word", "answer key", "visibility", "readers type", "reader word", "reader long", "readers many",
-        "listed type", "title type", "license",
+        "listed type", "listed null", "title type", "license",
         "folder slip", "folder path", "dot folder name", "silica folder", "no folder", "not a zip"])
 def test_a_hostile_package_is_refused_with_a_sentence_and_nothing_written(host, data, said):
     tc, tmp = host

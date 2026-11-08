@@ -908,7 +908,8 @@ function renderPublic(fresh) {
   if (st.outside) notes.push(`${pubCount(st.outside)} with publish: true outside every wiki ${st.outside === 1 ? "stays" : "stay"} in your vault`);
   if (notes.length) goes.append(mkEl("p", "pp-dim", notes.join(" · ")));
   grid.append(goes);
-  if (v.visibility === "public" && st.url) grid.append(listingBox(v));
+  // a linked computer owns its wikis' listing request, which its Publish carries (ADR-0157 point 10)
+  if (v.visibility === "public" && (st.url || st.link)) grid.append(listingBox(v));
   if (v.visibility === "private") grid.append(readersBox(v));
   if (alone) grid.append(linkBox());
   // alone, the draft puts Shared with you under the one action this computer has

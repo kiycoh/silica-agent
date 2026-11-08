@@ -299,13 +299,18 @@ async def public_publish(payload: dict | None = None):
     slug = str((payload or {}).get("vault") or "")
     if not publish.available():
         raise HTTPException(400, "this account has no public address yet")
-    # "Turn off on your account": a computer's Off wiki goes out Off, so its copy there leaves its
-    # address; no other route reaches the account from a computer
-    off = not hosted() and (payload or {}).get("off") is True
     try:
-        if publish.find(slug)["visibility"] == "off" and not off:
-            publish.set_visibility(slug, "public")
-        out = await asyncio.to_thread(build if hosted() else account_link.send, slug)
+        turn_on = publish.find(slug)["visibility"] == "off"
+        if hosted():
+            if turn_on:
+                publish.set_visibility(slug, "public")
+            out = await asyncio.to_thread(build, slug)
+        else:
+            # "Turn off on your account" sends the Off wiki as it is, so its copy there leaves its
+            # address; otherwise an Off wiki goes out Public, and the row turns Public only once the
+            # account took it, so a refusal on either side leaves it as it was
+            off = (payload or {}).get("off") is True
+            out = await asyncio.to_thread(account_link.send, slug, None, "public" if turn_on and not off else None)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {**_view(), "result": out}

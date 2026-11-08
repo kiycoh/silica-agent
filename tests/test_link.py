@@ -445,6 +445,79 @@ def test_two_wikis_landing_in_one_folder_of_the_account_and_too_many_readers_are
     assert gateway.posts("/link/publish") == []
 
 
+def test_a_refused_publish_leaves_an_off_wiki_off(memory, gateway, client, tmp_vault, monkeypatch):
+    """Publish on an Off wiki turns it Public only once the account took it (fix round 1, 3c)."""
+    from silica.kernel import account_link as link, publish
+    from silica.sources import saved_page
+
+    def refused(said: str) -> None:
+        r = client.post("/public/publish", json={"vault": "memory"})
+        assert (r.status_code, said in r.json()["detail"]) == (400, True), r.text
+        assert publish.find("memory")["visibility"] == "off"
+
+    refused("Link a Silica account to publish")
+    link._keep(TOKEN, "marta", gateway.host)
+    publish.update_vault("memory", {"readers": [f"r{i}" for i in range(101)]})
+    refused("100 readers at most")
+    publish.update_vault("memory", {"readers": []})
+    with monkeypatch.context() as m:
+        m.setattr(saved_page, "WIKI_FILE_MAX", 30)
+        refused("past the")
+    gateway.publish = (409, {"detail": "A folder named Memory already holds notes of yours: rename one of them"}, {})
+    refused("rename one of them")
+    tmp_vault.note("Other/Memory/Note.md", "Another wiki of the same name.\n")
+    publish.add_vault("Other/Memory")
+    refused("Two of your wikis")
+    assert len(gateway.posts("/link/publish")) == 1  # the 409 alone reached the account
+
+
+def test_no_exception_carries_the_request_and_the_gateway_s_answers_are_bounded(memory, gateway):
+    from silica.kernel import account_link as link
+
+    link._keep(TOKEN, "marta", "http://127.0.0.1:9")
+    with pytest.raises(ValueError) as caught:
+        link.send("memory")
+    assert caught.value.__context__ is None and caught.value.__cause__ is None
+    gateway.start = (200, {"code": CODE, "poll": POLL, "expires_in": 99999}, {})
+    assert link.start()["expires_in"] == 600
+    gateway.start = (200, {"code": CODE, "poll": POLL, "expires_in": 600, "pad": "x" * 70000}, {})
+    with pytest.raises(ValueError, match="more than an answer"):
+        link.start()
+
+
+def test_a_vault_yaml_that_is_not_utf8_keeps_the_link(memory, gateway, monkeypatch):
+    from silica.kernel import account_link as link
+
+    (memory / "vault.yaml").write_bytes(b"public:\n  title: \xff\xfe\n")
+    link.start()
+    gateway.confirmed = True
+    assert link.poll(POLL)["state"] == "linked"
+    assert link.state()["linked"] and _link_file().exists()
+
+
+def test_a_linked_computer_shows_the_listing_request_its_publish_carries():
+    js = (Path(__file__).parents[1] / "silica" / "ui" / "web" / "static" / "app-public.js").read_text(encoding="utf-8")
+    assert 'v.visibility === "public" && (st.url || st.link)) grid.append(listingBox(v))' in js
+
+
+def test_an_unlinked_removal_keeps_the_served_folder_through_a_later_page_write(memory, client):
+    from silica.kernel import publish
+
+    items = publish.vaults()
+    items[0]["visibility"] = "public"
+    publish._save_vaults(items, memory)
+    (memory / "Explore").mkdir()
+    (memory / "Explore" / "A.md").write_text("a\n", encoding="utf-8")
+    publish.add_vault("Explore")
+    live = memory.parent / "public" / "marta" / "live"
+    (live / "memory").mkdir(parents=True)
+    (live / "memory" / "index.html").write_text("served by the person", encoding="utf-8")
+    assert client.post("/public/vault/memory/remove").status_code == 200
+    # a visibility change elsewhere rewrites the Page, which sweeps a folder only for a row it has
+    assert client.post("/public/vault/explore", json={"visibility": "off"}).status_code == 200
+    assert (live / "memory" / "index.html").read_text(encoding="utf-8") == "served by the person"
+
+
 def test_the_account_s_tier_refusal_reaches_the_view_as_its_sentence(memory, gateway, client):
     from silica.kernel import account_link as link
 

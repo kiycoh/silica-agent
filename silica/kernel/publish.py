@@ -697,17 +697,18 @@ READERS_MAX = 100
 def _head(m, notes: set[str]) -> dict:
     """wiki.json's fields, each of its own type. Its `link` is never read: the gateway names the
     link a wiki came by, and a package is the client's word. Off takes the wiki off its address
-    on this account, as Off here does; `readers` and `listed` may be absent, read as none and no."""
+    on this account, as Off here does. `readers` may be absent, read as none; `listed` is None when
+    absent, and the row keeps the request it has."""
     from silica.kernel import rights
     from silica.sources.saved_page import _NAME
 
     if not isinstance(m, dict) or m.get("visibility") not in VISIBILITY \
             or not isinstance(m.get("answers"), dict):
         raise ValueError(_BAD_HEAD)
-    readers, listed = m.get("readers", []), m.get("listed", False)
+    readers, listed = m.get("readers", []), m.get("listed")
     # a handle each, within the 30 characters update_vault takes, so nothing is refused after the
-    # row is written
-    if not isinstance(listed, bool) or not isinstance(readers, list) or len(readers) > READERS_MAX \
+    # row is written; `listed` carried is a bool, null included in what is refused
+    if ("listed" in m and not isinstance(listed, bool)) or not isinstance(readers, list) or len(readers) > READERS_MAX \
             or not all(isinstance(r, str) and _NAME.fullmatch(r) and _HANDLE.fullmatch(r) for r in readers):
         raise ValueError(_BAD_HEAD)
     head = {k: _said(m.get(k), n) for k, n in (("folder", 4096), ("slug", 60), ("title", 80),
@@ -895,8 +896,10 @@ def receive(data: bytes, link: str, vault: Path | None = None) -> dict:
             # Publish, while a folder without its row would refuse that Publish as the person's.
             slug = _receive_row(folder, link, meta, vault)
             # The author's readers and listing request, as a hosted author's own: the account's
-            # handle leaves the readers, and the host's review still decides the listing
-            update_vault(slug, {"readers": meta["readers"], "listed": meta["listed"]}, vault)
+            # handle leaves the readers, and the host's review still decides the listing. The
+            # computer owns the request for its wikis; a package without it leaves the row's.
+            update_vault(slug, {"readers": meta["readers"]}
+                         | ({} if meta["listed"] is None else {"listed": meta["listed"]}), vault)
             if dest.exists():
                 dest.rename(aside)
             try:

@@ -795,9 +795,12 @@ def write_page(vault: Path | None = None) -> None:
             entries.append(json.loads((live / slug / "vault.json").read_text(encoding="utf-8")))
         except (OSError, ValueError):
             continue
+    rows = {v["slug"] for v in publish.vaults(vault)}
     if live.is_dir():
-        for stale in [p for p in live.iterdir() if p.is_dir() and p.name not in public and p.name != "_s"]:
-            # a vault Off or Private whose folder stayed, after a crash between two renames
+        # A wiki Off or Private whose folder stayed, after a crash between two renames. Only a row
+        # that still exists: an unlinked computer removes a Public row and leaves its served folder
+        # where it is, since the person may be serving it (ADR-0157, Consequences).
+        for stale in [p for p in live.iterdir() if p.is_dir() and p.name in rows - public]:
             shutil.rmtree(stale)
     if not entries:
         for name in ("index.html", "vaults.json"):
