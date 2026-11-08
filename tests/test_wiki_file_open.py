@@ -99,6 +99,49 @@ def test_a_saved_file_lands_in_saved_and_its_invitation_goes(wiki_zip, homes):
     assert [i["vault"] for i in saved_page.invitations()] == ["memory"]
 
 
+def test_a_saved_file_links_its_notes(wiki_zip, homes):
+    """ADR-0157 point 8: a file's notes link each other as `<slug>.html`, dead in the reader's
+    vault, so the save makes them wikilinks to the notes it writes."""
+    from silica.sources import saved_page
+
+    saved_page.open_file(wiki_zip)
+    r = saved_page.save_invitation("marta", "memory")
+    folder = homes / "vault" / r["folder"]
+    spacing = (folder / "Spacing effect.md").read_text(encoding="utf-8")
+    forgetting = (folder / "Forgetting curve.md").read_text(encoding="utf-8")
+    assert "[[Saved/@marta/Memoria/Forgetting curve|Forgetting curve]]" in spacing
+    assert "[[Saved/@marta/Memoria/Spacing effect|Spacing effect]]" in forgetting
+    for text in (spacing, forgetting):
+        for slug in ("spacing-effect", "forgetting-curve", "borrowed"):
+            assert f"]({slug}.html)" not in text and f"]({slug}.md)" not in text
+    # the image keeps its relative address: it lands beside the notes as assets/<name>
+    assert "![hypnogram.png](assets/1-hypnogram.png)" in spacing
+    assert not (homes / "home" / ".silica" / "invitations-done").exists()
+
+
+def test_only_a_files_own_relative_links_become_wikilinks(wiki_zip, homes):
+    """A file's manifest has no address, so an https link is never read as one of its notes
+    however its path ends; only `<slug>.html` or `<slug>.md` of a note this save writes is."""
+    from silica.sources import saved_page
+
+    with zipfile.ZipFile(io.BytesIO(wiki_zip)) as z:
+        notes = json.loads(z.read("memory/notes.json"))
+    notes["spacing-effect"] += (
+        "\nElsewhere: [x](https://example.org/foo/forgetting-curve), [y](not-in-manifest.html), "
+        "[z](sub/forgetting-curve.html), [m](forgetting-curve.md), [b](borrowed.html).\n")
+    saved_page.open_file(_rezip(wiki_zip, change={"memory/notes.json": json.dumps(notes).encode()}))
+    # area 0 holds the two linked notes, so Borrowed, in the manifest, is not saved
+    r = saved_page.save_invitation("marta", "memory", areas=[0])
+    folder = homes / "vault" / r["folder"]
+    assert sorted(p.name for p in folder.glob("*.md")) == ["Forgetting curve.md", "Spacing effect.md"]
+    spacing = (folder / "Spacing effect.md").read_text(encoding="utf-8")
+    # A Private save writes a link it cannot serve as its words, as it did before; a relative path
+    # with a folder in it is no note of the file and is left as written.
+    assert ("Elsewhere: x, y, [z](sub/forgetting-curve.html), "
+            "[[Saved/@marta/Memoria/Forgetting curve|m]], b.") in spacing
+    assert not (homes / "home" / ".silica" / "invitations-done").exists()
+
+
 def test_pages_scripts_and_what_is_not_an_image_are_never_written(wiki_zip, homes):
     from silica.sources import saved_page
 

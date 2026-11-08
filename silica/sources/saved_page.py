@@ -6,8 +6,9 @@ note, or the areas a reader picks of a published vault, copied into the
 reader's vault under `Saved/@handle/<Vault>/`, never read from another vault.
 
 A vault publishes a `.md` beside each note's `.html` and all of them in
-`notes.json`, whose links already point at the author's pages and whose
-private links are already plain words, so the copy can only rewrite the
+`notes.json`, whose links already point at the author's pages (in a wiki
+file, at each other by slug, ADR-0157 point 8) and whose private links are
+already plain words, so the copy can only rewrite the
 links the reader can serve from their own vault: a note of the same author
 they saved before, or one saved in the same write. A Private vault reaches
 the reader as the same files, put outside their vault by the host's relay.
@@ -28,6 +29,9 @@ _PAGE_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)/([a-z0-9-]+)$")
 _VAULT_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)/$")
 _FOLDER_UNSAFE = re.compile(r'[\\/:*?"<>|#^\[\]]+')
 _MD_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+# A wiki file has no address, so its notes link each other by slug alone, `<slug>.html` (a Private
+# build with no host writes `<slug>.md`): nothing before the slug, and `in names` checks the slug itself.
+_REL_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\(([^)\s/:]+)\.(?:html|md)\)")
 _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")
 # ADR-0157 Open 4: a wiki file may not pass 100 MB unpacked. Decimal megabytes, as Caddy reads the
 # edge's `max_size 100MB`, so the limit the file is built under is the one its upload meets.
@@ -310,16 +314,22 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
 
         def relink(m: re.Match) -> str:
             words, target = m.group(1), m.group(2)
-            tail = target.rsplit("/", 1)[-1].removesuffix(".md")
-            if (not base or target.startswith(base)) and tail in names:
-                return _wikilink(m, names[tail], words)
-            own = mine.get(target)
-            if own:
-                return _wikilink(m, own.removesuffix(".md"), words)
+            if m.re is _REL_LINK:
+                if target in names:
+                    return _wikilink(m, names[target], words)
+            else:
+                tail = target.rsplit("/", 1)[-1].removesuffix(".md")
+                # Only under the wiki's own address. A file's manifest has none, and with "" this
+                # took any https link whose path ended in one of its slugs for that note.
+                if base and target.startswith(base) and tail in names:
+                    return _wikilink(m, names[tail], words)
+                own = mine.get(target)
+                if own:
+                    return _wikilink(m, own.removesuffix(".md"), words)
             # a Private vault's address is never served: a link to a note not saved is its words
             return words if private else m.group(0)
 
-        new_body = _MD_LINK.sub(relink, body)
+        new_body = _REL_LINK.sub(relink, _MD_LINK.sub(relink, body))
         tags = props.get("tags") if isinstance(props.get("tags"), list) else []
         # a note the author saved from someone else credits that someone (ADR-0143 point 10)
         author, src = _credit(props, handle, base + slug if base else "")
