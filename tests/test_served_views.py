@@ -272,3 +272,40 @@ def test_shared_with_you_needs_no_handle_and_a_zip_opens_only_on_my_wikis():
     assert "invitesBox()" in gone
     drop = js[js.index('$("#view-public").addEventListener("drop"'):]
     assert 'wikisTab !== "mine"' in drop[:drop.index("openWikiFile(zip)")]
+
+
+# --- ADR-0157 point 9: the hosted Settings list the linked computers -------------
+
+def _linked_block() -> str:
+    js = _read("app-settings.js")
+    start = js.index("async function renderLinkedComputers")
+    return js[start:js.index("// The attached payload", start)]
+
+
+def test_settings_list_the_linked_computers_behind_the_gateway_gate():
+    js = _read("app-settings.js")
+    about = js[js.index("function renderAbout"):js.index("function renderSignOutEverywhere")]
+    hosted = about[about.index("if (data.hosted)"):about.index("stInfoRow(host, \"updates\"")]
+    # only the hosted branch draws it, and only where /link/* exists (the sign-out gate)
+    assert "dataset.signout !== undefined" in hosted and "renderLinkedComputers(host)" in hosted
+    assert "renderLinkedComputers" not in about.replace(hosted, "")
+
+
+def test_the_linked_computers_block_reads_and_removes_through_the_gateway():
+    block = _linked_block()
+    assert 'fetch("/link/list")' in block and 'fetch("/link/revoke"' in block
+    assert '"Content-Type": "application/json"' in block and "JSON.stringify({ id: l.id })" in block
+    assert "`Linked ${stLinkDate(l.created)} · until ${stLinkDate(l.expires)}`" in block
+    assert '"Remove"' in block and "Linked computers" in block
+    assert "No computer is linked. A Silica on a computer links from Wikis → My wikis → Link an account." in block
+    assert "Linked computers could not be read." in block
+    # text from the gateway is set as text, never parsed as markup
+    assert "innerHTML" not in block
+
+
+def test_the_settings_script_declares_each_top_level_const_once():
+    """Classic scripts share one global scope, so a second `const ST_MONTHS` is a SyntaxError that
+    leaves the whole file unloaded: no Settings at all. Found in the browser, not by the string
+    tests above, which still passed."""
+    names = re.findall(r"^const (\w+)", _read("app-settings.js"), re.M)
+    assert len(names) == len(set(names)), sorted({n for n in names if names.count(n) > 1})
