@@ -777,6 +777,11 @@ def receive(data: bytes, link: str, vault: Path | None = None) -> dict:
                 raise ValueError(f"that wiki holds {name[:120]!r}, a page: a computer sends notes, "
                                  "and this account writes the pages")
             rel = name.removeprefix("notes/")
+            # Refused here and not met as a write's OSError, which the route words as the disk's:
+            # 255 is a name's limit on every file system, and 1,024 keeps the vault's path, a
+            # folder of 255 and this under Linux's 4,096.
+            if len(rel.encode("utf-8")) > 1024 or any(len(s.encode("utf-8")) > 255 for s in rel.split("/")):
+                raise ValueError(f"that wiki holds {name[:120]!r}, a name longer than a file system takes")
             if name == "wiki.json":
                 head = info
             elif (rel != name and rel.endswith(".md") and all(_plain(p) for p in rel.split("/"))) \
@@ -784,6 +789,10 @@ def receive(data: bytes, link: str, vault: Path | None = None) -> dict:
                 keep[rel] = info  # a note by its path in the folder, an image as assets/<name>
             else:
                 raise ValueError(f"that wiki holds {name[:120]!r}, which is neither a note nor an image")
+        # `A.md` beside `A.md/B.md`: one name as a file and a folder, which no unpacking can write
+        folders = {k[:i] for k in keep for i, c in enumerate(k) if c == "/"}
+        if clash := next((k for k in keep if k in folders), None):
+            raise ValueError(f"that wiki holds {clash[:120]!r} both as a file and as a folder")
         if head is None:
             raise ValueError("that is not a wiki a Silica sends: it holds no wiki.json")
         if head.file_size > sp._MANIFEST_MAX:
@@ -823,6 +832,8 @@ def receive(data: bytes, link: str, vault: Path | None = None) -> dict:
         # far past any unpacking of 100 MB, as saved_page.open_file sweeps its own.
         parent = Path(os.path.abspath(vault)).parent
         for old in parent.glob(".receive-*"):
+            if old.name.endswith("-old"):
+                continue  # an old folder a failed swap could not put back: maybe the wiki's only copy here
             try:
                 if old.stat().st_mtime < time.time() - 3600:
                     shutil.rmtree(old, ignore_errors=True)
@@ -857,7 +868,12 @@ def receive(data: bytes, link: str, vault: Path | None = None) -> dict:
                 tmp.rename(dest)
             except BaseException:
                 if aside.exists():
-                    aside.rename(dest)
+                    try:
+                        aside.rename(dest)
+                    except OSError:
+                        # left where it is, never swept: it may be the only copy of the wiki here
+                        logger.error("receive: the old %s could not be put back; it waits beside the vault as %s",
+                                     folder, aside.name)
                 raise
         except BaseException:
             shutil.rmtree(tmp, ignore_errors=True)

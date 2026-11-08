@@ -248,6 +248,9 @@ def _symlink_package() -> bytes:
     (package(extra={"notes/run.sh": "rm -rf /"}), "neither a note nor an image"),
     (package(extra={"assets/x.svg": "<svg/>"}), "neither a note nor an image"),
     (package(extra={"notes/.hidden/x.md": "x"}), "neither a note nor an image"),
+    (package(extra={"notes/A.md": "a", "notes/A.md/B.md": "b"}), "both as a file and as a folder"),
+    (package(extra={"notes/" + "/".join(["x" * 250] * 20) + ".md": "x"}), "longer than a file system takes"),
+    (package(extra={"notes/" + "y" * 300 + ".md": "x"}), "longer than a file system takes"),
     (package(folder=7), "wiki.json"),
     (package(answers=["a"]), "wiki.json"),
     (package(answers={"Spacing effect.md": {"answer": "stolen"}}), "wiki.json"),
@@ -262,7 +265,7 @@ def _symlink_package() -> bytes:
     (package(folder=""), "cannot be"),
     (b"not a zip", "zip"),
 ], ids=["slip", "absolute", "backslash", "symlink", "html note", "html page", "script", "svg",
-        "dot folder", "folder type", "answers type", "answer word", "answer key", "visibility", "title type", "license",
+        "dot folder", "file and folder", "long path", "long name", "folder type", "answers type", "answer word", "answer key", "visibility", "title type", "license",
         "folder slip", "folder path", "dot folder name", "silica folder", "no folder", "not a zip"])
 def test_a_hostile_package_is_refused_with_a_sentence_and_nothing_written(host, data, said):
     tc, tmp = host
@@ -294,3 +297,60 @@ def test_a_busy_account_asks_for_the_publish_again_and_never_reads_as_a_taken_fo
     r = send(tc, package())
     assert r.status_code == 503 and "publish again" in r.json()["detail"]
     assert not (tmp / "vault" / "Memoria").exists()
+
+
+def test_the_sweep_leaves_an_old_folder_a_failed_swap_could_not_put_back(host):
+    """A `-old` folder is one the swap moved aside and could not move back: maybe the only copy."""
+    import time
+
+    tc, tmp = host
+    kept, stale = tmp / ".receive-abc-old", tmp / ".receive-def"
+    for d in (kept, stale):
+        d.mkdir()
+        (d / "Note.md").write_text("the only copy\n", encoding="utf-8")
+        os.utime(d, (time.time() - 7200,) * 2)
+    assert send(tc, package()).status_code == 200
+    assert (kept / "Note.md").read_text(encoding="utf-8") == "the only copy\n"
+    assert not stale.exists()
+
+
+def test_a_computer_s_remote_image_goes_out_as_a_link_and_this_account_is_asked_nothing(host):
+    from silica.kernel import rights
+
+    tc, tmp = host
+    url = "https://example.org/pic.png"
+    # this account answered the site and holds a copy: a wiki of its own would copy the image in
+    rights._keep(url, PNG, "image/png", tmp / "vault")
+    rights.save_answer("site:example.org", "mine")
+    notes = {**NOTES, "Spacing effect.md": NOTES["Spacing effect.md"] + f"\n![a figure]({url})\n"}
+    assert send(tc, package(notes=notes)).status_code == 200
+    live = tmp / "public" / "marta" / "live" / "memoria"
+    page = (live / "spacing-effect.html").read_text(encoding="utf-8")
+    assert f'href="{url}"' in page and "Image from example.org" in page
+    assert "Image not published" not in page
+    assert [p.name for p in (live / "assets").iterdir()] == ["1-hypnogram.png"]
+    md = (live / "spacing-effect.md").read_text(encoding="utf-8")
+    assert f"[Image from example.org]({url})" in md
+    sheet = rights.sheet(rights.read_wiki("memoria"), rights.answers())
+    assert not [g for g in sheet["groups"] if g["kind"] == "site"]
+
+
+def test_a_swap_that_cannot_put_the_old_folder_back_says_where_it_waits(host, monkeypatch, caplog):
+    import pathlib
+
+    tc, tmp = host
+    assert send(tc, package()).status_code == 200
+    real = pathlib.Path.rename
+
+    def rename(self, target):
+        # the vault's folder moves aside; nothing moves back in from beside the vault
+        if self.name.startswith(".receive-"):
+            raise OSError(28, "No space left on device")
+        return real(self, target)
+
+    monkeypatch.setattr(pathlib.Path, "rename", rename)
+    r = send(tc, package(notes={"New.md": "new\n"}, answers={}))
+    assert r.status_code == 500 and "could not write" in r.json()["detail"]
+    old = [p for p in tmp.iterdir() if p.name.endswith("-old")]
+    assert len(old) == 1 and (old[0] / "Forgetting curve.md").is_file()
+    assert "could not be put back" in caplog.text and old[0].name in caplog.text

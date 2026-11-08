@@ -439,7 +439,9 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
                 "file": leaves["traced"].get(name), "group": "folder:" + _folder_of(p, conf["folder"]),
                 "location": _located(found)})
             row["notes"].append(p)
-        for url in shown_remote:
+        # A computer's remote image goes out as the link naming its host (ADR-0153 point 23b): its
+        # author answered on the computer, so this account is asked nothing and fetches nothing.
+        for url in shown_remote if not conf["from_link"] else ():
             row = remote.setdefault(url, _remote_row(url, vault, fetch))
             row["notes"].append(p)
     for row in local.values():
