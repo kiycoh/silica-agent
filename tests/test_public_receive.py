@@ -111,6 +111,40 @@ def test_a_new_folder_is_written_marked_and_published_with_the_host_s_renderer(h
     assert v["computer"] is True and "from_link" not in v
 
 
+def test_the_computer_s_readers_and_listing_request_are_the_row_s_and_the_review_still_decides(host):
+    from silica.kernel import publish
+
+    tc, tmp = host
+    r = send(tc, package(readers=["sara", "marta", "luca"], listed=True))
+    assert r.status_code == 200, r.text
+    row = publish.find("memoria")
+    # the account's own handle is no reader of its wiki, as for a hosted author's list
+    assert (row["readers"], row["listed"]) == (["luca", "sara"], True)
+    m = json.loads((tmp / "public" / "marta" / "live" / "memoria" / "vault.json").read_text(encoding="utf-8"))
+    assert m["listed"] is True
+    assert publish.host_reviews().get("memoria") is None  # asked, not in: the host's review reads it next
+    assert send(tc, package(readers=[], listed=False)).status_code == 200
+    assert (publish.find("memoria")["readers"], publish.find("memoria")["listed"]) == ([], False)
+
+
+def test_a_wiki_the_computer_turned_off_leaves_its_address_and_keeps_its_notes(host):
+    from silica.kernel import publish
+
+    tc, tmp = host
+    assert send(tc, package()).status_code == 200
+    root = tmp / "public" / "marta"
+    assert (root / "live" / "memoria" / "index.html").is_file()
+    r = send(tc, package(notes={"Spacing effect.md": "Rewritten, then turned off.\n"}, assets={}, visibility="off"))
+    assert r.status_code == 200, r.text
+    assert r.json() == {"slug": "memoria", "url": "", "notes": 0, "published_at": ""}
+    assert publish.find("memoria")["visibility"] == "off" and publish.find("memoria")["from_link"] == LINK
+    assert not (root / "live" / "memoria").exists() and (root / "paused" / "memoria" / "index.html").is_file()
+    assert (tmp / "vault" / "Memoria" / "Spacing effect.md").read_text(encoding="utf-8") == "Rewritten, then turned off.\n"
+    # a later Publish from the computer puts it back on its address
+    assert send(tc, package()).status_code == 200
+    assert (root / "live" / "memoria" / "index.html").is_file()
+
+
 def test_the_computer_s_own_folder_is_replaced_whole_and_the_journal_takes_it_back(host):
     from silica.kernel import publish
     from silica.kernel.write.undo_journal import get_undo_journal, revert_run
@@ -255,7 +289,12 @@ def _symlink_package() -> bytes:
     (package(answers=["a"]), "wiki.json"),
     (package(answers={"Spacing effect.md": {"answer": "stolen"}}), "wiki.json"),
     (package(answers={"notes/Spacing effect.md": ANSWERS["Spacing effect.md"]}), "a note it did not send"),
-    (package(visibility="off"), "wiki.json"),
+    (package(visibility="hidden"), "wiki.json"),
+    (package(readers="sara"), "wiki.json"),
+    (package(readers=["Not A Handle"]), "wiki.json"),
+    (package(readers=["x" * 31]), "wiki.json"),
+    (package(readers=[f"r{i}" for i in range(101)]), "wiki.json"),
+    (package(listed="yes"), "wiki.json"),
     (package(title=None), "wiki.json"),
     (package(license="mine"), "license"),
     (package(folder="../Elsewhere"), "cannot be"),
@@ -265,7 +304,8 @@ def _symlink_package() -> bytes:
     (package(folder=""), "cannot be"),
     (b"not a zip", "zip"),
 ], ids=["slip", "absolute", "backslash", "symlink", "html note", "html page", "script", "svg",
-        "dot folder", "file and folder", "long path", "long name", "folder type", "answers type", "answer word", "answer key", "visibility", "title type", "license",
+        "dot folder", "file and folder", "long path", "long name", "folder type", "answers type", "answer word", "answer key", "visibility", "readers type", "reader word", "reader long", "readers many",
+        "listed type", "title type", "license",
         "folder slip", "folder path", "dot folder name", "silica folder", "no folder", "not a zip"])
 def test_a_hostile_package_is_refused_with_a_sentence_and_nothing_written(host, data, said):
     tc, tmp = host

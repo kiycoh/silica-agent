@@ -299,8 +299,11 @@ async def public_publish(payload: dict | None = None):
     slug = str((payload or {}).get("vault") or "")
     if not publish.available():
         raise HTTPException(400, "this account has no public address yet")
+    # "Turn off on your account": a computer's Off wiki goes out Off, so its copy there leaves its
+    # address; no other route reaches the account from a computer
+    off = not hosted() and (payload or {}).get("off") is True
     try:
-        if publish.find(slug)["visibility"] == "off":
+        if publish.find(slug)["visibility"] == "off" and not off:
             publish.set_visibility(slug, "public")
         out = await asyncio.to_thread(build if hosted() else account_link.send, slug)
     except ValueError as exc:
@@ -384,6 +387,11 @@ def _receive(data: bytes, link: str) -> tuple[str, dict]:
     from silica.ui.web.public_site import build
 
     got = publish.receive(data, link)
+    if got["visibility"] == "off":
+        # The computer turned it Off: the notes are in, its address answers that nothing is there,
+        # as an Off here does, and the Page stops listing it.
+        _refresh_page()
+        return got["folder"], {"vault": got["slug"], "url": "", "notes": 0, "published_at": ""}
     # Built by this account's renderer from the notes, with its tier, its check and its listing:
     # no page a client wrote is ever served. A build that fails leaves the notes in and the
     # answer says why; the computer's next Publish builds them.

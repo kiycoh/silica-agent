@@ -286,10 +286,11 @@ def test_send_packs_the_notes_that_go_out_as_written_with_their_images_and_answe
     from silica.sources import saved_page
 
     link._keep(TOKEN, "marta", gateway.host)
-    publish.set_visibility("memory", "public")
+    publish.set_visibility("memory", "private")
+    publish.update_vault("memory", {"readers": ["sara", "luca"], "listed": True})
     out = link.send("memory")
     assert out == {"vault": "memory", "notes": 3, "url": "https://wikis.test/@marta/memory/",
-                   "published_at": "2026-11-08T10:00:00+00:00", "sent": True}
+                   "published_at": "2026-11-08T10:00:00+00:00", "sent": True, "off": False}
     assert publish.find("memory")["published"]
     headers, z = _sent(gateway)
     assert headers["authorization"] == f"Bearer {TOKEN}" and headers["content-type"] == "application/zip"
@@ -300,12 +301,14 @@ def test_send_packs_the_notes_that_go_out_as_written_with_their_images_and_answe
     assert not any(n.endswith((".html", ".htm", ".js")) for n in names)
     meta = json.loads(z.read("wiki.json"))
     assert meta == {"link": "", "folder": "Memory", "slug": "memory", "title": "Memoria",
-                    "line": "How remembering works.", "license": "CC BY 4.0", "visibility": "public",
+                    "line": "How remembering works.", "license": "CC BY 4.0", "visibility": "private",
                     "answers": {"Forgetting curve.md": {"answer": "open", "license": "CC BY",
-                                                        "credit": "Ebbinghaus 1885"}}}
+                                                        "credit": "Ebbinghaus 1885"}},
+                    "readers": ["luca", "sara"], "listed": True}
     # what the receiver checks, run on what was sent
     notes = {n.removeprefix("notes/") for n in names if n.startswith("notes/")}
-    assert publish._head(meta, notes)["answers"] == meta["answers"]
+    head = publish._head(meta, notes)
+    assert (head["answers"], head["readers"], head["listed"]) == (meta["answers"], ["luca", "sara"], True)
     assert all(saved_page._ASSET.fullmatch(n.removeprefix("assets/")) for n in names if n.startswith("assets/"))
     assert z.read("assets/1-hypnogram.png") == JPG and z.read("assets/2-pasted-image-1.png") == PNG
     # as written, but each image let out points at its copy; a remote one, an svg the receiver
@@ -391,6 +394,66 @@ def test_the_token_is_in_no_log_no_error_and_no_answer_to_the_page(memory, gatew
         seen.append(repr(exc) + str(exc.__cause__) + str(exc.__context__))
     for text in seen + [caplog.text]:
         assert TOKEN not in text and POLL not in text
+
+
+def test_linking_takes_the_account_s_handle_so_files_and_publish_say_the_same(memory, gateway, client, monkeypatch):
+    from silica.kernel import account_link as link, publish
+
+    monkeypatch.delenv("SILICA_PUBLIC_HANDLE")
+    assert publish.handle() == "vault" and publish.handle_state()["ask"] is True
+    link.start()
+    gateway.confirmed = True
+    assert link.poll(POLL)["state"] == "linked"
+    assert publish._block(memory)["handle"] == "marta"
+    assert publish.handle() == "marta" and publish.handle_state() == {"ask": False}
+    assert client.post("/public/vault/memory/file").json()["name"] == "Memoria by marta.zip"
+
+
+def test_an_off_wiki_goes_out_off_and_stays_off_here(memory, gateway, client):
+    from silica.kernel import account_link as link, publish
+
+    link._keep(TOKEN, "marta", gateway.host)
+    assert client.post("/public/publish", json={"vault": "memory"}).status_code == 200
+    day = publish.find("memory")["published"]
+    assert day and _sent(gateway)[1].read("wiki.json") and json.loads(_sent(gateway)[1].read("wiki.json"))["visibility"] == "public"
+    client.post("/public/vault/memory", json={"visibility": "off"})
+    r = client.post("/public/publish", json={"vault": "memory", "off": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["result"]["off"] is True
+    _, z = _sent(gateway)
+    assert json.loads(z.read("wiki.json"))["visibility"] == "off" and "notes/Spacing effect.md" in z.namelist()
+    # Off here, and the day it last went out stays the day it was published
+    assert publish.find("memory")["visibility"] == "off" and publish.find("memory")["published"] == day
+    # without the word, Publish on an Off wiki turns it on, as before
+    client.post("/public/publish", json={"vault": "memory"})
+    assert json.loads(_sent(gateway)[1].read("wiki.json"))["visibility"] == "public"
+
+
+def test_two_wikis_landing_in_one_folder_of_the_account_and_too_many_readers_are_refused(memory, gateway, tmp_vault):
+    from silica.kernel import account_link as link, publish
+
+    link._keep(TOKEN, "marta", gateway.host)
+    publish.set_visibility("memory", "public")
+    publish.update_vault("memory", {"readers": [f"r{i}" for i in range(101)]})
+    with pytest.raises(ValueError, match="names 100 readers at most"):
+        link.send("memory")
+    publish.update_vault("memory", {"readers": []})
+    tmp_vault.note("Other/Memory/Note.md", "Another wiki of the same name.\n")
+    publish.add_vault("Other/Memory")
+    with pytest.raises(ValueError, match="^Two of your wikis would publish into the folder Memory on your account: rename one.$"):
+        link.send("memory")
+    assert gateway.posts("/link/publish") == []
+
+
+def test_the_account_s_tier_refusal_reaches_the_view_as_its_sentence(memory, gateway, client):
+    from silica.kernel import account_link as link
+
+    link._keep(TOKEN, "marta", gateway.host)
+    gateway.publish = (400, {"detail": "Private needs a paid account on Silica hosted"}, {})
+    assert client.post("/public/vault/memory", json={"visibility": "private"}).status_code == 200
+    r = client.post("/public/publish", json={"vault": "memory"})
+    assert (r.status_code, r.json()["detail"]) == \
+        (400, "Your account refused this wiki: Private needs a paid account on Silica hosted.")
 
 
 # --- the app's routes ----------------------------------------------------------------------

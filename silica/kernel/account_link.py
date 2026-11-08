@@ -193,7 +193,25 @@ def poll(poll: str) -> dict:
     handle = handle if isinstance(handle, str) and _HANDLE.fullmatch(handle) else ""
     _keep(token, handle, at)
     logger.info("account link: this computer is linked to @%s on %s", handle or "?", at)
+    if handle:
+        _take_handle(handle)
     return {"state": "linked", **state()}
+
+
+def _take_handle(handle: str) -> None:
+    """The account's handle becomes this vault's, so My wikis never asks a linked computer for one
+    and a wiki file saved here says the @handle its Publish goes out under."""
+    from silica.config import CONFIG
+    from silica.kernel.publish import PUBLIC_KEY
+    from silica.kernel.vault_manifest import set_block_key
+
+    if not CONFIG.vault_path:
+        return  # no vault open: nothing to name, and "." would put a vault.yaml in the working folder
+    try:
+        set_block_key(CONFIG.vault_path, PUBLIC_KEY, "handle", handle)
+    except OSError as exc:
+        # The link is kept and works: only the handle overlay asks again, until vault.yaml is writable
+        logger.warning("account link: @%s not written into vault.yaml (%s)", handle, type(exc).__name__)
 
 
 # --- a Publish from the computer (ADR-0157 points 10 and 11) -------------------------------------
@@ -268,10 +286,7 @@ def _pack(conf: dict, vault: Path, out) -> None:
 
     cap = saved_page.WIKI_FILE_MAX
     folder = conf["folder"]
-    # The receiver takes a name at the top of the account's vault, never a path.
-    # shortcut: two wikis in A/Notes and B/Notes both send "Notes", and the second replaces the
-    # first on the host; send a folder name of the person's choosing if one ever does
-    name = folder.rsplit("/", 1)[-1]
+    name = _hosted_folder(folder)
     # what the check before Publish decides, read as the build reads it (public_site._write_wiki)
     wiki = rights.read_wiki(conf["slug"], vault)
     said = rights.answers(vault)
@@ -318,10 +333,17 @@ def _pack(conf: dict, vault: Path, out) -> None:
             if a := _answer(wiki["notes"][p]["files"], said):
                 answers[rel] = a
         head = {"link": "", "folder": name, "slug": conf["slug"], "title": conf["title"], "line": conf["line"],
-                "license": conf["license"], "visibility": conf["visibility"], "answers": answers}
+                "license": conf["license"], "visibility": conf["visibility"], "answers": answers,
+                "readers": conf["readers"], "listed": conf["listed"]}
         # `link` is the format's and stays empty: the account learns which link sent a wiki from
         # the gateway, never from the package (Task 10), and this computer is never told its id
         z.writestr("wiki.json", json.dumps(head, ensure_ascii=False))
+
+
+def _hosted_folder(folder: str) -> str:
+    """The folder a wiki lands in on the account: the receiver takes a name at the top of the
+    account's vault, never a path, so a nested wiki goes under its last segment."""
+    return folder.rsplit("/", 1)[-1]
 
 
 def _refusal(status: int, detail: str, at: str) -> str:
@@ -346,9 +368,10 @@ def _refusal(status: int, detail: str, at: str) -> str:
 def send(slug: str, vault: Path | None = None) -> dict:
     """Publish one wiki through the linked account: the notes that go out, as written, their images
     and the author's answers (ADR-0157 points 10 and 11); the account publishes them with its
-    own renderer, in the visibility the wiki has here. Returns {"vault", "notes", "url",
-    "published_at", "sent"}, the account's count and address. ValueError with a sentence for
-    anything the person must read, the account's refusals included."""
+    own renderer, in the visibility the wiki has here. An Off wiki is sent Off, which takes it off
+    its address on the account. Returns {"vault", "notes", "url", "published_at", "sent", "off"},
+    the account's count and address. ValueError with a sentence for anything the person must
+    read, the account's refusals included."""
     import httpx
 
     from silica.kernel import publish
@@ -360,8 +383,13 @@ def send(slug: str, vault: Path | None = None) -> dict:
         raise ValueError(NOT_LINKED)
     vault = vault or publish._vault()
     conf = publish.find(slug, vault)
-    if conf["visibility"] == "off":
-        raise ValueError("turn the wiki Public or Private before publishing it")
+    name = _hosted_folder(conf["folder"])
+    # The account replaces a folder any linked computer sent (Task 10), so A/Notes and B/Notes
+    # would overwrite each other there, each Publish taking the other's place.
+    if sum(_hosted_folder(v["folder"]) == name for v in publish.vaults(vault)) > 1:
+        raise ValueError(f"Two of your wikis would publish into the folder {name} on your account: rename one.")
+    if len(conf["readers"]) > publish.READERS_MAX:
+        raise ValueError(f"A wiki published from this computer names {publish.READERS_MAX} readers at most.")
     at = got["host"]
     # On disk under ~/.silica, unnamed, so it goes when closed even after a crash, and 100 MB is
     # never held in memory
@@ -386,11 +414,13 @@ def send(slug: str, vault: Path | None = None) -> dict:
         raise ValueError(_refusal(r.status_code, out.get("detail") if isinstance(out.get("detail"), str) else "", at))
     url = out.get("url") if isinstance(out.get("url"), str) and out["url"].startswith("https://") else ""
     notes = out.get("notes") if type(out.get("notes")) is int else 0
-    items = publish.vaults(vault)
-    for v in items:
-        if v["slug"] == slug:
-            v["published"] = datetime.date.today().isoformat()
-    publish._save_vaults(items, vault)
+    off = conf["visibility"] == "off"
+    if not off:
+        items = publish.vaults(vault)
+        for v in items:
+            if v["slug"] == slug:
+                v["published"] = datetime.date.today().isoformat()
+        publish._save_vaults(items, vault)
     return {"vault": slug, "notes": notes, "url": url,
             "published_at": out.get("published_at") if isinstance(out.get("published_at"), str) else "",
-            "sent": True}
+            "sent": True, "off": off}

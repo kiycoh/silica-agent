@@ -630,7 +630,8 @@ function pubHandleWhy(h, reserved) {
 function pubAsk(st) {
   const view = $("#view-public");
   let over = $("#pg-ask");
-  const ask = st && st.ask_handle && st.ask_handle.ask ? st.ask_handle : null;
+  // a code waiting on the account: linking brings the account's handle, so the question waits
+  const ask = st && st.ask_handle && st.ask_handle.ask && !pubLinking ? st.ask_handle : null;
   $("#public-body").inert = !!ask;
   if (!ask) {
     if (over) over.remove();
@@ -839,8 +840,9 @@ function renderPublic(fresh) {
         ? "Off. Link an account to publish, or save it as a file."
         : st.hosted || st.url
           ? "Off: this wiki's address says there is nothing there, and your public page does not show it. Its notes keep their globes for when you turn it on."
-          // Off here sends nothing, and no route takes a wiki down from a computer: the account does
-          : "Off. Publish sends its notes to your account. A copy published before stays there until you turn it Off in your account.";
+          : v.published
+            ? "Off on this computer. Turn off on your account takes its copy there off its address too."
+            : "Off. Publish sends its notes to your account, which publishes them.";
   }
 
   // the head of the vault in hand: its title and line, edited in place
@@ -920,11 +922,15 @@ function renderPublic(fresh) {
   file.addEventListener("click", () => startPublish(v, file, true));
   if (alone) row.append(file, mkEl("span", "pp-dim", FILE_LINE));
   else {
-    const go = mkEl("button", "pp-go", v.visibility === "off" ? `Turn on and publish ${pubCount(v.out)}` : `Publish ${pubCount(v.out)}`);
+    // a linked computer's Off wiki that went out before: its copy on the account is what is left to turn off
+    const off = !!st.link && v.visibility === "off" && !!v.published;
+    const go = mkEl("button", "pp-go", off ? "Turn off on your account"
+      : v.visibility === "off" ? `Turn on and publish ${pubCount(v.out)}` : `Publish ${pubCount(v.out)}`);
     go.type = "button";
     go.disabled = !v.out;
-    go.addEventListener("click", () => startPublish(v, go));
-    row.append(go, file, mkEl("span", "pp-dim", inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
+    go.addEventListener("click", () => startPublish(v, go, false, off));
+    row.append(go, file, mkEl("span", "pp-dim", off ? "Your account keeps the notes and takes the wiki off its address, as Off does there."
+      : inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
       ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
       : st.link
         ? `Publish sends the notes to your account, which builds the pages and publishes them at ${st.wikis_host}/@${pubHandle()}/${v.slug}/. Nothing else leaves this computer.`
@@ -942,7 +948,8 @@ function renderPublic(fresh) {
   if (pubFile && pubFile.vault === v.slug) frag.append(fileSavedLine(pubFile));
   if (pubResult && pubResult.vault === v.slug) {
     const r = pubResult;
-    if (r.sent) {
+    if (r.off) frag.append(mkEl("p", "pp-dim", "Turned off on your account: its address says there is nothing there."));
+    else if (r.sent) {
       // a computer's Publish: its account built the pages, and only the account knows the address
       const p = mkEl("p", "pp-dim pp-res", `Last publish: ${pubCount(r.notes)}, sent to your account`);
       if (r.url) p.append(", at ", Object.assign(document.createElement("a"), { href: r.url, target: "_blank", rel: "noopener", textContent: r.url.replace(/^https:\/\//, "") }));
@@ -1164,12 +1171,15 @@ const PRE_SHEET = 10;
 const prePlural = (n, w) => `${n.toLocaleString("en-GB")} ${w}${n === 1 ? "" : "s"}`;
 const preOpen = (o) => !o.answer || (o.answer === "open" && !o.free && o.license !== "CC BY-ND");
 
-async function publishNow(v) {
-  const r = await pubPost("/public/publish", { vault: v.slug });
+async function publishNow(v, off = false) {
+  const r = await pubPost("/public/publish", { vault: v.slug, off });
   if (r) pubCheck = null;
   // an account that no longer knows this computer unlinks it: the view says so at once
   else if (pubState && pubState.link) await loadPublicState();
-  if (r && r.result) {
+  if (r && r.result && r.result.off) {
+    pubResult = r.result;
+    notify("Turned off on your account", "info");
+  } else if (r && r.result) {
     pubResult = r.result;
     notify(`Published ${pubCount(r.result.notes)}${r.result.private ? ` for ${v.readers.length} ${v.readers.length === 1 ? "reader" : "readers"}` : ""}`, "info");
   }
@@ -1178,7 +1188,7 @@ async function publishNow(v) {
 
 // A file goes through the same check as a Publish (ADR-0157 point 5): an answer missing leaves a
 // note out of a file as it does out of a Publish, and the sheet is where the person learns it.
-async function startPublish(v, go, file = false) {
+async function startPublish(v, go, file = false, off = false) {
   go.disabled = true;
   go.textContent = "checking…";
   let c = null;
@@ -1192,14 +1202,14 @@ async function startPublish(v, go, file = false) {
     return;
   }
   if (c.ask) {
-    pubCheck = { slug: v.slug, data: c, open: new Set(), all: new Set(), old: false, personal: false, file };
+    pubCheck = { slug: v.slug, data: c, open: new Set(), all: new Set(), old: false, personal: false, file, off };
     $("#public-body").scrollTop = 0;
     renderPublic();
     return;
   }
   if (file) return saveWikiFile(v, go);
   go.textContent = "publishing…";
-  await publishNow(v);
+  await publishNow(v, off);
 }
 
 async function preSend(url, body) {
@@ -1479,7 +1489,7 @@ function checkSheet(v) {
   sum.append(line);
   const wikis = inWikis(v) ? LEAVES_WIKIS : c.wikis;
   if (wikis) sum.append(mkEl("p", "pp-dim", wikis));
-  const go = mkEl("button", "pp-go", pubCheck.file ? "Save as a file"
+  const go = mkEl("button", "pp-go", pubCheck.file ? "Save as a file" : pubCheck.off ? "Turn off on your account"
     : `${v.visibility === "off" ? "Turn on and publish" : "Publish"} ${prePlural(c.count.notes, "note")}`);
   go.type = "button";
   go.disabled = !c.count.notes;
@@ -1487,7 +1497,7 @@ function checkSheet(v) {
     if (pubCheck.file) return saveWikiFile(v, go);
     go.disabled = true;
     go.textContent = "publishing…";
-    publishNow(v);
+    publishNow(v, pubCheck.off);
   });
   foot.append(sum, go);
   frag.append(foot);

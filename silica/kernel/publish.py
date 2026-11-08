@@ -689,13 +689,26 @@ def _said(v, n: int) -> str:
     return v.strip()[:n]
 
 
+# Readers a computer names for a Private wiki, as many as an invitation list is worth carrying in
+# one wiki.json (the controller's number for Task 11, 2026-11-08)
+READERS_MAX = 100
+
+
 def _head(m, notes: set[str]) -> dict:
     """wiki.json's fields, each of its own type. Its `link` is never read: the gateway names the
-    link a wiki came by, and a package is the client's word."""
+    link a wiki came by, and a package is the client's word. Off takes the wiki off its address
+    on this account, as Off here does; `readers` and `listed` may be absent, read as none and no."""
     from silica.kernel import rights
+    from silica.sources.saved_page import _NAME
 
-    if not isinstance(m, dict) or m.get("visibility") not in ("public", "private") \
+    if not isinstance(m, dict) or m.get("visibility") not in VISIBILITY \
             or not isinstance(m.get("answers"), dict):
+        raise ValueError(_BAD_HEAD)
+    readers, listed = m.get("readers", []), m.get("listed", False)
+    # a handle each, within the 30 characters update_vault takes, so nothing is refused after the
+    # row is written
+    if not isinstance(listed, bool) or not isinstance(readers, list) or len(readers) > READERS_MAX \
+            or not all(isinstance(r, str) and _NAME.fullmatch(r) and _HANDLE.fullmatch(r) for r in readers):
         raise ValueError(_BAD_HEAD)
     head = {k: _said(m.get(k), n) for k, n in (("folder", 4096), ("slug", 60), ("title", 80),
                                                 ("line", 160), ("license", 80))}
@@ -714,7 +727,7 @@ def _head(m, notes: set[str]) -> dict:
         if rel not in notes:
             raise ValueError(f"that wiki answers for {rel[:120]!r}, a note it did not send")
         answers[rel] = {k: v for k, v in row.items() if v}
-    return {**head, "visibility": m["visibility"], "answers": answers}
+    return {**head, "visibility": m["visibility"], "answers": answers, "readers": readers, "listed": listed}
 
 
 def _plain(name: str) -> bool:
@@ -755,7 +768,8 @@ def receive(data: bytes, link: str, vault: Path | None = None) -> dict:
     """A wiki a linked computer sent through the gateway (ADR-0157 point 10), a zip of `wiki.json`,
     `notes/<path>.md` and `assets/<image>`: its notes become the folder of this vault it names,
     replacing that folder whole when its row came from any linked computer, and its row carries
-    `link` as the last sender, the author's answers (point 11) and the visibility. Returns {"slug", "folder"}; the caller builds.
+    `link` as the last sender, the author's answers (point 11), its readers, its listing request
+    and the visibility. Returns {"slug", "folder", "visibility"}; the caller builds, unless Off.
 
     ValueError with a sentence for a refused package, FolderTaken for a folder of the person's
     own, and then nothing is written; an OSError is the disk's. The folder is written beside the
@@ -880,6 +894,9 @@ def receive(data: bytes, link: str, vault: Path | None = None) -> dict:
             # The row before the folder: a row whose folder failed to land is taken by the next
             # Publish, while a folder without its row would refuse that Publish as the person's.
             slug = _receive_row(folder, link, meta, vault)
+            # The author's readers and listing request, as a hosted author's own: the account's
+            # handle leaves the readers, and the host's review still decides the listing
+            update_vault(slug, {"readers": meta["readers"], "listed": meta["listed"]}, vault)
             if dest.exists():
                 dest.rename(aside)
             try:
@@ -925,4 +942,4 @@ def receive(data: bytes, link: str, vault: Path | None = None) -> dict:
     finally:
         shutil.rmtree(aside, ignore_errors=True)
     set_visibility(slug, meta["visibility"], vault)
-    return {"slug": slug, "folder": folder}
+    return {"slug": slug, "folder": folder, "visibility": meta["visibility"]}
