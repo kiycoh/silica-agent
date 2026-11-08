@@ -117,6 +117,8 @@ def _view() -> dict:
             "published_at": last.get(v["slug"], {}).get("published_at", ""),
             "review": reviews.get(v["slug"], {}),
             "blocked": last.get(v["slug"], {}).get("blocked", []) if v["visibility"] == "public" else [],
+            # "kept by your computer": the link id itself is the gateway's business, not the page's
+            "computer": bool(v["from_link"]),
         })
     return {
         "available": publish.available(vault),
@@ -296,6 +298,55 @@ async def public_publish(payload: dict | None = None):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {**_view(), "result": out}
+
+
+# --- a linked computer's Publish (ADR-0157 points 10 and 11) ----------------------
+
+def _receive(data: bytes, link: str) -> tuple[str, dict]:
+    from silica.kernel import publish
+    from silica.ui.web.public_site import build
+
+    got = publish.receive(data, link)
+    # Built by this account's renderer from the notes, with its tier, its check and its listing:
+    # no page a client wrote is ever served. A build that fails leaves the notes in and the
+    # answer says why; the computer's next Publish builds them.
+    return got["folder"], build(got["slug"])
+
+
+@router.post("/public/receive", dependencies=_SAME_ORIGIN)
+async def public_receive(request: Request):
+    """A wiki a linked computer sends, reached only through the gateway's /link/publish, which
+    checks its token (silica-hosted deploy/Caddyfile). The body is the zip; the answer is what
+    the computer shows: {"slug", "url", "notes", "published_at"}."""
+    from silica.config import hosted
+    from silica.kernel import publish
+    from silica.ui.web.server import _begin_turn, _embed_imported, _end_turn
+
+    if not hosted():
+        raise HTTPException(404)
+    # The gateway's word and never the package's: Caddy drops any X-Silica-* a client sent and
+    # copies this one from the token's check, as it does X-Silica-Email (ADR-0154 point 13). An
+    # older Caddy copies a header the check did not set as empty.
+    link = request.headers.get("x-silica-link", "")
+    if not publish.LINK_ID.fullmatch(link):
+        raise HTTPException(401, "this computer is not linked to this account")
+    data = await _wiki_body(request)
+    # the one serialisation of vault writes the server has (see /vault/import)
+    if not _begin_turn():
+        raise HTTPException(409, "this account is busy with a turn: publish again when it ends")
+    try:
+        folder, out = await asyncio.to_thread(_receive, data, link)
+    except publish.FolderTaken as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        # the account's disk, full or not writable: the package was fine, and the sentence says so
+        raise HTTPException(500, f"this account could not write the wiki ({exc.strerror or exc})")
+    finally:
+        _end_turn()
+    _embed_imported({folder})
+    return {"slug": out["vault"], "url": out["url"], "notes": out["notes"], "published_at": out["published_at"]}
 
 
 # --- Save as a file (ADR-0157 point 5) ------------------------------------------
@@ -591,10 +642,9 @@ async def invitation_save(payload: dict):
     return {"path": out["first"], **out}
 
 
-@router.post("/vault/invitations/file", dependencies=_SAME_ORIGIN)
-async def invitation_file(request: Request):
-    """Open a file (ADR-0157 point 7): the body is the zip, refused past the cap as it arrives,
-    so a larger one is never held whole."""
+async def _wiki_body(request: Request) -> bytes:
+    """A wiki's zip as the body, refused past the cap as it arrives, so a larger one is never
+    held whole: Open a file's and a linked computer's Publish's."""
     from silica.sources import saved_page
 
     too_big = HTTPException(413, str(saved_page._file_too_big()))
@@ -610,8 +660,17 @@ async def invitation_file(request: Request):
         if held > saved_page.WIKI_FILE_MAX:
             raise too_big
         chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@router.post("/vault/invitations/file", dependencies=_SAME_ORIGIN)
+async def invitation_file(request: Request):
+    """Open a file (ADR-0157 point 7)."""
+    from silica.sources import saved_page
+
+    data = await _wiki_body(request)
     try:
-        out = await asyncio.to_thread(saved_page.open_file, b"".join(chunks))
+        out = await asyncio.to_thread(saved_page.open_file, data)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except OSError as exc:

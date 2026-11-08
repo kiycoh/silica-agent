@@ -869,6 +869,8 @@ function renderPublic(fresh) {
   line.addEventListener("keydown", (e) => { if (e.key === "Enter") line.blur(); });
   const meta = mkEl("p", "pg-meta");
   meta.append(mkEl("span", "", "@" + st.handle), mkEl("span", "pg-path", v.folder + "/"), mkEl("span", "", pubCount(v.out)));
+  // ADR-0157 point 10: the computer's next Publish replaces this folder, an edit made here with it
+  if (v.computer) meta.append(Object.assign(mkEl("span", "", "kept by your computer"), { title: "Publish on your computer replaces this folder, edits made here included." }));
   const areaN = pubCover && pubCoverOf === v.slug && pubCover.areas ? pubCover.areas.length : null;
   meta.append(mkEl("span", "pg-areas", areaN === null ? "" : `${areaN} ${areaN === 1 ? "area" : "areas"}`));
   const lic = mkEl("label", "pg-lic", "License: ");

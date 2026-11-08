@@ -512,6 +512,8 @@ def _write_wiki(slug: str, conf: dict, vault: Path, site: _Site, build_dir: Path
         "v": 1, "handle": h, "slug": slug, "title": conf["title"], "line": conf["line"],
         "license": conf["license"], "published": today, "listed": conf["listed"] and not private and not blocked and not site.file,
         "blocked": bool(blocked), "rights": rights.statement(wiki, said, plan, slugs),
+        # the review reads that a linked computer sent it, whose check chose its notes (ADR-0157 point 11)
+        **({"from": "computer"} if conf["from_link"] else {}),
         "url": vurl,
         "count": {"notes": len(shown), "links": len(pairs), "drawn": len(c["n"]), "areas": len(c["areas"])},
         "areas": c["areas"],
