@@ -15,6 +15,28 @@ function toggleSidebar() {
 }
 for (const b of document.querySelectorAll(".side-toggle")) b.addEventListener("click", toggleSidebar);
 
+// --- how far a task is ---------------------------------------------------------
+// One bar for every task that knows its count (the page vectors, a conversion's
+// pages, an import's files, a nucleation's chunks), drawn as Discover's reading
+// of the feeds is: two pixels under the words that already say the count.
+function progressBar(fraction, label) {
+  const bar = document.createElement("div");
+  bar.className = "pbar";
+  bar.setAttribute("role", "progressbar");
+  bar.setAttribute("aria-label", label);
+  bar.setAttribute("aria-valuemin", "0");
+  bar.setAttribute("aria-valuemax", "100");
+  bar.append(document.createElement("i"));
+  setProgress(bar, fraction);
+  return bar;
+}
+
+function setProgress(bar, fraction) {
+  const pct = Math.round(Math.min(1, Math.max(0, fraction || 0)) * 100);
+  bar.setAttribute("aria-valuenow", String(pct));
+  bar.firstElementChild.style.width = `${pct}%`;
+}
+
 // --- the 1120 floor: the deck folds, it does not reflow ----------------------
 // Below the width that holds rail + reading measure + right sidebar side by
 // side, the rail becomes five icons summoned over the transcript. It does not

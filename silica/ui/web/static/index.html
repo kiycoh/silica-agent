@@ -160,6 +160,10 @@
                was started from, not in a toast that leaves before the student
                has read which files were refused and why. -->
           <div id="vault-import" role="status" aria-live="polite" hidden></div>
+          <!-- The page vectors' build (ADR-0156, amended 2026-11-08): hours the
+               first time on a library, so the rail says how far. Not a live
+               region: its count moves once a file, its bar carries the value. -->
+          <div id="vectors-line" hidden></div>
           <!-- The tree's selection (ADR-0126): its count lives here and not on
                the rows, since aria-selected is not a link's to carry. The
                "New folder…" line is a drop target while notes are dragged, and

@@ -337,6 +337,10 @@ def _run(job_id: str) -> None:
     if rec is None:
         return
     _settle_source(rec)
+    if rec.get("state") == "done":
+        from silica.ui.web import vectors
+
+        vectors.refresh()  # the pages of the note it wrote
     hook = _ON_END.pop(job_id, None)
     if hook is not None:
         hook(rec)

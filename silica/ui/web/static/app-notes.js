@@ -331,6 +331,74 @@ const vaultAddMenu = $("#vault-add-menu");
 const vaultFilesInput = $("#vault-files");
 const vaultFolderInput = $("#vault-folder");
 const vaultImportBox = $("#vault-import");
+
+// --- the page vectors' build (ADR-0156, amended 2026-11-08) ---------------------
+// A laptop builds them itself (silica/ui/web/vectors.py), at start and after each
+// write. A saved note's build is a second, so the line waits that long before it
+// shows: a line at every save would be a flicker. A failure shows at once.
+const vectorsLine = $("#vectors-line");
+const VECTORS_SAY = { waiting: "Waiting for the embedder", index: "Reading the vault", vectors: "Reading for meaning" };
+let vectorsLast = { state: "idle" };
+let vectorsSoon = 0;
+
+function renderVectors(st) {
+  vectorsLast = st || { state: "idle" };
+  const working = vectorsLast.state in VECTORS_SAY;
+  if (working && vectorsLine.hidden && !vectorsSoon) {
+    vectorsSoon = setTimeout(() => { vectorsSoon = 0; drawVectors(); }, 1000);
+    return;
+  }
+  if (!working) { clearTimeout(vectorsSoon); vectorsSoon = 0; }
+  drawVectors();
+}
+
+function drawVectors() {
+  const st = vectorsLast;
+  vectorsLine.replaceChildren();
+  vectorsLine.hidden = !(st.state in VECTORS_SAY) && st.state !== "failed";
+  if (vectorsLine.hidden) return;
+  vectorsLine.title = "Search and Explore's similar links use them as each file is done";
+  const head = document.createElement("div");
+  head.className = "vi-head";
+  const text = document.createElement("span");
+  head.append(text);
+  vectorsLine.append(head);
+  if (st.state === "failed") {
+    text.textContent = `Not read for meaning: ${st.error || "the build failed"}`;
+    const again = document.createElement("button");
+    again.type = "button";
+    again.className = "linklike";
+    again.textContent = "Try again";
+    again.addEventListener("click", async () => {
+      again.disabled = true;
+      try {
+        await fetch("/vectors/refresh", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      } catch {
+        notify("the server could not be reached");
+        again.disabled = false;
+      }
+    });
+    head.append(again);
+    return;
+  }
+  const say = document.createElement("b");
+  say.textContent = VECTORS_SAY[st.state];
+  text.append(say);
+  if (st.total) {
+    text.append(` · ${st.done} of ${st.total} file${st.total === 1 ? "" : "s"}`);
+    vectorsLine.append(progressBar(st.done / st.total, VECTORS_SAY[st.state]));
+  }
+}
+
+async function vectorsFetch() {
+  try {
+    const r = await fetch("/vectors");
+    if (r.ok) renderVectors(await r.json());
+  } catch { /* the stream's next step or reconnect says it again */ }
+}
+document.addEventListener("silica:vectors", (e) => renderVectors(e.detail));
+document.addEventListener("silica:stream-open", vectorsFetch);
+vectorsFetch();
 // The server's cap per request (_UPLOAD_MAX_FILES), and ADR-0098 H2's cap per
 // import: past it a folder is a job, not a pick.
 const VAULT_IMPORT_BATCH = 32;
@@ -503,7 +571,7 @@ async function importToVault(files, fromFolder) {
   const batches = importBatches(wanted, VAULT_IMPORT_BATCH, VAULT_IMPORT_BATCH_BYTES);
   let sent = 0;
   for (const [n, batch] of batches.entries()) {
-    renderVaultImport({ progress: `importing ${sent} of ${wanted.length}…` });
+    renderVaultImport({ progress: `importing ${sent} of ${wanted.length}…`, step: sent, of: wanted.length });
     const fd = new FormData();
     for (const f of batch) {
       fd.append("files", f, f.name);
@@ -556,7 +624,7 @@ function vaultImportJob(j) {
 // One line of counts with its two actions, then the files that need a word:
 // refused with their reason, hidden text left out (ADR-0098 H6), and pages
 // with no text that no model read (ADR-0087 point 3).
-function renderVaultImport({ progress = "", rows = [], skipped = [], failed = "", folder = "", big = 0, obsidian = "" }) {
+function renderVaultImport({ progress = "", step = 0, of = 0, rows = [], skipped = [], failed = "", folder = "", big = 0, obsidian = "" }) {
   vaultImportBox.hidden = false;
   vaultImportBox.replaceChildren();
   const head = document.createElement("div");
@@ -564,6 +632,7 @@ function renderVaultImport({ progress = "", rows = [], skipped = [], failed = ""
   vaultImportBox.append(head);
   if (progress) {
     head.textContent = progress;
+    if (of) vaultImportBox.append(progressBar(step / of, "files imported"));
     return;
   }
   // A file its notes lost and got back (ADR-0129, amended 2026-11-04) was

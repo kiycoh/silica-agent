@@ -1662,6 +1662,10 @@ function neighbourRows(d) {
     es.addEventListener("job", (e) => {
       try { document.dispatchEvent(new CustomEvent("silica:job", { detail: JSON.parse(e.data) })); } catch { /* one malformed frame is not the stream */ }
     });
+    // So do the page vectors' steps, for the rail's line (app-notes.js).
+    es.addEventListener("vectors", (e) => {
+      try { document.dispatchEvent(new CustomEvent("silica:vectors", { detail: JSON.parse(e.data) })); } catch { /* one malformed frame is not the stream */ }
+    });
     es.addEventListener("open", () => document.dispatchEvent(new CustomEvent("silica:stream-open")));
     es.onerror = () => { /* EventSource retries by itself; a closed panel is not an error to report */ };
   }

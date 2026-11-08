@@ -2047,6 +2047,10 @@ async def _lifespan(app: FastAPI):
     from silica.connectors.mcp_tools import start as _start_connectors
     asyncio.get_running_loop().run_in_executor(None, _start_connectors)
     asyncio.get_running_loop().run_in_executor(None, _prewarm_learn)
+    # The page vectors of whatever changed while the app was closed, and of a
+    # first build cut by the last close (ADR-0156, amended 2026-11-08).
+    from silica.ui.web import vectors
+    asyncio.get_running_loop().run_in_executor(None, vectors.refresh)
     yield
     if bridge is not None:
         await bridge.stop()
@@ -3520,6 +3524,9 @@ def _embed_imported(folders: set[str]) -> None:
                     # The import is done and the notes are searchable by words;
                     # vectors arrive with the next /embed instead.
                     logger.warning("vault import: embedding %s failed: %s", folder, type(exc).__name__)
+        from silica.ui.web import vectors
+
+        vectors.refresh()  # and the pages of what it brought, the PDFs among them
 
     threading.Thread(target=run, name="vault-import-embed", daemon=True).start()
 
@@ -4689,7 +4696,9 @@ def _index_note(key: str) -> None:
     from silica.driver import DRIVER
     from silica.kernel.recall.cooccurrence import build_index
     from silica.kernel.recall.embed import refresh_note
+    from silica.ui.web import vectors
 
+    vectors.refresh()  # the engine's section vectors, a store of their own
     embedder = get_embedder_or_none(CONFIG, "note index", level="debug")
     if embedder is None:
         return
@@ -4837,6 +4846,24 @@ def file_study(payload: dict):
     for path in out["parts"]:
         _index_later(path)
     return out
+
+
+@app.get("/vectors")
+def vectors_status():
+    """The page vectors' build as the rail shows it: on page load and on each
+    reconnect of the stream that carries its steps. Always `idle` on the
+    server, whose tenants build none here (ADR-0156, amended 2026-11-08)."""
+    from silica.ui.web import vectors
+
+    return vectors.status()
+
+
+@app.post("/vectors/refresh", dependencies=_SAME_ORIGIN)
+def vectors_refresh():
+    """The rail's "Try again" after a build that failed."""
+    from silica.ui.web import vectors
+
+    return {"started": vectors.refresh()}
 
 
 @app.post("/file/ocr", dependencies=_SAME_ORIGIN)
@@ -6726,6 +6753,16 @@ async def narration_sse(request: Request, from_seq: int = 0):
             pass   # loop closed: the client is gone, and GET /jobs answers its next page
 
     BUS.subscribe(jobs.TOPIC, on_job)
+    # The page vectors' build too, for the rail's line (ADR-0156, amended 2026-11-08).
+    from silica.ui.web import vectors
+
+    def on_vectors(status: dict) -> None:
+        try:
+            loop.call_soon_threadsafe(q.put_nowait, ("vectors", status))
+        except RuntimeError:
+            pass   # loop closed: the client is gone, and GET /vectors answers its next page
+
+    BUS.subscribe(vectors.TOPIC, on_vectors)
 
     async def gen():
         try:
@@ -6750,7 +6787,7 @@ async def narration_sse(request: Request, from_seq: int = 0):
                         return
                     continue
                 if isinstance(rec, tuple):
-                    yield f"event: job\ndata: {json.dumps(rec[1], default=str)}\n\n"
+                    yield f"event: {rec[0]}\ndata: {json.dumps(rec[1], default=str)}\n\n"
                     continue
                 if not _beat_for_tab(rec):
                     continue
@@ -6759,6 +6796,7 @@ async def narration_sse(request: Request, from_seq: int = 0):
         finally:
             BUS.unsubscribe(_narr.BEAT_TOPIC, on_beat)
             BUS.unsubscribe(jobs.TOPIC, on_job)
+            BUS.unsubscribe(vectors.TOPIC, on_vectors)
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
@@ -7298,6 +7336,9 @@ def _apply_vault_switch(path: str) -> dict:
     result = {"ok": True, "values": {st.VAULT_KEY: switched.vault}}
     # The fresh-session seed carries the old vault's map until it is rebuilt.
     _prewarm_seed()
+    from silica.ui.web import vectors
+
+    vectors.refresh()  # a build of the old vault stops at its next document
     notes = []
     if switched.write_dir:
         notes.append(f"writes confined to {switched.write_dir}/")

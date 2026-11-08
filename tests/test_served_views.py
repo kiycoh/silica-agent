@@ -126,7 +126,7 @@ SHARED_ROUTES = {
     "/", "/asset", "/attachment/{name}", "/bug_report", "/changes", "/changes/diff", "/changes/keep",
     "/chat", "/chat/files/add", "/commands", "/concept", "/concepts", "/config", "/connectors",
     "/connectors/{name}/{action}", "/context", "/docs", "/docs/oauth2-redirect", "/endpoints",
-    "/endpoints/start", "/file", "/file/chapters", "/file/ocr", "/file/study", "/find", "/flag", "/health", "/instructions", "/jobs", "/jobs/running",
+    "/endpoints/start", "/file", "/file/chapters", "/vectors", "/vectors/refresh", "/file/ocr", "/file/study", "/find", "/flag", "/health", "/instructions", "/jobs", "/jobs/running",
     "/jobs/{job_id}/dismiss", "/jobs/{job_id}/retry", "/jobs/{job_id}/turn", "/limits", "/mail/upload",
     "/memory", "/memory/reset", "/memory/undo", "/memory/{scope}", "/messages", "/narration",
     "/narration/sse", "/note", "/note/asset", "/note/check", "/note/check/keep", "/note/history",

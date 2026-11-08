@@ -204,6 +204,8 @@ function jobRow(j, ahead) {
     acts.append(x);
   }
   if (acts.childElementCount) row.append(acts);
+  const p = j.progress;
+  if (j.state === "running" && p && p.total) row.append(progressBar(p.done / p.total, "pages read"));
   return row;
 }
 

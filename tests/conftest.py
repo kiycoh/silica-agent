@@ -215,6 +215,16 @@ def _no_real_server_autostart(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_page_vector_builds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test starts a page-vector build (silica/ui/web/vectors.py).
+
+    The real ~/.silica/.env names a loopback embedder, so every note a test
+    saves would start a build against the developer's live llama-server.
+    tests/test_vectors_refresh.py puts the real check back."""
+    monkeypatch.setattr("silica.ui.web.vectors._eligible", lambda: False)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_llama_props(monkeypatch: pytest.MonkeyPatch) -> None:
     """No test asks the developer's llama-server for its window.
 

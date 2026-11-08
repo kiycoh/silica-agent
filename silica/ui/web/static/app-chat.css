@@ -1088,6 +1088,9 @@
   gap: 0.5rem;
 }
 
+/* How far the run is (progressBar): under the head that says the file and chunk. */
+.tool-pipeline .pbar { margin: 0.3rem 0 0.4rem; max-width: 28rem; }
+
 .tool-pipeline.running .pipe-title { color: var(--frost); }
 .tool-pipeline.ok .pipe-title,
 .tool-pipeline.empty .pipe-title { color: var(--ash); }
