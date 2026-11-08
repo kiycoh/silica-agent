@@ -7471,6 +7471,10 @@ def _zotero_call(fn, *args):
         # where to fix it), never a raw transport error: zotero.Zotero.send
         # turns httpx's URL-bearing text into one before it gets here.
         raise HTTPException(status_code=409, detail=exc.args[0] if exc.args else "Zotero failed")
+    except ValueError as exc:
+        # vault.yaml that does not parse, or would not read back, so set_zotero wrote nothing:
+        # its sentence says which line to fix (vault_manifest._write_lines)
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/zotero/status")
@@ -7492,6 +7496,8 @@ def zotero_setting(payload: dict):
         return zotero_web.setting(str(payload.get("key", "")), payload.get("value"))
     except KeyError:
         raise HTTPException(status_code=400, detail="not a Zotero setting")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))  # vault.yaml left as it was
 
 
 @app.post("/zotero/grant", dependencies=_SAME_ORIGIN)

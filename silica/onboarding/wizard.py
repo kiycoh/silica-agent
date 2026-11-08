@@ -577,7 +577,12 @@ def _offer_zotero(input_fn: Callable[[str], str], vault: Path) -> None:
         return
     answer = _ask(input_fn, "Use your Zotero library in this vault? [y/n]", "y")
     if answer.lower() in ("y", "yes"):
-        set_zotero(vault, "library", library)
+        try:
+            set_zotero(vault, "library", library)
+        except ValueError as exc:
+            # a vault.yaml that does not parse is left as it was: the rest of the wizard still runs
+            CONSOLE.print(f"  zotero: not linked: {exc}")
+            return
         CONSOLE.print(f"  {GLYPHS['ok']} zotero: library {library}")
 
 

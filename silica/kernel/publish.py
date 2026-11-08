@@ -50,7 +50,23 @@ def _block(vault: Path) -> dict:
     except (OSError, yaml.YAMLError):
         return {}
     block = raw.get(PUBLIC_KEY) if isinstance(raw, dict) else None
-    return block if isinstance(block, dict) else {}
+    return _paired(block) if isinstance(block, dict) else {}
+
+
+_HALF = re.compile("[\ud800-\udfff]")
+
+
+def _paired(value):
+    """`value` with each surrogate pair read as its character. Before 2026-11-08 the writer put an
+    emoji as `\\ud83c\\udfa8`, which PyYAML reads as two lone halves that no response or page can
+    encode; a half with no partner has no character and reads as U+FFFD."""
+    if isinstance(value, str):
+        return value.encode("utf-16", "surrogatepass").decode("utf-16", "replace") if _HALF.search(value) else value
+    if isinstance(value, list):
+        return [_paired(v) for v in value]
+    if isinstance(value, dict):
+        return {_paired(k): _paired(v) for k, v in value.items()}
+    return value
 
 
 def slugify(text: str) -> str:
