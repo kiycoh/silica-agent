@@ -1271,6 +1271,7 @@ body.sidebar-collapsed #sidebar {
   display: none;
 }
 
+
 #vault-import .vi-head {
   display: flex;
   flex-wrap: wrap;
@@ -1619,6 +1620,17 @@ body.sidebar-collapsed #sidebar {
 
 .tree-ext {
   color: var(--ash-dim);
+}
+
+/* What Silica lacks of a file no note names (ADR-0129, amended 2026-11-08),
+   at the row's end: a file it reads carries nothing. */
+.tree-file .tree-mark {
+  flex: none;
+  margin-left: auto;
+  padding-right: 0.4rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  white-space: nowrap;
 }
 
 .tree-note.sel {

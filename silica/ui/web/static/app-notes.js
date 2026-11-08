@@ -997,6 +997,9 @@ let detailsLent = false; // open for the note at the centre, so they do not stic
 let rawOn = false;
 let rawFor = null;
 let drawerRaw = null; // the open note's raw, as /note/raw describes it
+// A vault file no note names (ADR-0129, amended 2026-11-08), the drawer's
+// `file` mode: {path, state, act} as its rail row carries them.
+let drawerFile = null;
 let rawTop = null;    // the strip heading its text, refilled when the raw comes back
 const rawShowing = () => drawerMode === "note" && !!drawerRaw && drawerRaw.open
   && (rawOn || rawFor === drawerNote.path);
@@ -1004,19 +1007,24 @@ const rawShowing = () => drawerMode === "note" && !!drawerRaw && drawerRaw.open
 function syncDrawerMode() {
   const open = notePanel.classList.contains("open");
   const raw = rawShowing();
-  const details = drawerMode === "note" && detailsOn && !raw;
+  const chaptered = drawerMode === "file" && fileHasChapters();
+  const details = (drawerMode === "note" || chaptered) && detailsOn && !raw;
   // The title belongs to a note in every view of it, in the same place; the
   // two chips to what has no title. Beside the title, the info button and
   // the pin on the text, the read glyph in details, which leads back; the
   // raw's glyph on the text and on the PDF, lit on the PDF.
   $("#note-title").hidden = drawerMode === "node";
-  $("#note-info").hidden = drawerMode !== "note" || details || raw;
+  // A file no note names has a name and no note's menu: rename, history and
+  // the reads behind the title act on a note.
+  $("#note-title").disabled = drawerMode === "file";
+  $("#note-info").hidden = !(drawerMode === "note" || chaptered) || details || raw;
   $("#note-read").hidden = !details;
   $("#note-raw").hidden = drawerMode !== "note" || details || !drawerRaw || !drawerRaw.open;
   $("#note-raw").setAttribute("aria-pressed", String(raw));
   $("#note-raw").setAttribute("aria-label", raw ? "back to the text" : "the PDF this note came from");
   $("#note-raw").dataset.tip = raw ? "back to the text" : "the PDF this note came from";
-  $("#note-pin").hidden = drawerMode === "node" || details;
+  $("#note-pin").hidden = drawerMode === "node" || drawerMode === "file" || details;
+  $("#note-ws").hidden = drawerMode === "file"; // a workspace's members are notes
   $("#note-changes").hidden = drawerMode !== "diff";
   $("#node-scope").hidden = drawerMode !== "node";
   $("#node-state").hidden = drawerMode !== "node";
@@ -1024,7 +1032,7 @@ function syncDrawerMode() {
   $("#note-foot").hidden = $("#note-edit").hidden;
   $("#note-centre").hidden = $("#note-edit").hidden;
   $("#note-diff").hidden = drawerMode !== "diff";
-  $("#node-pane").hidden = drawerMode !== "node" && !details;
+  $("#node-pane").hidden = drawerMode !== "node" && !(details && drawerMode === "note");
   syncRawView(raw);
   // A diff of a note this session never touched has nothing in it, so the
   // menu lists it only when there is one, and not while it is showing.
@@ -1188,6 +1196,14 @@ function setInfoDot(on) {
 // The two views of one note. False when nothing changed, so the Escape list
 // can stop at a press that took the reader back to the text.
 function setDetails(on) {
+  // A PDF no note names has its chapters as its second view (ADR-0156 point
+  // 6), drawn in the raw view, so there is no note to go back to or close.
+  if (drawerMode === "file") {
+    if (!fileHasChapters() || detailsOn === on || !notePanel.classList.contains("open")) return false;
+    detailsOn = on;
+    syncDrawerMode();
+    return true;
+  }
   if (drawerMode !== "note" || detailsOn === on || !notePanel.classList.contains("open")) return false;
   const inPanel = notePanel.contains(document.activeElement);
   detailsOn = on;
@@ -1226,6 +1242,162 @@ async function openRaw(path) {
   if (ok === true) { rawFor = drawerNote.path; syncDrawerMode(); markOpenNote(); }
 }
 window.openRaw = openRaw;
+
+// The rail's row of a file no note names (ADR-0129, amended 2026-11-08). No
+// note is held, so the composer's chip, the address and the tree's note mark
+// let go with lastNotePath; lastViewedPath keeps the file for the corner toggle.
+async function openFile(path, state, act) {
+  if (!path) return false;
+  ++openSeq; // a note still loading must not land over the file
+  closeNoteMenu();
+  if (!(await releaseNote())) return false; // what was typed into the note reaches the disk first
+  if (detailsLent) { detailsLent = false; detailsOn = false; }
+  drawerFile = { path, state: state || "unread", act: act || "" };
+  drawerMode = "file";
+  lastNotePath = null;
+  lastViewedPath = path;
+  focusGraphNode(null);
+  showDrawer(path.split("/").pop());
+  return true;
+}
+window.openFile = openFile;
+
+const fileUrl = (path, extra = "") => "/file?path=" + encodeURIComponent(path) + extra;
+const FILE_PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
+// What Silica holds of the file, in the strip's words; an unread file says
+// why, by its kind, since that is what OCR or a conversion would change.
+function fileSays(f, name) {
+  if (f.state === "read") return "Silica reads its text.";
+  if (f.state === "unindexed") return "Silica has not indexed it yet: the next search reads it.";
+  if (/\.pdf$/i.test(name)) return "No text layer: Silica has not read it.";
+  if (FILE_PICTURE.test(name)) return "A picture: Silica has not read it.";
+  return "Silica has not read it.";
+}
+
+// A PDF in the browser's viewer and a picture as itself, both from /file
+// under /asset's sandbox; anything else is the strip and its Download.
+function syncFileView() {
+  const f = drawerFile, name = f.path.split("/").pop();
+  const head = $("#raw-head");
+  head.className = "note-paper raw-strip";
+  head.replaceChildren();
+  const line = mkEl("span", "");
+  line.append(mkEl("b", "", name), " " + fileSays(f, name));
+  head.append(line);
+  const act = f.state === "unread" ? { ocr: "OCR this", convert: "Convert this" }[f.act] : "";
+  if (act) {
+    const b = mkEl("button", "wk-paper-a", act);
+    b.type = "button";
+    b.title = "read it into a note beside the file; the row says read once it is done";
+    // Two clicks, as a delete takes: on a scan with no OCR provider every
+    // page is one call to the vision model, 1,795 for one Bible here.
+    armThenRun(b, act, f.act === "ocr" ? "click again: every page goes to a model" : "click again to convert",
+               () => fileOcr(f, b));
+    head.append(b);
+  }
+  // A PDF with a text layer can be studied (ADR-0156 point 7): its chapters
+  // become notes beside it, and Memorize opens a plan over them. Not indexed
+  // yet counts: the chapters read the text layer themselves, and a file with
+  // none is refused with the sentence that says to OCR it.
+  if (f.state !== "unread" && /\.pdf$/i.test(name)) {
+    const study = mkEl("button", "wk-paper-a", "Study this");
+    study.type = "button";
+    study.title = "write its chapters beside it as notes, from its own text, and plan over them in Memorize";
+    study.addEventListener("click", () => fileStudy(f, study));
+    head.append(study);
+  }
+  head.append(Object.assign(document.createElement("a"),
+    { className: "wk-paper-a", textContent: "Download", href: fileUrl(f.path, "&download=1") }));
+  const pdf = /\.pdf$/i.test(name), pic = FILE_PICTURE.test(name);
+  const frame = $("#raw-frame"), img = $("#raw-img"), url = fileUrl(f.path);
+  const listing = pdf && detailsOn;
+  $("#raw-chapters").hidden = !listing;
+  if (listing) fillChapters(f.path);
+  frame.hidden = !pdf || listing;
+  img.hidden = !pic;
+  // the same address is left alone, or the reader's place in the PDF goes
+  // the file is compared without its #page, which a chapter adds: a redraw of
+  // the drawer must not take the reader back to the first page
+  if (pdf && (frame.dataset.url || "").split("#")[0] !== url) { frame.dataset.url = url; frame.title = name; frame.src = url; }
+  if (pic && img.dataset.url !== url) { img.dataset.url = url; img.alt = name; img.src = url; }
+}
+
+const fileHasChapters = () => !!drawerFile && /\.pdf$/i.test(drawerFile.path);
+
+// A PDF's chapters (ADR-0156 point 6), the ladder Memorize studies by: one
+// row a chapter, which opens the PDF at its first page. Asked once a file;
+// the rows are text nodes, every title being words from the person's vault.
+const chaptersOf = new Map();
+async function fillChapters(path) {
+  const box = $("#raw-chapters");
+  if (box.dataset.path === path) return;
+  box.dataset.path = path;
+  box.replaceChildren(mkEl("p", "raw-ch-from", "reading its chapters…"));
+  let data = chaptersOf.get(path);
+  if (!data) {
+    try {
+      const r = await fetch("/file/chapters?path=" + encodeURIComponent(path));
+      data = r.ok ? await r.json() : {};
+    } catch { data = {}; }
+    chaptersOf.set(path, data);
+  }
+  if (box.dataset.path !== path) return; // another file was opened meanwhile
+  const steps = data.steps || [];
+  const head = mkEl("div", "wk-sec");
+  head.append(mkEl("span", "wk-sec-t", "Chapters"), mkEl("span", "wk-sec-n", String(steps.length)));
+  const from = { outline: "from the book's own outline", chapters: "from the pages that open a chapter",
+                 pages: "in runs of pages: the book names no chapters" }[data.source] || "";
+  const list = mkEl("ol", "raw-ch");
+  for (const s of steps) {
+    const b = mkEl("button", "");
+    b.type = "button";
+    const title = mkEl("span", "raw-ch-t", s.title);
+    // the chapters a step took in, too short to be steps of their own
+    for (const part of s.parts || []) title.append(mkEl("span", "raw-ch-sub", part));
+    b.append(title, mkEl("span", "raw-ch-p", s.to > s.from ? `pp. ${s.from}–${s.to}` : `p. ${s.from}`));
+    b.addEventListener("click", () => openFileAt(path, s.from));
+    const li = mkEl("li", "");
+    li.append(b);
+    list.append(li);
+  }
+  box.replaceChildren(head, mkEl("p", "raw-ch-from", steps.length ? from : "no chapters could be read from this file"), list);
+}
+
+// Back to the PDF, at a chapter's first page: a new address, so the frame loads it.
+function openFileAt(path, page) {
+  detailsOn = false;
+  syncDrawerMode();
+  const frame = $("#raw-frame"), url = fileUrl(path) + `#page=${page}`;
+  frame.dataset.url = url;
+  frame.src = url;
+}
+
+async function fileStudy(f, b) {
+  b.disabled = true;
+  try {
+    const r = await fetch("/file/study", { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify({ path: f.path }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { b.disabled = false; notify(typeof d.detail === "string" ? d.detail : `the server answered ${r.status}`); return; }
+    notify(d.written ? `${d.parts.length} chapters written beside ${f.path.split("/").pop()}`
+                     : `${f.path.split("/").pop()} was studied before: its chapters are in ${d.folder}`, "info");
+    loadVaultInfo();
+    learnPlanFolder(d.folder + "/");
+  } catch { b.disabled = false; notify("the server could not be reached"); }
+}
+
+async function fileOcr(f, b) {
+  b.disabled = true;
+  try {
+    const r = await fetch("/file/ocr", { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify({ path: f.path }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { b.disabled = false; notify(typeof d.detail === "string" ? d.detail : `the server answered ${r.status}`); return; }
+    notify(`reading ${f.path.split("/").pop()}: its row says read once the note is written`, "info");
+    if (typeof jobsFetch === "function") jobsFetch();
+  } catch { b.disabled = false; notify("the server could not be reached"); }
+}
 
 const rawUrl = (path, extra = "") => "/raw?path=" + encodeURIComponent(path) + extra;
 
@@ -1275,11 +1447,16 @@ function fillRawStrip(el, raw, path, inRaw) {
 // alone, or the reader's place in it would be lost.
 function syncRawView(on) {
   const view = $("#raw-view");
-  view.hidden = !on;
+  // a file no note names shows in the same view (ADR-0129, amended 2026-11-08)
+  const file = drawerMode === "file" && !!drawerFile && notePanel.classList.contains("open");
+  view.hidden = !on && !file;
+  if (file) { syncFileView(); return; }
   if (!on) return;
   fillRawStrip($("#raw-head"), drawerRaw, drawerNote.path, true);
   const url = rawUrl(drawerNote.path) + (drawerRaw.from ? `#page=${drawerRaw.from}` : "");
   const frame = $("#raw-frame");
+  frame.hidden = false;
+  $("#raw-img").hidden = true;
   if (frame.dataset.url !== url) {
     frame.dataset.url = url;
     frame.title = `${drawerRaw.name}, the PDF of this note`;
@@ -1348,6 +1525,8 @@ async function showNode(target) {
   const path = target.path || "";
   const ghost = !!target.ghost || !path;
   if (!path && !target.name) return;
+  // A file (ADR-0156) opens as itself; an edition opens on its first photo.
+  if (target.file && path) { openFile(path, target.fileState, target.act); return; }
   // A note opens, on its text or its details (ADR-0075). Only what has no
   // text to read raises node mode, below.
   if (!ghost && !target.href && !target.outside) { openNote(path, null, target); return; }
@@ -1476,6 +1655,7 @@ function closeNote(force = false) {
 // one that has something behind it, because a segment can go dead between two
 // opens (a diff needs this session to have touched the file).
 function reopenDrawer() {
+  if (drawerMode === "file" && drawerFile) { openFile(drawerFile.path, drawerFile.state, drawerFile.act); return; }
   const path = lastNotePath || lastViewedPath;
   if (drawerMode === "diff" && changedPaths.has(path)) { openDiff(path); return; }
   if (drawerMode !== "node" && path) { openNote(path); return; }

@@ -143,8 +143,23 @@ _RAW_GLYPH = ('<svg aria-hidden="true" width="13" height="13" viewBox="0 0 16 16
               '<path d="M6.25 8.5h4M6.25 11h4"></path></svg>')
 
 
+# A file row's mark (ADR-0129, amended 2026-11-08): only what Silica lacks is
+# marked, since a row with nothing on it is a file Silica reads.
+_FILE_MARKS = {
+    "unread": ("not read", "Silica holds no text of this file"),
+    "unindexed": ("not indexed", "Silica has not indexed this file yet: the next search reads it"),
+}
+
+
+def _file_act(rel: str) -> str:
+    from silica.kernel.library import file_act
+
+    return file_act(rel)
+
+
 def render_tree(nodes: list[dict], *, actions: bool = False,
-                raws: dict[str, list[str]] | None = None) -> str:
+                raws: dict[str, list[str]] | None = None,
+                files: dict[str, str] | None = None) -> str:
     """Build a collapsible <details> file tree from real note paths.
 
     Pure: nodes -> HTML. Folders become nested <details>/<summary> (native
@@ -179,6 +194,12 @@ def render_tree(nodes: list[dict], *, actions: bool = False,
     (ADR-0129, amended 2026-11-04): each raw is a row in its own folder, with
     its extension, a link to the note that opens it. Not a `.tree-note`, which
     every search, count, selection and drag of the rail reads as a note.
+
+    `files`, the laptop rail's (ADR-0129, amended 2026-11-08), is every other
+    vault file with what Silica holds of it, `read`, `unread` or `unindexed`:
+    a row as a raw's, keyed by the file and not a note, marked when Silica
+    lacks its text. A folder's number counts every row under it; the notes
+    alone ride on it as `data-notes`, which the folder's delete names.
     """
     root: dict = {}
     for n in nodes:
@@ -198,12 +219,18 @@ def render_tree(nodes: list[dict], *, actions: bool = False,
         for f in folders:
             cur = cur.setdefault(f, {})
         cur.setdefault("__notes__", []).append((leaf, raw, notes[0]))
+    for rel, state in (files or {}).items() if actions else ():
+        *folders, leaf = rel.split("/")
+        cur = root
+        for f in folders:
+            cur = cur.setdefault(f, {})
+        cur.setdefault("__notes__", []).append((leaf, rel, None, state))
 
-    def count(tree: dict) -> int:
-        # notes only, raws not: the folder menu's delete names this count, and
-        # tree_delete removes the notes the tree counts, never their raws
-        return sum(1 for row in tree.get("__notes__", []) if len(row) == 2) + sum(
-            count(v) for k, v in tree.items() if k != "__notes__")
+    def count(tree: dict, notes_only: bool = False) -> int:
+        # notes_only for the folder menu's delete, which names how many notes
+        # go: tree_delete removes the notes, never a raw or another file
+        return sum(1 for row in tree.get("__notes__", []) if not notes_only or len(row) == 2) + sum(
+            count(v, notes_only) for k, v in tree.items() if k != "__notes__")
 
     def emit(tree: dict, depth: int, prefix: str = "") -> str:
         out = []
@@ -224,19 +251,36 @@ def render_tree(nodes: list[dict], *, actions: bool = False,
             # a note's <a> drags by itself; a summary only when told, and the
             # rail drops a folder on a workspace row as its menu adds one
             drag = ' draggable="true"' if actions else ""
+            total, notes = count(tree[name]), count(tree[name], True)
+            # the notes ride apart only where files make the number larger
+            apart = f' data-notes="{notes}"' if notes != total else ""
             out.append(f"<details><summary{drag}>{html.escape(name)}"
-                       f'<span class="tree-n">{count(tree[name])}</span>{more}{pub}{plan}</summary>')
+                       f'<span class="tree-n"{apart}>{total}</span>'
+                       f"{more}{pub}{plan}</summary>")
             out.append(emit(tree[name], depth + 1, folder))
             out.append("</details>")
         for leaf, nid, *raw_note in sorted(tree.get("__notes__", []), key=lambda x: x[0].lower()):
             if raw_note:
                 stem, dot, ext = leaf.rpartition(".")
+                shown = (f'{_RAW_GLYPH}<span>{html.escape(stem or leaf)}<span class="tree-ext">'
+                         f'{dot}{html.escape(ext if stem else "")}</span></span>')
+                if raw_note[0] is None:  # a file no note names, keyed by its own path
+                    state = raw_note[1]
+                    mark = _FILE_MARKS.get(state)
+                    act = _file_act(nid) if state == "unread" else ""
+                    out.append(
+                        f'<div class="tree-row tree-raw"><a class="tree-file" '
+                        f'href="/file?path={quote(nid, safe="")}" '
+                        f'data-file="{html.escape(nid, quote=True)}" data-state="{state}"'
+                        + (f' data-act="{act}"' if act else "") + f">{shown}"
+                        + (f'<span class="tree-mark" title="{mark[1]}">{mark[0]}</span>' if mark else "")
+                        + "</a></div>")
+                    continue
                 out.append(
                     f'<div class="tree-row tree-raw"><a class="tree-file" '
                     f'href="/raw?path={quote(raw_note[0], safe="")}" '
                     f'data-raw="{html.escape(nid, quote=True)}" data-note="{html.escape(raw_note[0], quote=True)}">'
-                    f'{_RAW_GLYPH}'
-                    f'<span>{html.escape(stem or leaf)}<span class="tree-ext">{dot}{html.escape(ext if stem else "")}</span></span></a></div>')
+                    f"{shown}</a></div>")
                 continue
             shown = leaf[:-3] if leaf.endswith(".md") else leaf
             note = (
@@ -346,7 +390,10 @@ def _frame_context(
     # in this vault, and stays out of them for the same reason.
     missing = {n["id"] for n in nodes if n.get("type") == "missing"}
     outside = {n["id"] for n in nodes if n.get("type") == "outside"}
-    nodes_all, nodes = nodes, [n for n in nodes if n["id"] not in missing | outside]
+    # A file or an edition (ADR-0156) is a node and not a note: the counts
+    # below are the notes'.
+    files = {n["id"] for n in nodes if n.get("type") in ("file", "edition")}
+    nodes_all, nodes = nodes, [n for n in nodes if n["id"] not in missing | outside | files]
     n_notes      = sum(1 for n in nodes if n.get("type") != "ghost")
     n_ghost      = sum(1 for n in nodes if n.get("type") == "ghost")
     # A written requires is drawn and switched as its own row (ADR-0145), so
@@ -1142,9 +1189,28 @@ def export_graph(
     except Exception as exc:
         logger.warning("graph_view: coupled layer skipped (%s)", exc)
 
+    # The vault's files as nodes (ADR-0156), joined here, after every
+    # partition and size above, so no area of the notes moves for them: they
+    # bring their own areas, the folders they sit in, and their own edges.
+    # Best-effort as the proposal layers are: a vault with no file to draw, or
+    # an engine that cannot read, gets the graph it always got.
+    files: dict = {"nodes": [], "edges": [], "areas": []}
+    try:
+        from silica.kernel.library import file_layer
+
+        files = file_layer(first_group=len(communities))
+    except Exception as exc:
+        logger.warning("graph_view: file layer skipped (%s)", exc)
+    from silica.kernel.recall.graph_export import Community, _community_color
+
+    file_areas = [Community(id=g, label=label, color=_community_color(g),
+                            color_paper=_community_color(g, on_paper=True), size=n)
+                  for g, label, n in files["areas"]]
+
     html_out = render_html(
-        nodes + missing + outside, edges + sim + gaps + proposed + coupled + cites + covers,
-        communities, title=title, lib_js=lib_js, discourse=discourse, zones=zones,
+        nodes + missing + outside + files["nodes"],
+        edges + sim + gaps + proposed + coupled + cites + covers + files["edges"],
+        list(communities) + file_areas, title=title, lib_js=lib_js, discourse=discourse, zones=zones,
         covers=covers_meta, subs=subs,
     )
 

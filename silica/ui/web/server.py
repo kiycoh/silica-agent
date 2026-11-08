@@ -4776,6 +4776,87 @@ def raw_file(path: str = "", download: bool = False):
                         content_disposition_type="attachment" if attach else "inline")
 
 
+# What the drawer shows of a file no note names: a PDF in the browser's viewer
+# and a picture as itself. Not SVG, which is a document that runs (see
+# _ASSET_EXTS): it goes as a download.
+_FILE_OPENS = (*_RAW_OPENS, *(_ASSET_EXTS - {".svg"}))
+
+
+def _vault_file(path: str) -> Path:
+    """The vault file a rail row names, or 404: the laptop's only, inside the
+    vault, never under a dot-folder or a dot-file."""
+    from silica.config import hosted
+
+    if hosted() or not path or not CONFIG.vault_path:
+        raise HTTPException(404)
+    root = Path(CONFIG.vault_path).resolve()
+    target = (root / path).resolve()
+    if not (target.is_relative_to(root) and target.is_file()) \
+            or any(part.startswith(".") for part in target.relative_to(root).parts):
+        raise HTTPException(404)
+    return target
+
+
+@app.get("/file")
+def vault_file(path: str = "", download: bool = False):
+    """A vault file no note names (ADR-0129, amended 2026-11-08), which /raw,
+    keyed by a note, answers for none of: on the laptop every file is a rail
+    row since that day. Under /asset's headers, whose `sandbox` keeps a
+    navigated file off the GUI's origin."""
+    found = _vault_file(path)
+    attach = download or found.suffix.lower() not in _FILE_OPENS
+    return FileResponse(found, headers=_ASSET_HEADERS, filename=found.name,
+                        content_disposition_type="attachment" if attach else "inline")
+
+
+@app.get("/file/chapters")
+def file_chapters(path: str = ""):
+    """A vault PDF's chapters for the drawer's info view (ADR-0156 point 6):
+    {source, pages, steps}, the one ladder Memorize studies by too; {} for a
+    file with none to read."""
+    from silica.kernel.library import chapters
+
+    found = _vault_file(path)
+    return chapters(found.relative_to(Path(CONFIG.vault_path).resolve()).as_posix())
+
+
+@app.post("/file/study", dependencies=_SAME_ORIGIN)
+def file_study(payload: dict):
+    """The drawer's "Study this" on a PDF Silica reads (ADR-0156 point 7): its
+    chapters written beside it as notes, one undo run, and the folder they are
+    in, which Memorize's new plan opens on. No model call: the text layer."""
+    from silica.kernel.library import write_chapters
+
+    found = _vault_file(str(payload.get("path") or ""))
+    try:
+        out = write_chapters(found.relative_to(Path(CONFIG.vault_path).resolve()).as_posix())
+    except ValueError as exc:  # no text to study: the sentence says to OCR it first
+        raise HTTPException(400, exc.args[0]) from None
+    except FileExistsError as exc:  # a chapter's path is taken by a note of the person's
+        raise HTTPException(409, f"{exc.args[0] if exc.args else 'a chapter'} is already taken") from None
+    for path in out["parts"]:
+        _index_later(path)
+    return out
+
+
+@app.post("/file/ocr", dependencies=_SAME_ORIGIN)
+def file_ocr(payload: dict):
+    """The drawer's "OCR this" on a file Silica holds no text of (ADR-0129,
+    amended 2026-11-08): one conversion job, as the vault's + makes, whose
+    note lands beside the file and names it in `source_file`, so the row is
+    a raw of a note, read, once the job is done. The configured PDF provider
+    reads it: on a laptop set to mineru, mineru's OCR."""
+    from silica.sources.media_admission import MediaRefused
+    from silica.ui.web import jobs
+
+    found = _vault_file(str(payload.get("path") or ""))
+    rel = found.relative_to(Path(CONFIG.vault_path).resolve()).as_posix()
+    try:
+        return jobs.record(rel, origin="ocr")
+    except MediaRefused as exc:  # a recording over the length cap: its text is the person's sentence
+        raise HTTPException(400, exc.args[0]) from None
+
+
 @app.post("/note/save", dependencies=_SAME_ORIGIN)
 def note_save(payload: dict):
     from silica.driver import DRIVER
@@ -6312,6 +6393,17 @@ def _tree_raws() -> dict[str, list[str]]:
             if Path(r).suffix.lower() in DOC_EXTS}
 
 
+def _tree_files(raws: dict[str, list[str]]) -> dict[str, str]:
+    """Every other file in the vault with what Silica holds of it (ADR-0129,
+    amended 2026-11-08), the rule Explore's file nodes read too (ADR-0156):
+    the laptop's only, empty on the server."""
+    from silica.kernel.library import file_states
+
+    if not CONFIG.vault_path:
+        return {}
+    return file_states(Path(CONFIG.vault_path), raws)
+
+
 @app.get("/vault_info")
 def vault_info():
     """Sidebar data: vault stats + file tree, from the same builders as the
@@ -6334,7 +6426,7 @@ def vault_info():
         # actions=True: the rail's tree carries a pin per note. The graph
         # frame renders the same tree without one, because a pin there would
         # point at a rail that document does not have.
-        "tree": render_tree(nodes, actions=True, raws=_tree_raws()),
+        "tree": render_tree(nodes, actions=True, raws=(raws := _tree_raws()), files=_tree_files(raws)),
         # Silica's own folders: no folder in view and no "Write a note" (ADR-0155
         # points 4, 5). The page asks here because it has the tree from here.
         "never": list(never_dirs()),
