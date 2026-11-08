@@ -15,7 +15,6 @@ time: a request during one runs one more after it, which finds what the
 request was about."""
 from __future__ import annotations
 
-import inspect
 import logging
 import threading
 import time
@@ -54,20 +53,15 @@ def status() -> dict:
 
 
 def _eligible() -> bool:
-    """A laptop (ADR-0085: a tenant's vectors are the host's), an embedder
-    on this machine (a remote one sends every page off it, paid: that stays
-    the person's `silica-core index --embed`), and a silica-core that saves
-    as it goes and keeps a build on its vault. 0.12.0 did neither, and on it
-    a build at every start restarted from zero each time the app closed."""
+    """A laptop (ADR-0085: a tenant's vectors are the host's) and an
+    embedder on this machine: a remote one sends every page off it, paid,
+    so that stays the person's `silica-core index --embed`."""
     if hosted():
         return False
     from silica.tools.atomic import _engine
     from silica_core import embeddings
 
-    core = _engine()
-    # shortcut: feature-detects silica-core 0.13.0's build; drop it when the floor is >=0.13.0
-    if "progress" not in inspect.signature(core.build_index).parameters:
-        return False
+    _engine()  # raises on a silica-core this tree cannot drive, before a thread starts
     return embeddings.enabled() and embeddings.remote_host() is None
 
 

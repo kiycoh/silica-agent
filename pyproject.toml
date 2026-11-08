@@ -29,11 +29,13 @@ dependencies = [
   # The retrieval engine behind silica_search_context and silica_read, and
   # from here on whatever else the public core covers, one piece at a time.
   # One arrow: this tree depends on silica-core, the core never knows this
-  # tree exists (ADR-0043). 0.12.0 is the first release with the public
-  # `unreadable`, `walk` and `version_of` this tree reads instead of the
-  # engine's private names (2026-11-05); to work on both at once,
+  # tree exists (ADR-0043). 0.13.0 is the first release whose index build
+  # saves as it goes, reads only what it embeds, reports its progress and
+  # stays on the vault it started on, which the GUI's own page-vector builds
+  # rely on (ADR-0156, amended 2026-11-08); 0.12.0 brought the public
+  # `unreadable`, `walk` and `version_of`. To work on both at once,
   # `uv pip install -e ../silica-core` over it.
-  "silica-core>=0.12.0",
+  "silica-core>=0.13.0",
   # [mcp]: litellm 1.106.6 (0.26.0's lock; 1.86.0 did not) imports its MCP
   # gateway from completion(), and through it `mcp.types`, whenever `tools`
   # is passed, which every chat turn does; litellm declares that package only
