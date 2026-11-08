@@ -663,7 +663,8 @@ function renderSignOutEverywhere(host) {
   row.dataset.search = "sign out everywhere session device account";
   const label = stEl("div", "st-label");
   label.appendChild(stEl("span", "st-name", "sign out everywhere"));
-  label.appendChild(stEl("div", "st-help", "ends every session of this account, this window's too"));
+  // the gateway removes the links with the sessions (ADR-0157 point 9): a computer learns it at its next Publish
+  label.appendChild(stEl("div", "st-help", "ends every session of this account, this window's too, and unlinks every computer linked to it"));
   row.appendChild(label);
   const form = stEl("form", "st-ctl");
   form.method = "post";
