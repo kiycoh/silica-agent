@@ -30,6 +30,8 @@ from urllib.parse import quote
 
 from silica.kernel import publish, rights
 from silica.kernel.image_meta import strip_location
+# named where a file is opened: one number for the file built and the file read (ADR-0157 Open 4)
+from silica.sources.saved_page import WIKI_FILE_MAX
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +51,6 @@ _LANGS = {"italian": "it", "english": "en", "spanish": "es", "french": "fr",
 # shortcut: past this many linked notes the cover keeps the best linked ones, so the layout stays
 # near a second; reopen if a vault this large asks for every mark (count them in the caption)
 _COVER_MAX = 1500
-# ADR-0157 Open 4: a wiki file may not pass 100 MB unpacked. Decimal megabytes, as Caddy reads the
-# edge's `max_size 100MB`, so the limit the file is built under is the one its upload meets.
-WIKI_FILE_MAX = 100_000_000
 # Shown only where pages.css did not load, which is how a page opened inside the zip looks: its
 # sheet, its data and its neighbours are still packed (ADR-0157 point 5).
 _EXTRACT = '<p class="extract">Extract the whole zip first, then open index.html.</p>\n'

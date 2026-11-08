@@ -640,7 +640,7 @@ function renderPublic(fresh) {
   }
   if (!v) {
     frag.append(mkEl("p", "pp-status", `You can publish up to ${st.max} wikis, each a folder of your vault. Readers find them at your address, and in Pages if you list them.`));
-    frag.append(invitesBox(true));
+    frag.append(invitesBox());
     body.replaceChildren(frag);
     return;
   }
@@ -719,7 +719,7 @@ function renderPublic(fresh) {
   grid.append(goes);
   if (v.visibility === "public" && st.url) grid.append(listingBox(v));
   if (v.visibility === "private") grid.append(readersBox(v));
-  grid.append(invitesBox(false));
+  grid.append(invitesBox());
   frag.append(grid);
 
   const row = mkEl("div", "pp-actions");
@@ -1214,14 +1214,23 @@ function readersBox(v) {
   return box;
 }
 
-function invitesBox(alone) {
+function invitesBox() {
   const n = pubInvites.length;
   const box = ppBox("Shared with you", `${n} ${n === 1 ? "invitation" : "invitations"}`, { wide: true });
+  // Open a file (ADR-0157 point 7): a wiki someone sent as a zip becomes an invitation here
+  const pick = Object.assign(document.createElement("input"), { type: "file", hidden: true });
+  pick.accept = ".zip,application/zip";
+  pick.addEventListener("change", () => { if (pick.files[0]) openWikiFile(pick.files[0]); });
+  const open = mkEl("button", "st-btn", "Open a file…");
+  open.type = "button";
+  open.addEventListener("click", () => pick.click());
+  box.firstChild.append(open, pick);
   const ul = mkEl("ul", "pg-rows");
   for (const inv of pubInvites) {
     const li = mkEl("li", "");
     const what = mkEl("span", "pg-grow");
     what.append(mkEl("span", "pg-who", "@" + inv.author), document.createTextNode(` shared ${inv.title}`));
+    if (inv.file) what.append(mkEl("span", "pp-dim", " · from a file"));
     li.append(what, mkEl("span", "pp-dim", `${pubCount(inv.notes)}${inv.published ? " · " + pubDay(inv.published) : ""}`));
     const no = mkEl("button", "st-btn", "Decline");
     no.type = "button";
@@ -1235,11 +1244,37 @@ function invitesBox(alone) {
     li.append(no, yes);
     ul.append(li);
   }
-  if (!n) ul.append(mkEl("li", "pp-dim", "No invitations. When an account names you as a reader of a Private wiki, it appears here."));
-  box.append(ul, mkEl("p", "pp-dim", "Free and paid accounts both receive. A saved copy lands in Saved/@handle/ and is a write like any other: it can be taken back."));
-  box.hidden = alone ? false : !n;
+  if (!n) ul.append(mkEl("li", "pp-dim", "No invitations. A wiki someone sent you as a file opens here, or drop the zip on this view."));
+  box.append(ul, mkEl("p", "pp-dim", "Free and paid accounts both receive. A saved copy lands in Saved/@handle/ and is a write like any other: it can be taken back. Silica reads a file's notes and images, never its pages."));
   return box;
 }
+
+// The zip goes as the request's body; the server reads its data and never its pages.
+async function openWikiFile(file) {
+  // the server's own cap (saved_page.WIKI_FILE_MAX), said here before 100 MB travel to be refused
+  if (file.size > 100e6) { notify("that file is past the 100 MB a wiki file may hold"); return; }
+  let r, d;
+  try {
+    r = await fetch("/vault/invitations/file", { method: "POST", headers: { "Content-Type": "application/zip" }, body: file });
+    d = await r.json().catch(() => ({}));
+  } catch {
+    notify("the file could not be opened");
+    return;
+  }
+  if (!r.ok) { notify(d.detail || "the file could not be opened"); return; }
+  pubInvites = d.invitations;
+  notify(`${d.opened.title} by @${d.opened.author} is in Shared with you`, "info");
+  if (activeTab === "public") renderPublic();
+}
+
+// A zip dropped on My Wikis opens like the button; dropped elsewhere it is the chat's or nothing.
+// Prevented here, so the window's own drop handler (app-notes.js) leaves it alone.
+$("#view-public").addEventListener("drop", (e) => {
+  const zip = [...(e.dataTransfer?.files || [])].find((f) => /\.zip$/i.test(f.name));
+  if (!zip) return;
+  e.preventDefault();
+  openWikiFile(zip);
+});
 
 document.addEventListener("silica:vault-info", () => loadPublicState()); // a fresh tree has bare globes
 
@@ -1309,7 +1344,8 @@ async function openSaveSheet(what) {
     return;
   }
   const head = mkEl("div", "sv-card");
-  head.append(mkEl("b", "", p.title), mkEl("span", "", `by ${p.author}`), mkEl("code", "", what.invite ? "a Private wiki shared with you" : (p.source || p.url || "").replace(/^https:\/\//, "")));
+  head.append(mkEl("b", "", p.title), mkEl("span", "", `by ${p.author}`), mkEl("code", "", !what.invite ? (p.source || p.url || "").replace(/^https:\/\//, "")
+    : what.invite.file ? `from a file: the file says it is by ${p.author}, and Silica cannot check that` : "a Private wiki shared with you"));
   const parts = [head];
   if (p.kind === "note") {
     parts.push(mkEl("p", "st-sheet-text", `Into ${p.folder}.`));

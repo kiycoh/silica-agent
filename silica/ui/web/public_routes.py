@@ -587,6 +587,32 @@ async def invitation_save(payload: dict):
     return {"path": out["first"], **out}
 
 
+@router.post("/vault/invitations/file", dependencies=_SAME_ORIGIN)
+async def invitation_file(request: Request):
+    """Open a file (ADR-0157 point 7): the body is the zip, refused past the cap as it arrives,
+    so a larger one is never held whole."""
+    from silica.sources import saved_page
+
+    too_big = HTTPException(413, str(saved_page._file_too_big()))
+    said = request.headers.get("content-length", "")
+    if said.isdigit() and int(said) > saved_page.WIKI_FILE_MAX:
+        raise too_big
+    # shortcut: held in memory, twice during the join, so 200 MB at the cap beside the 234 MiB a
+    # tenant holds on average (2026-11-06); spool it to silica_tmp_dir() and open the zip from
+    # there if a tenant is ever killed during an Open
+    chunks, held = [], 0
+    async for chunk in request.stream():
+        held += len(chunk)
+        if held > saved_page.WIKI_FILE_MAX:
+            raise too_big
+        chunks.append(chunk)
+    try:
+        out = await asyncio.to_thread(saved_page.open_file, b"".join(chunks))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"opened": out, "invitations": saved_page.invitations()}
+
+
 @router.post("/vault/invitations/decline", dependencies=_SAME_ORIGIN)
 def invitation_decline(payload: dict):
     from silica.sources import saved_page

@@ -727,6 +727,9 @@ body.drawer-recall #public-bar {
 .pp-box.wide .pg-rows li:first-child { border-top: 0; }
 .pp-box .pg-rows .st-btn { margin-left: auto; }
 .pp-box .pg-rows .st-btn + .st-btn { margin-left: 0; }
+/* Open a file… sits beside the count, both at the head's right */
+.pp-box h3:has(> .st-btn) { align-items: center; }
+.pp-box h3:has(> .st-btn) b { margin-left: auto; }
 .pp-box.wide ul.pg-chips { gap: 6px; }
 
 /* --- the handle, asked on the first visit (ADR-0143 point 7, amended 2026-11-02) ------------

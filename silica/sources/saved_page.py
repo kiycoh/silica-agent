@@ -18,6 +18,7 @@ import datetime
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -28,6 +29,9 @@ _VAULT_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)/$")
 _FOLDER_UNSAFE = re.compile(r'[\\/:*?"<>|#^\[\]]+')
 _MD_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
 _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")
+# ADR-0157 Open 4: a wiki file may not pass 100 MB unpacked. Decimal megabytes, as Caddy reads the
+# edge's `max_size 100MB`, so the limit the file is built under is the one its upload meets.
+WIKI_FILE_MAX = 100_000_000
 
 
 def allowed_hosts() -> set[str]:
@@ -397,38 +401,66 @@ def _is_done(author: str, slug: str, stamp: str) -> bool:
         return False
 
 
-def invitations() -> list[dict]:
-    """The Private vaults offered to this account and not yet saved or declined."""
-    root = invitations_dir()
-    out: list[dict] = []
+def file_invitations_dir() -> Path:
+    """Where Open a file unpacks a wiki file (ADR-0157 point 7). Not the relay's folder: on the
+    hosted service that one is root's, and the account cannot write in it."""
+    raw = os.environ.get("SILICA_FILE_INVITATIONS_DIR", "").strip()
+    return Path(raw) if raw else Path.home() / ".silica" / "file-invitations"
+
+
+def _folders(root: Path):
     if not root.is_dir():
-        return out
+        return
     for a in sorted(root.iterdir()):
-        if not (a.is_dir() and _NAME.match(a.name)):
-            continue
-        for d in sorted(a.iterdir()):
-            if not (d.is_dir() and _NAME.match(d.name)) or _is_done(a.name, d.name, _stamp(d)):
-                continue
-            try:
-                m = json.loads((d / "vault.json").read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            count = m.get("count") if isinstance(m.get("count"), dict) else {}
-            out.append({"author": a.name, "vault": d.name,
-                        "title": str(m.get("title") or d.name)[:80], "line": str(m.get("line") or "")[:160],
-                        "notes": int(count.get("notes") or 0), "areas": m.get("areas") or [],
-                        "unlinked": len(m.get("unlinked") or []),
-                        "published": str(m.get("published") or "")[:10], "license": str(m.get("license") or "")})
+        if a.is_dir() and _NAME.match(a.name):
+            yield from (d for d in sorted(a.iterdir()) if d.is_dir() and _NAME.match(d.name))
+
+
+def invitations() -> list[dict]:
+    """The Private vaults offered to this account and not yet saved or declined, then the wiki
+    files opened here. A relay's folder owns its author and wiki: a file of the same two is never
+    offered beside it, saved or not, so `_invitation` and this list always mean the same folder."""
+    relay = invitations_dir()
+    out: list[dict] = []
+    for d in _folders(relay):
+        if not _is_done(d.parent.name, d.name, _stamp(d)):
+            out += _listed(d, file=False)
+    for d in _folders(file_invitations_dir()):
+        if not (relay / d.parent.name / d.name / "vault.json").is_file():
+            out += _listed(d, file=True)
     return out
+
+
+def _listed(d: Path, *, file: bool) -> list[dict]:
+    try:
+        m = json.loads((d / "vault.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # half written, or not a manifest: nothing to offer, and the folder is not this list's to fix
+        return []
+    if not isinstance(m, dict):
+        return []
+    count = m.get("count") if isinstance(m.get("count"), dict) else {}
+    return [{"author": d.parent.name, "vault": d.name,
+             "title": str(m.get("title") or d.name)[:80], "line": str(m.get("line") or "")[:160],
+             "notes": int(count.get("notes") or 0), "areas": m.get("areas") or [],
+             "unlinked": len(m.get("unlinked") or []),
+             "published": str(m.get("published") or "")[:10], "license": str(m.get("license") or ""),
+             "file": file}]
 
 
 def _invitation(author: str, slug: str) -> Path:
     if not (_NAME.match(author or "") and _NAME.match(slug or "")):
         raise ValueError("no such invitation")
-    d = invitations_dir() / author / slug
-    if not (d / "vault.json").is_file():
-        raise ValueError("that invitation is gone: its author may have withdrawn it")
-    return d
+    # the relay's first, as invitations() lists them
+    for root in (invitations_dir(), file_invitations_dir()):
+        d = root / author / slug
+        if (d / "vault.json").is_file():
+            return d
+    raise ValueError("that invitation is gone: its author may have withdrawn it")
+
+
+def _from_file(d: Path) -> bool:
+    return d.parent.parent == file_invitations_dir() and (d / ".from-file").is_file()
 
 
 def _files(d: Path) -> tuple[dict, dict]:
@@ -451,16 +483,155 @@ def save_invitation(author: str, slug: str, areas=None, vault: Path | None = Non
     d = _invitation(author, slug)
     m, n = _files(d)
     out = save_vault(str(m.get("url") or ""), areas, vault, files=(m, n), private=True, assets=d / "assets")
-    _mark_done(author, slug, _stamp(d))
+    if _from_file(d):
+        # Gone rather than marked done: the mark is keyed author.slug with the file's hash, so the
+        # same file opened again would be hidden from the person who chose to open it. A folder that
+        # will not go stays offered; the notes are saved all the same, so the save is not undone.
+        shutil.rmtree(d, ignore_errors=True)
+    else:
+        _mark_done(author, slug, _stamp(d))
     return out
 
 
 def decline_invitation(author: str, slug: str) -> None:
     d = _invitation(author, slug)
-    _mark_done(author, slug, _stamp(d))
+    if _from_file(d):
+        shutil.rmtree(d)
+    else:
+        _mark_done(author, slug, _stamp(d))
 
 
 def _mark_done(author: str, slug: str, stamp: str) -> None:
     done = _done_dir()
     done.mkdir(parents=True, exist_ok=True)
     (done / f"{author}.{slug}").write_text(stamp or "-", encoding="utf-8")
+
+
+# --- a wiki file, opened (ADR-0157 point 7) ---------------------------------------
+# The zip comes from anyone. Its data is read and its pages never: a page is the author's HTML and
+# a script, and Silica builds its own from the notes. What is written is only vault.json,
+# notes.json and the images under assets/, by names this code makes, so no entry's name decides
+# where a byte lands; the refusals below are for a zip no Silica built, which is not opened at all.
+# No svg: it can carry a script, and the reader's vault would serve it back.
+_ASSET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(png|jpe?g|gif|webp)$", re.IGNORECASE)
+_DRIVE = re.compile(r"^[A-Za-z]:")
+# A wiki file holds two entries a note (its page and its .md) and one an image: 100,000 is some
+# 45,000 notes, far past the largest vault seen (1,780 notes, 2026-10-29), and about 42 MB of
+# headers held while zipfile reads them.
+_ENTRIES_MAX = 100_000
+
+
+def _file_too_big() -> ValueError:
+    return ValueError(f"that file is past the {WIKI_FILE_MAX / 1e6:g} MB a wiki file may hold")
+
+
+def _unpacked(z, keep: dict, into: Path) -> None:
+    """Each kept entry into `into`, counting what comes out: a zip's sizes are its own claim."""
+    held = 0
+    for name, info in keep.items():
+        with z.open(info) as src, open(into / name, "wb") as out:
+            while chunk := src.read(1 << 20):
+                held += len(chunk)
+                if held > WIKI_FILE_MAX:
+                    raise _file_too_big()
+                out.write(chunk)
+
+
+def open_file(data: bytes) -> dict:
+    """A wiki file someone sent, as an invitation from a file in
+    file_invitations_dir()/<handle>/<slug>/: {"author", "vault", "title", "notes"}. The handle is
+    the file's word, which nothing here can check, and the screen says so. Opening the same
+    author's wiki again replaces the one opened before; a relay invitation of the two is never
+    replaced. ValueError with a sentence on a refusal, and then nothing is written."""
+    import hashlib
+    import io
+    import stat
+    import tempfile
+    import time
+    import zipfile
+    import zlib
+
+    if len(data) > WIKI_FILE_MAX:
+        raise _file_too_big()
+    # zipfile holds every entry's header before any check below can run, about 420 bytes each
+    # (measured 2026-11-08), and 100 MB of empty entries is 1.1 M of them. Each one zipfile reads
+    # starts with this signature, so its count bounds them, before a byte is parsed.
+    if data.count(b"PK\x01\x02") > _ENTRIES_MAX:
+        raise ValueError(f"that file holds more than {_ENTRIES_MAX:,} entries, which no wiki file does")
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise ValueError("that file is not a zip Silica can read") from None
+    unreadable = (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError, RuntimeError)
+    with z:
+        for info in z.infolist():
+            name = info.filename
+            if name.startswith("/") or "\\" in name or ".." in name.split("/") or _DRIVE.match(name):
+                raise ValueError(f"that file holds {name[:120]!r}, a name that leaves its folder")
+            if stat.S_ISLNK(info.external_attr >> 16):
+                raise ValueError(f"that file holds {name[:120]!r}, a link, which Silica never unpacks")
+        entries = [i for i in z.infolist() if not i.is_dir()]
+        heads = [i for i in entries if i.filename.count("/") == 1 and i.filename.endswith("/vault.json")]
+        if len(heads) != 1:
+            raise ValueError("that zip is not a wiki file: it holds no one <wiki>/vault.json")
+        top = heads[0].filename.removesuffix("vault.json")
+        keep = {}
+        for i in entries:
+            rest = i.filename.removeprefix(top) if i.filename.startswith(top) else ""
+            if rest in ("vault.json", "notes.json") or (
+                    rest.startswith("assets/") and _ASSET.match(rest.removeprefix("assets/"))):
+                keep[rest] = i
+        if "notes.json" not in keep:
+            raise ValueError("that zip is not a wiki file: it holds no notes.json beside its vault.json")
+        if sum(i.file_size for i in keep.values()) > WIKI_FILE_MAX:
+            raise _file_too_big()
+        try:
+            m = json.loads(z.read(keep["vault.json"]))
+        except (ValueError, *unreadable):
+            raise ValueError("that wiki file could not be read: its vault.json is not a wiki's") from None
+        if not isinstance(m, dict):
+            raise ValueError("that wiki file could not be read: its vault.json is not a wiki's")
+        handle, slug = m.get("handle"), m.get("slug")
+        if not (isinstance(handle, str) and isinstance(slug, str) and _NAME.match(handle) and _NAME.match(slug)):
+            raise ValueError("that file does not name its author and its wiki as Silica names them")
+        title = str(m.get("title") or slug)[:80]
+        if (invitations_dir() / handle / slug / "vault.json").is_file():
+            raise ValueError(f"@{handle}'s {title} already came to you as an invitation, "
+                             "and a file does not replace it")
+        root = file_invitations_dir()
+        root.mkdir(parents=True, exist_ok=True)
+        # An Open killed mid-write never reaches its cleanup. An hour is far past any unpacking of
+        # 100 MB, so no live one is taken.
+        for old in root.glob(".open-*"):
+            try:
+                if old.stat().st_mtime < time.time() - 3600:
+                    shutil.rmtree(old, ignore_errors=True)
+            except OSError:
+                pass  # gone between the glob and the stat: another Open swept it first
+        # Beside the folder it becomes, under a name _NAME refuses, so invitations() never lists a
+        # half-written one, a refused one leaves the earlier one as it was, and the move is a rename.
+        tmp = Path(tempfile.mkdtemp(prefix=".open-", dir=root))
+        try:
+            (tmp / "assets").mkdir()
+            try:
+                _unpacked(z, keep, tmp)
+            except unreadable:
+                raise ValueError("that wiki file could not be read: the zip is damaged") from None
+            try:
+                notes = json.loads((tmp / "notes.json").read_text(encoding="utf-8"))
+            except ValueError:
+                notes = None
+            if not isinstance(notes, dict):
+                raise ValueError("that wiki file could not be read: its notes.json is not a wiki's")
+            (tmp / ".hash").write_text(hashlib.sha256((tmp / "notes.json").read_bytes()).hexdigest(),
+                                       encoding="utf-8")
+            (tmp / ".from-file").write_bytes(b"")
+            dest = root / handle / slug
+            dest.parent.mkdir(exist_ok=True)
+            if dest.exists():
+                shutil.rmtree(dest)
+            tmp.rename(dest)
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+    return {"author": handle, "vault": slug, "title": title, "notes": len(notes)}
