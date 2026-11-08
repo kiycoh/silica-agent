@@ -123,6 +123,7 @@ def _view() -> dict:
             "blocked": last.get(v["slug"], {}).get("blocked", []) if vis == "public" else [],
             # "kept by your computer": the link id itself is the gateway's business, not the page's
             "computer": bool(v["from_link"]),
+            "sent_listed": v["sent_listed"],
         })
     return {
         "available": publish.available(vault),

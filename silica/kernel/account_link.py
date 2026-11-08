@@ -433,12 +433,13 @@ def send(slug: str, vault: Path | None = None, visibility: str | None = None) ->
     off = conf["visibility"] == "off"
     if conf["visibility"] != row["visibility"]:
         publish.set_visibility(slug, conf["visibility"], vault)
-    if not off:
-        items = publish.vaults(vault)
-        for v in items:
-            if v["slug"] == slug:
+    items = publish.vaults(vault)
+    for v in items:
+        if v["slug"] == slug:
+            v["sent_listed"] = conf["listed"]
+            if not off:
                 v["published"] = datetime.date.today().isoformat()
-        publish._save_vaults(items, vault)
+    publish._save_vaults(items, vault)
     return {"vault": slug, "notes": notes, "url": url,
             "published_at": out.get("published_at") if isinstance(out.get("published_at"), str) else "",
             "sent": True, "off": off}

@@ -518,6 +518,35 @@ def test_an_unlinked_removal_keeps_the_served_folder_through_a_later_page_write(
     assert (live / "memory" / "index.html").read_text(encoding="utf-8") == "served by the person"
 
 
+def test_an_unlinked_computer_writes_and_sweeps_nothing_of_its_served_page(memory, client):
+    from silica.kernel import publish
+
+    live = memory.parent / "public" / "marta" / "live"
+    (live / "_s").mkdir(parents=True)
+    (live / "_s" / "pages.css").write_text("css", encoding="utf-8")
+    (live / "index.html").write_text("the person's page", encoding="utf-8")
+    (live / "old-wiki").mkdir()
+    assert not any(v["visibility"] == "public" for v in publish.vaults())
+    assert client.post("/public/vault/memory", json={"visibility": "off"}).status_code == 200
+    assert (live / "index.html").read_text(encoding="utf-8") == "the person's page"
+    assert (live / "_s" / "pages.css").is_file() and (live / "old-wiki").is_dir()
+
+
+def test_a_listing_asked_on_a_computer_waits_for_the_next_publish_to_reach_the_account(memory, gateway, client):
+    from silica.kernel import account_link as link
+
+    link._keep(TOKEN, "marta", gateway.host)
+    client.post("/public/vault/memory", json={"visibility": "public"})
+    v = client.post("/public/vault/memory", json={"listed": True}).json()["vaults"][0]
+    assert (v["listed"], v["sent_listed"]) == (True, False)
+    assert client.post("/public/publish", json={"vault": "memory"}).status_code == 200
+    assert json.loads(_sent(gateway)[1].read("wiki.json"))["listed"] is True
+    assert client.get("/public").json()["vaults"][0]["sent_listed"] is True
+    js = (Path(__file__).parents[1] / "silica" / "ui" / "web" / "static" / "app-public.js").read_text(encoding="utf-8")
+    box = js[js.index("function listingBox("):js.index("// --- the check before Publish")]
+    assert 'if (pubState.link && !v.sent_listed) return box("Asked", listingRow("Asked. It reaches your account with your next Publish."' in box
+
+
 def test_the_account_s_tier_refusal_reaches_the_view_as_its_sentence(memory, gateway, client):
     from silica.kernel import account_link as link
 
