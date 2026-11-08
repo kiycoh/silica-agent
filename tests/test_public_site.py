@@ -1,6 +1,7 @@
 """A Page's files (ADR-0143, ADR-0151): what goes out, and above all what does not."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -223,7 +224,10 @@ def test_with_an_address_links_are_absolute_and_every_page_can_be_saved_and_repo
     index = (vault / "index.html").read_text(encoding="utf-8")
     assert 'name="save" value="https://pages.test/@marta/memory/"' in index
     assert "Save 3 notes to Silica" in index and 'form="save"' in index and 'action="/_report"' in index
-    assert '<a href="https://pages.test/">Pages</a> / <a href="/@marta/">@marta</a> / Memoria' in index
+    assert '<a href="https://pages.test/">Wikis</a> / <a href="/@marta/">@marta</a> / Memoria' in index
+    # the catalog is Wikis wherever a reader meets it, the bar and the crumbs (ADR-0157 point 1)
+    for html in (page, index):
+        assert '<a href="https://pages.test/">Wikis</a>' in html and not re.search(r"\bPages\b", html)
     md = (vault / "spacing-effect.md").read_text(encoding="utf-8")
     assert "[Forgetting curve](https://pages.test/@marta/memory/forgetting-curve)" in md
     assert not (_live(marta) / "_s").exists()  # the host serves the sheet
@@ -386,6 +390,9 @@ def test_the_catalog_lists_only_what_the_host_approved_under_the_handle_it_gave(
     assert pages_catalog.write(host, tsv, wikis, out, "https://app.test") == 1
     index = (out / "index.html").read_text(encoding="utf-8")
     assert 'href="/@marta/memory/"' in index and "Memoria" in index and "Fake" not in index
+    # the catalog is called Wikis, and sends a person to the app's view of that name (ADR-0157 point 1)
+    assert "<title>Wikis · Silica</title>" in index and '<h1 id="cat-h">Wikis</h1>' in index
+    assert "open Wikis → My wikis" in index and not re.search(r"\bPages\b|My Wikis", index)
     assert (out / "_s" / "pages.js").is_file() and (out / "_s" / "archivo-latin.woff2").is_file()
     # index.json is what index.html shows, as data for the app (ADR-0157 point 2): same wikis,
     # each with its license and address, and the unlisted or unapproved ones absent from both

@@ -250,7 +250,7 @@ def _head(title: str, desc: str, site: _Site, lvl: int, *, canonical: str = "", 
 def top(catalog: str, app: str, current: str = "", page: str = "", h: str = "") -> str:
     """The bar every public page shares, the catalog's included."""
     cur = ' aria-current="page"'
-    pages = f'<a href="{_esc(catalog)}"{cur if current == "pages" else ""}>Pages</a>' if catalog else ""
+    pages = f'<a href="{_esc(catalog)}"{cur if current == "pages" else ""}>Wikis</a>' if catalog else ""
     own = (f'<a class="opt" href="{_esc(page)}"{cur if current == "page" else ""}>@{_esc(h)}</a>'
            if page and h else "")
     brand = f'<a class="brand" href="{_esc(app)}/" aria-label="Silica">{_BRAND}<b>Silica</b></a>'
@@ -644,7 +644,7 @@ def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, bac
     head = _head(f"{titles[p]} · {conf['title']} · @{h}", _desc(r["body"]), site, 1, canonical=canonical,
                  md=f"{slug}.md", lang=lang, kind="article")
     crumb = ('<nav class="crumb" aria-label="Breadcrumb">'
-             + (f'<a href="{_esc(site.catalog())}">Pages</a> / ' if site.base else "")
+             + (f'<a href="{_esc(site.catalog())}">Wikis</a> / ' if site.base else "")
              + f'<a href="{_esc(site.page(1))}">@{_esc(h)}</a> / '
              f'<a href="{_esc(site.vault(vslug, 1))}">{_esc(conf["title"])}</a></nav>')
     banner = ""
@@ -730,7 +730,7 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
             'choose the zip this wiki came in.</p>' if site.file else
             '<p class="dim">Saving needs the wiki on a Silica host.</p>')
     crumb = ('<nav class="crumb" aria-label="Breadcrumb">'
-             + (f'<a href="{_esc(site.catalog())}">Pages</a> / ' if site.base else "")
+             + (f'<a href="{_esc(site.catalog())}">Wikis</a> / ' if site.base else "")
              + f'<a href="{_esc(site.page(1))}">@{_esc(h)}</a> / {_esc(m["title"])}</nav>')
     head = _head(f"{m['title']} · @{h}", m["line"] or f"{_plural(count['notes'], 'note')} by @{h}", site, 1,
                  canonical=m["url"], lang=lang)

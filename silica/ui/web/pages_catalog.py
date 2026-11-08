@@ -110,10 +110,10 @@ def render(entries: list[dict], app: str) -> str:
     notes = sum(e["count"]["notes"] for e in entries)
     head = ('<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-            '<title>Pages · Silica</title>\n'
+            '<title>Wikis · Silica</title>\n'
             '<meta name="description" content="Notes people chose to publish from their Silica vaults.">\n'
             '<link rel="stylesheet" href="/_s/pages.css">\n<script src="/_s/pages.js" defer></script>\n'
-            '<meta property="og:title" content="Pages · Silica">\n<meta property="og:site_name" content="Silica">\n'
+            '<meta property="og:title" content="Wikis · Silica">\n<meta property="og:site_name" content="Silica">\n'
             '</head>\n')
     tools = ('<div class="cat-tools" hidden><label class="search"><svg viewBox="0 0 24 24" aria-hidden="true">'
              '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" '
@@ -127,12 +127,12 @@ def render(entries: list[dict], app: str) -> str:
     empty = "" if entries else "Nothing is listed yet."
     return (head + "<body>\n" + site.top("/", app, current="pages")
             + '<main class="sheet"><section class="wrap cat" aria-labelledby="cat-h" data-catalog>'
-            '<div class="cat-head grid"><h1 id="cat-h">Pages</h1><p>Notes people chose to publish from their Silica '
+            '<div class="cat-head grid"><h1 id="cat-h">Wikis</h1><p>Notes people chose to publish from their Silica '
             'vaults. Read one here, or save a copy into your own vault: every note in the copy keeps its author\'s '
             'name.</p></div>' + tools
             + f'<div class="cat-grid">{cards}</div><p class="cat-empty" data-empty{"" if not entries else " hidden"}>'
             f'{empty}</p>'
-            '<div class="cat-join"><span><b>List your own.</b> In Silica, open My Wikis, set a wiki to Public and ask to '
+            '<div class="cat-join"><span><b>List your own.</b> In Silica, open Wikis → My wikis, set a wiki to Public and ask to '
             'list it. It is reviewed first.</span><span>Something here should not be? Open the wiki and press Report.'
             '</span></div>'
             '</section></main>\n'
