@@ -421,13 +421,19 @@ def _key_span(lines: list[str], block: str, key: str) -> tuple[int, int] | None:
     return i, last + 1
 
 
+class ManifestRefused(ValueError):
+    """A write vault_manifest would not make, with a sentence for the person: a ValueError, so every
+    caller that maps one keeps doing so, and its own class, so a route can pass this sentence on and
+    no other exception's text."""
+
+
 def _parsed(text: str, path: Path):
     try:
         return yaml.safe_load(text)
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         where = f" (line {mark.line + 1})" if mark else ""
-        raise ValueError(f"{path.name} cannot be read{where}, so Silica did not change it: "
+        raise ManifestRefused(f"{path.name} cannot be read{where}, so Silica did not change it: "
                          "fix that line and try again") from None
 
 
@@ -448,10 +454,10 @@ def _write_lines(vault: str | Path, mutate, check=None) -> Path:
     if check is not None:
         try:
             ok = check(_parsed(new, path))
-        except ValueError:
+        except ManifestRefused:
             ok = False
         if not ok:
-            raise ValueError(f"Silica could not change {path.name} without breaking its other lines, "
+            raise ManifestRefused(f"Silica could not change {path.name} without breaking its other lines, "
                              "so it left the file as it was")
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_bytes(path, new.encode("utf-8"))
