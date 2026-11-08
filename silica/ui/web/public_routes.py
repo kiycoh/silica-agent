@@ -13,7 +13,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -288,6 +292,117 @@ async def public_publish(payload: dict | None = None):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {**_view(), "result": out}
+
+
+# --- Save as a file (ADR-0157 point 5) ------------------------------------------
+
+def _downloads() -> Path:
+    """Where a computer saves a wiki file: the desktop's Downloads folder, else ~/Downloads."""
+    home = Path.home()
+    if shutil.which("xdg-user-dir"):
+        try:
+            said = subprocess.run(["xdg-user-dir", "DOWNLOAD"], capture_output=True, text=True,
+                                  timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            # a desktop that cannot answer is one with no folder of its own: ~/Downloads is the
+            # folder every other platform uses
+            said = ""
+        # With no Downloads set it answers the home folder itself, and the line under the button
+        # says "in Downloads".
+        if said and Path(said).is_dir() and Path(said).resolve() != home.resolve():
+            return Path(said)
+    d = home / "Downloads"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _into_downloads(path: Path, name: str) -> Path:
+    """The zip copied under a name no file in Downloads has, "x (2).zip" after "x.zip" as a browser
+    names a second download. Created exclusively, so a file of the person's, or a save running
+    beside this one, is never overwritten."""
+    folder, stem, n = _downloads(), name.removesuffix(".zip"), 1
+    while True:
+        dest = folder / (name if n == 1 else f"{stem} ({n}).zip")
+        n += 1
+        try:
+            out = dest.open("xb")
+        except FileExistsError:
+            continue
+        try:
+            with out, path.open("rb") as src:
+                shutil.copyfileobj(src, out)
+        except BaseException:
+            dest.unlink(missing_ok=True)  # half a zip in Downloads would be passed on as if whole
+            raise
+        return dest
+
+
+def _open_folder(folder: Path) -> None:
+    opener = {"darwin": "open", "win32": "explorer"}.get(sys.platform, "xdg-open")
+    # not waited for: a file manager that stays open must not hold the request
+    subprocess.Popen([opener, str(folder)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+@router.get("/public/vault/{slug}/file", dependencies=_SAME_ORIGIN)
+async def public_file(slug: str):
+    """The wiki file as a download, on every install: how the hosted service hands it over."""
+    from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
+
+    from silica.ui.web.public_site import build_file
+
+    try:
+        path, out = await asyncio.to_thread(build_file, slug)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    # Set here and not through `filename=`, which Starlette writes as `filename="..."` for an ASCII
+    # name. The folder goes once the zip is sent; one a dropped download leaves, the next build sweeps.
+    said = f"attachment; filename*=UTF-8''{quote(out['name'], safe='')}"
+    return FileResponse(path, media_type="application/zip", headers={"Content-Disposition": said},
+                        background=BackgroundTask(shutil.rmtree, path.parent, ignore_errors=True))
+
+
+@router.post("/public/vault/{slug}/file", dependencies=_SAME_ORIGIN)
+async def public_file_save(slug: str):
+    """The wiki file written into this computer's Downloads, so the screen can say where it is."""
+    from silica.config import hosted
+    from silica.ui.web.public_site import build_file
+
+    if hosted():
+        # the server's disk is not the person's: there the browser downloads the GET
+        raise HTTPException(404)
+    try:
+        path, out = await asyncio.to_thread(build_file, slug)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    try:
+        dest = await asyncio.to_thread(_into_downloads, path, out["name"])
+    except OSError as exc:
+        raise HTTPException(400, f"Downloads did not take the file ({exc.strerror or exc})")
+    finally:
+        shutil.rmtree(path.parent, ignore_errors=True)
+    return {"path": str(dest), "name": dest.name, "notes": out["notes"], "bytes": out["bytes"]}
+
+
+@router.post("/public/reveal", dependencies=_SAME_ORIGIN)
+def public_reveal(payload: dict):
+    """Show in folder, for a wiki file this computer saved. Only inside Downloads, so whatever
+    reaches this route cannot make it open any other folder."""
+    from silica.config import hosted
+
+    if hosted():
+        raise HTTPException(404)
+    raw = str(payload.get("path") or "")
+    # both sides resolved, so neither `..` nor a link planted in Downloads leads out of it
+    p = Path(raw).resolve() if raw and Path(raw).is_absolute() else None
+    if p is None or _downloads().resolve() not in p.parents:
+        raise HTTPException(400, "only a file in Downloads can be shown in its folder")
+    try:
+        _open_folder(p.parent)
+    except OSError as exc:
+        raise HTTPException(400, f"the folder could not be opened ({exc.strerror or exc})")
+    return {"ok": True}
 
 
 # --- the check before Publish (ADR-0153 points 9, 20 and 26) --------------------

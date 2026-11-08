@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 from urllib.parse import quote
@@ -572,6 +573,14 @@ def build_file(slug: str, vault: Path | None = None) -> tuple[Path, dict]:
     from silica.kernel.recall.paths import silica_tmp_dir
 
     conf = publish.find(slug, vault)
+    # A build killed by a signal never reaches its cleanup, and nothing else empties ~/.silica/tmp
+    # of these. An hour is far past any build or download of 100 MB, so no live one is taken.
+    for old in silica_tmp_dir().glob("wiki-file-*"):
+        try:
+            if old.stat().st_mtime < time.time() - 3600:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass  # gone between the glob and the stat: a parallel build swept it first
     # On disk under ~/.silica and not in the system's temp, which is RAM where /tmp is tmpfs (the
     # owner's machine) and shared by every tenant on the hosted service.
     tmp = Path(tempfile.mkdtemp(prefix="wiki-file-", dir=silica_tmp_dir()))

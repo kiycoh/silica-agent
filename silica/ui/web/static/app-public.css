@@ -168,6 +168,9 @@
   min-width: 14rem;
 }
 
+/* the file's name is what the person looks for in Downloads */
+.pp-saved b { color: var(--frost); font-weight: 500; }
+
 /* the globe on a row: the pin's size, shown as the pin is (hover, focus, on) */
 .tree-pub {
   flex: none;

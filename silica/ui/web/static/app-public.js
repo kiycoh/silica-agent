@@ -12,6 +12,7 @@ let pubCur = "";      // the slug of the vault the view has open
 let pubInvites = [];  // GET /vault/invitations
 let pubAdding = false;
 let pubResult = null; // the last Publish, for the line under the button
+let pubFile = null;   // the last Save as a file on this computer, for the line that says where
 
 const pubName = (path) => path.split("/").pop().replace(/\.md$/, "");
 const pubLive = () => !!(pubState && pubState.available);
@@ -726,7 +727,11 @@ function renderPublic(fresh) {
   go.type = "button";
   go.disabled = !v.out;
   go.addEventListener("click", () => startPublish(v, go));
-  row.append(go, mkEl("span", "pp-dim", inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
+  const file = mkEl("button", "st-btn", "Save as a file");
+  file.type = "button";
+  file.disabled = !v.out;
+  file.addEventListener("click", () => saveWikiFile(v, file));
+  row.append(go, file, mkEl("span", "pp-dim", inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
     ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
     : "Readers see the wiki as it is when you publish; a note written later in its folder goes out the next time."));
   if (v.visibility === "off") {
@@ -736,7 +741,8 @@ function renderPublic(fresh) {
     rm.addEventListener("click", async () => { const r = await pubPost(`/public/vault/${encodeURIComponent(v.slug)}/remove`); if (r) { pubCur = ""; renderPublic(true); } });
     row.append(rm);
   }
-  frag.append(row);
+  frag.append(row, mkEl("p", "pp-dim", FILE_LINE));
+  if (pubFile && pubFile.vault === v.slug) frag.append(fileSavedLine(pubFile));
   if (pubResult && pubResult.vault === v.slug) {
     const r = pubResult;
     frag.append(mkEl("p", "pp-dim", `Last publish: ${pubCount(r.notes)}, ${r.links} ${r.links === 1 ? "link" : "links"}, ${r.images} ${r.images === 1 ? "image" : "images"}.`));
@@ -748,6 +754,53 @@ function renderPublic(fresh) {
   }
   if (fresh || pubCoverOf !== v.slug || (pubCover && pubCover.n.length + (pubCover.unlinked || 0) !== v.out)) loadPubCover(v.slug, !!fresh);
   else drawPubCover();
+}
+
+// --- Save as a file (ADR-0157 point 5) ---------------------------------------------
+// Any wiki in any state. On a computer the server writes it into Downloads and the line says
+// where; on the hosted service the server's disk is not the person's, so the browser downloads it.
+const FILE_LINE = "Anyone you give the file to reads it in a browser, offline, or keeps it in their Silica. A file cannot be taken back.";
+const fileMB = (b) => (b < 1e5 ? "less than 0.1 MB" : `${(b / 1e6).toLocaleString("en-GB", { maximumFractionDigits: 1 })} MB`);
+
+async function saveWikiFile(v, b) {
+  b.disabled = true;
+  b.textContent = "saving…";
+  if (pubState.hosted) await downloadWikiFile(v);
+  else {
+    const r = await pubPost(`/public/vault/${encodeURIComponent(v.slug)}/file`);
+    if (r) pubFile = { vault: v.slug, ...r };
+  }
+  renderPublic();
+}
+
+// A fetch and not a link, so a refusal (past 100 MB) is said on the screen instead of landing in
+// Downloads as the file; a wiki file is capped, so holding it in memory is affordable.
+async function downloadWikiFile(v) {
+  let r, blob;
+  try {
+    r = await fetch(`/public/vault/${encodeURIComponent(v.slug)}/file`);
+    if (r.ok) blob = await r.blob();
+  } catch {
+    notify("My Wikis could not be reached");
+    return;
+  }
+  if (!r.ok) {
+    notify((await r.json().catch(() => ({}))).detail || "The file could not be made");
+    return;
+  }
+  const m = /filename\*=UTF-8''([^;]+)/.exec(r.headers.get("Content-Disposition") || "");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = m ? decodeURIComponent(m[1]) : `${v.slug}.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+
+function fileSavedLine(f) {
+  const p = mkEl("p", "pp-dim pp-saved");
+  p.append("Saved ", mkEl("b", "", f.name), `, ${pubCount(f.notes)}, ${fileMB(f.bytes)}, in Downloads. `,
+    preLink("Show in folder", "reveal", () => pubPost("/public/reveal", { path: f.path })));
+  return p;
 }
 
 // --- the listing (ADR-0153 points 7, 8 and 13) -------------------------------------
