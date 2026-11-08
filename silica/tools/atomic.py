@@ -322,6 +322,11 @@ def _engine():
 
     core.INDEX = "retrieval"
     core_config.CONFIG.vault_path = CONFIG.vault_path
+    # The engine reads SILICA_EMBEDDING_DOC_PREFIX and this tree
+    # SILICA_EMBEDDING_DOCUMENT_PREFIX: unmirrored, a page would be embedded
+    # bare while every query carried "Query: " (found 2026-11-08 on jina v5).
+    core_config.CONFIG.embedding_doc_prefix = CONFIG.embedding_document_prefix
+    core_config.CONFIG.embedding_query_prefix = CONFIG.embedding_query_prefix
     # A silica-core that renamed either name would go back to opening PDFs in
     # this process without a word, so the engine refuses to run instead. The
     # server installs the lock (0.10.1), but a wheel install resolves

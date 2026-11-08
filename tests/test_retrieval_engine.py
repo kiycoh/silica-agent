@@ -102,3 +102,21 @@ def test_the_seam_mirrors_the_vault_into_the_engine(vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", str(vault / "elsewhere"))
     assert _engine().INDEX == "retrieval"
     assert CORE_CONFIG.vault_path == str(vault / "elsewhere")
+
+
+def test_the_engine_embeds_a_page_with_the_prefix_this_tree_resolved(monkeypatch):
+    """The engine names it SILICA_EMBEDDING_DOC_PREFIX, this tree
+    SILICA_EMBEDDING_DOCUMENT_PREFIX: a page embedded bare under a query
+    carrying "Query: " is the asymmetry jina v5 is not trained for."""
+    from silica.config import CONFIG
+    from silica.tools.atomic import _engine
+    from silica_core.config import CONFIG as CORE
+
+    monkeypatch.setattr(CONFIG, "embedding_document_prefix", "Document: ")
+    monkeypatch.setattr(CONFIG, "embedding_query_prefix", "Query: ")
+    monkeypatch.setattr(CORE, "embedding_doc_prefix", "")
+    monkeypatch.setattr(CORE, "embedding_query_prefix", "")
+
+    _engine()
+
+    assert (CORE.embedding_doc_prefix, CORE.embedding_query_prefix) == ("Document: ", "Query: ")
