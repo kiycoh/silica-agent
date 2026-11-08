@@ -51,6 +51,13 @@
     }
     return "";
   }
+  // A wiki file's data, from wiki-data.js by the name of the file it stands for, since a page opened
+  // from disk may not fetch the files beside it (ADR-0157 point 6). Own keys only: a name such as
+  // "constructor" is not a file the script carries.
+  const fromData = (D, url) => {
+    const name = String(url).split("/").pop();
+    return D && Object.hasOwn(D, name) ? D[name] : undefined;
+  };
   // pages-pure:end
 
   // ---- paper or graphite: the reader's system decides until they choose -------------------
@@ -88,7 +95,11 @@
 
   const graphs = new Map();
   const load = (url) => {
-    if (!graphs.has(url)) graphs.set(url, fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+    if (graphs.has(url)) return graphs.get(url);
+    // A wiki file carries all it has, so what it lacks (the ../vaults.json its pages name) is null and
+    // not fetched: from disk the fetch is refused and logged as an error a reader cannot act on.
+    const D = window.SILICA_WIKI;
+    graphs.set(url, D ? Promise.resolve(fromData(D, url) ?? null) : fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null));
     return graphs.get(url);
   };
   const drawers = [];
@@ -473,6 +484,8 @@
     async function openNote(slug, push = true, page = null) {
       const n = by.get(slug);
       if (!n) return;
+      // from disk a note's page can only be read by loading it, which then opens it from its own document
+      if (!page && location.protocol === "file:") { location.href = noteUrl(slug); return; }
       const mine = ++asked;
       opener = document.activeElement?.dataset?.k || opener;
       S.note = n.i; S.review = false; S.link = null; ltag.hidden = true;
@@ -486,6 +499,8 @@
       if (!page) drawer.focus({ preventScroll: true });
     }
     function closeNote(push = true) {
+      // from disk Chrome refuses pushState to another file, so the wiki's page is loaded instead
+      if (push && location.protocol === "file:") { location.href = vaultUrl; return; }
       asked++;
       S.note = null; S.review = false; drawer.hidden = true; view.classList.remove("has-note");
       if (camBack) { glide(camBack); camBack = null; }
