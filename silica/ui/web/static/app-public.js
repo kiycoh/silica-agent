@@ -1,7 +1,8 @@
-// My Wikis (ADR-0143, ADR-0151): the view that holds the account's vaults, each a
-// folder of its vault, Off, Public or Private; the globes on the tree and on the note; the strip
-// over a saved note; the invitations to Private vaults; and the confirm a page's "Save to Silica"
-// lands on, for one note or for the areas of a whole vault.
+// Wikis (ADR-0157 point 1): the view of two tabs, the catalog of Public wikis the host lists and
+// My wikis (ADR-0143, ADR-0151), the account's vaults, each a folder of its vault, Off, Public or
+// Private; the globes on the tree and on the note; the strip over a saved note; the invitations to
+// Private vaults; and the confirm a page's "Save to Silica" lands on, for one note or for the areas
+// of a whole vault.
 
 const PUB_PATHS = '<circle cx="12" cy="12" r="9"></circle><ellipse cx="12" cy="12" rx="4" ry="9"></ellipse><line x1="3" y1="12" x2="21" y2="12"></line>';
 const LOCK_PATHS = '<rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>';
@@ -101,7 +102,7 @@ function syncTreePublic() {
         b.hidden = false;
         b.classList.add("vault", v.visibility === "public" ? "on" : v.visibility === "private" ? "priv" : "paused");
         b.innerHTML = pubSvg(11, false, v.visibility === "private");
-        b.title = `the wiki ${v.title} in My Wikis, ${v.visibility === "off" ? "Off" : v.visibility === "public" ? "Public" : "Private"}: open it`;
+        b.title = `the wiki ${v.title} in My wikis, ${v.visibility === "off" ? "Off" : v.visibility === "public" ? "Public" : "Private"}: open it`;
         b.setAttribute("aria-pressed", String(v.visibility !== "off"));
         continue;
       }
@@ -111,7 +112,7 @@ function syncTreePublic() {
       if (b.hidden) continue;
       b.innerHTML = pubSvg(11, false, false);
       b.setAttribute("aria-pressed", "false");
-      b.title = `make the folder ${folder} a wiki in My Wikis`;
+      b.title = `make the folder ${folder} a wiki in My wikis`;
       continue;
     }
     const v = pubVaultOfNote(b.dataset.pub);
@@ -128,12 +129,12 @@ async function pubPost(url, body) {
   try {
     r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   } catch {
-    notify("My Wikis could not be reached");
+    notify("My wikis could not be reached");
     return null;
   }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
-    notify(data.detail || "My Wikis did not change");
+    notify(data.detail || "My wikis did not change");
     return null;
   }
   if (data.vaults) {
@@ -228,9 +229,179 @@ $("#note-pub-pop").addEventListener("click", (e) => {
 // --- the view ----------------------------------------------------------------
 
 async function loadPublicView() {
+  wikisFresh = false;
+  showWikisTab(wikisTab);
   if (!pubState) $("#public-body").replaceChildren(mkEl("p", "pp-dim", "Reading the vault…"));
   await Promise.all([loadPublicState(), loadInvitations()]);
   renderPublic(true);
+}
+
+// --- Wikis, the catalog (ADR-0157 points 1 to 3) -------------------------------------------
+// The view's first tab: the Public wikis the host lists after review. The app's server reads them
+// (/wikis/catalog), never the browser, so no page can make the app fetch an address of its
+// choosing. Every field of an entry is an account's words: it is set as text, never as markup.
+// My wikis keeps rendering while the catalog shows; the view's data-wtab hides the tab not shown.
+const WIKIS_TAB = "silica-wikis-tab";
+let wikisTab = localStorage.getItem(WIKIS_TAB) === "mine" ? "mine" : "wikis";
+let wikisCat = null;     // the last /wikis/catalog answer, null when it could not be read
+let wikisFresh = false;  // read since the view opened: the server keeps it ten minutes, so once per opening
+let wikisSeen = null;    // the grid's IntersectionObserver, which asks for a cover once it is near
+const wikisDrawn = new WeakMap();  // a cover's box -> the graph it draws, for a resize or a theme
+const wikisSized = new ResizeObserver((rows) => { for (const r of rows) wikiDraw(r.target); });
+const wikiAddr = (w) => `https://${wikisCat.host}${w.url}`;
+const wikisCount = (n) => `${n.toLocaleString("en-GB")} ${n === 1 ? "wiki" : "wikis"}`;
+
+function paintWikisTab() {
+  $("#view-public").dataset.wtab = wikisTab;
+  for (const b of document.querySelectorAll("#wikis-tabs .stab")) setActive(b, b.dataset.wtab === wikisTab);
+}
+
+function showWikisTab(t) {
+  wikisTab = t;
+  localStorage.setItem(WIKIS_TAB, t);
+  paintWikisTab();
+  if (t === "wikis" && !wikisFresh) loadWikis();
+}
+
+$("#wikis-tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-wtab]");
+  if (b) showWikisTab(b.dataset.wtab);
+});
+glide($("#wikis-tabs"));
+paintWikisTab();
+
+async function loadWikis() {
+  wikisFresh = true;
+  if (!wikisCat) $("#wikis-body").replaceChildren(mkEl("p", "pp-dim", "Reading Wikis…"));
+  let d = null;
+  try {
+    const r = await fetch("/wikis/catalog");
+    d = r.ok ? await r.json() : null;
+  } catch {
+    // No answer reads as a catalog that could not be read: the tab says so, and My wikis, which
+    // reads none of this, keeps working (ADR-0157 point 2).
+    d = null;
+  }
+  wikisCat = d && Array.isArray(d.wikis) ? d : null;
+  renderWikis();
+}
+
+function wikisAgo(iso) {
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  return m >= 1 ? `${m.toLocaleString("en-GB")} min ago` : "just now";
+}
+
+function renderWikis() {
+  const body = $("#wikis-body"), from = $("#wikis-from"), cat = wikisCat;
+  wikisSeen?.disconnect();
+  wikisSized.disconnect();
+  if (!cat) {
+    from.replaceChildren();
+    body.replaceChildren(mkEl("p", "pp-status", "Wikis could not be read."));
+    return;
+  }
+  from.replaceChildren("from ", mkEl("b", "", cat.host), `, read ${wikisAgo(cat.read_at)}`);
+  if (!cat.wikis.length) {
+    body.replaceChildren(mkEl("p", "pp-status", "No wiki is in Wikis yet."));
+    return;
+  }
+  const search = Object.assign(document.createElement("input"), { type: "search", className: "pg-sel", placeholder: "Search Wikis" });
+  search.setAttribute("aria-label", "Search Wikis");
+  const count = mkEl("span", "pp-dim");
+  count.setAttribute("role", "status");
+  const top = mkEl("div", "wk-top");
+  top.append(search, count);
+  const cards = cat.wikis.map((w) => [wikiCard(w), [w.title, w.line, "@" + w.handle, ...w.areas.map((a) => a[0])].join("\n").toLowerCase()]);
+  const grid = mkEl("div", "wk-grid");
+  grid.append(...cards.map(([card]) => card));
+  const filter = () => {
+    const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    for (const [card, text] of cards) {
+      card.hidden = !words.every((x) => text.includes(x));
+      if (!card.hidden) shown++;
+    }
+    count.textContent = !words.length ? `${wikisCount(cards.length)}, newest first`
+      : shown ? `${shown.toLocaleString("en-GB")} of ${wikisCount(cards.length)}` : "No wiki matches.";
+  };
+  search.addEventListener("input", filter);
+  filter();
+  body.replaceChildren(top, grid, mkEl("p", "pp-dim", "A wiki enters Wikis once it has been reviewed. Save copies the areas you choose into Saved/@handle/ in your vault."));
+  // A card asks for its cover once, when it first comes near: a catalog of 500 wikis opened at
+  // the top reads the few in sight, and a card the search hides is never near.
+  wikisSeen = new IntersectionObserver((rows, io) => {
+    for (const r of rows) if (r.isIntersecting) { io.unobserve(r.target); wikiCover(r.target); }
+  }, { root: body, rootMargin: "200px 0px" });
+  for (const [card] of cards) wikisSeen.observe(card.querySelector(".wk-cover"));
+}
+
+function wikiCard(w) {
+  const card = mkEl("article", "wk-card");
+  const cover = mkEl("div", "pp-cover-box wk-cover");
+  cover.dataset.handle = w.handle;
+  cover.dataset.slug = w.slug;
+  const cv = document.createElement("canvas");
+  cv.setAttribute("role", "img");
+  cv.setAttribute("aria-label", `${w.title} as a graph of its notes`);
+  cover.append(cv);
+  card.append(cover, mkEl("h3", "wk-t", w.title), mkEl("p", "wk-by", "by @" + w.handle));
+  if (w.line) card.append(mkEl("p", "wk-line", w.line));
+  const meta = [pubCount(w.count.notes), `${w.count.areas.toLocaleString("en-GB")} ${w.count.areas === 1 ? "area" : "areas"}`];
+  if (w.license) meta.push(w.license);
+  card.append(mkEl("p", "pp-dim", meta.join(" · ")));
+  const named = w.areas.filter((a) => a[0]).slice(0, 3);
+  if (named.length) {
+    const chips = mkEl("ul", "pg-chips");
+    for (const [name] of named) chips.append(mkEl("li", "", name));
+    card.append(chips);
+  }
+  const open = Object.assign(document.createElement("a"), { className: "st-btn", href: wikiAddr(w), target: "_blank", rel: "noopener", textContent: "Open ↗" });
+  // the save sheet a wiki's own page hands the app through ?save=, here for the same address
+  const save = mkEl("button", "st-btn primary", "Save to Silica");
+  save.type = "button";
+  save.addEventListener("click", () => openSaveSheet({ url: wikiAddr(w), areas: null }));
+  const acts = mkEl("div", "wk-acts");
+  acts.append(open, save);
+  card.append(acts);
+  return card;
+}
+
+async function wikiCover(box) {
+  let g = null;
+  try {
+    const r = await fetch(`/wikis/graph?handle=${encodeURIComponent(box.dataset.handle)}&slug=${encodeURIComponent(box.dataset.slug)}`);
+    g = r.ok ? await r.json() : null;
+  } catch {
+    // A card without its picture still says what the wiki holds: its well stays plain, and the
+    // next opening of the view asks again.
+    g = null;
+  }
+  if (!g || !Array.isArray(g.n) || !g.n.length) return;
+  wikisDrawn.set(box, g);
+  wikisSized.observe(box); // draws it now, and again whenever the grid gives the card another width
+}
+
+// A card's cover in the print of My wikis' own (drawPubCover): every note a mark, every link a line,
+// two inks on the well. Drawn whole, with no build and no pointing: a card is read at a glance.
+function wikiDraw(box) {
+  const g = wikisDrawn.get(box), w = box.clientWidth, h = box.clientHeight;
+  if (!g || w < 40 || h < 40) return;
+  const cv = box.querySelector("canvas");
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const N = g.n, pad = 12;
+  const X = (i) => Math.round(pad + N[i][0] * (w - 2 * pad)), Y = (i) => Math.round(pad + N[i][1] * (h - 2 * pad));
+  const ctx = cv.getContext("2d"), img = ctx.createImageData(w, h), px = new Uint32Array(img.data.buffer);
+  const ground = pubU32(pubRgb(pubCss("--void"))), ink = pubU32(pubRgb(pubCss("--frost")));
+  px.fill(ground);
+  const put = (a, b, c) => { if (a >= 0 && b >= 0 && a < w && b < h) px[b * w + a] = c; };
+  const disc = (cx, cy, r, c) => { for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) if (a * a + b * b <= r * r + r) put(cx + a, cy + b, c); };
+  for (const [a, b] of g.e) {
+    const x0 = X(a), y0 = Y(a), x1 = X(b), y1 = Y(b), n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+    for (let k = 0; k <= n; k++) put(Math.round(x0 + (x1 - x0) * k / n), Math.round(y0 + (y1 - y0) * k / n), ink);
+  }
+  // a clear ring of the well first, so a note reads as a mark and not as a crossing
+  N.forEach((nd, i) => { const r = nd[2] >= 12 ? 2 : 1; disc(X(i), Y(i), r + 1, ground); disc(X(i), Y(i), r, ink); });
+  ctx.putImageData(img, 0, 0);
 }
 
 // --- the cover (ADR-0146 point 4) ----------------------------------------------
@@ -367,7 +538,10 @@ function pubCoverPoint(ev) {
   tip.classList.toggle("left", tx > w * 0.62);
 }
 
-new MutationObserver(() => drawPubCover()).observe(document.documentElement, { attributeFilter: ["data-theme"] });
+new MutationObserver(() => {
+  drawPubCover();
+  for (const box of document.querySelectorAll("#wikis-body .wk-cover")) wikiDraw(box);
+}).observe(document.documentElement, { attributeFilter: ["data-theme"] });
 
 function ppBox(title, count, { wide = false } = {}) {
   const box = mkEl("section", "pp-box" + (wide ? " wide" : ""));
@@ -436,8 +610,10 @@ function upsellText(why) {
 }
 
 // --- the handle, asked on the first visit (ADR-0143 point 7, amended 2026-11-02) ---------
-// An overlay on this view alone: the drawer stays live, so the person can leave and come back,
-// and the view behind it is inert. The format and the reserved names are checked as typed with
+// An overlay on My wikis alone: the drawer stays live, so the person can leave and come back, and
+// the wikis behind it are inert. The bar stays live, since the catalog needs no handle, and so does
+// Shared with you, drawn under the question: a wiki someone sent opens with no handle chosen, and
+// behind the overlay its Open a file… could not be reached (ADR-0157 point 7). The format and the reserved names are checked as typed with
 // the server's own list; whether a name is taken only the host knows, within a minute.
 const PUB_HANDLE = /^[a-z0-9]([a-z0-9-]{0,28}[a-z0-9])?$/;
 // How long a claim may wait before the field opens again: the host's pass runs every minute.
@@ -455,7 +631,7 @@ function pubAsk(st) {
   const view = $("#view-public");
   let over = $("#pg-ask");
   const ask = st && st.ask_handle && st.ask_handle.ask ? st.ask_handle : null;
-  for (const el of [$("#public-bar"), $("#public-body")]) el.inert = !!ask;
+  $("#public-body").inert = !!ask;
   if (!ask) {
     if (over) over.remove();
     clearTimeout(pubAskTimer);
@@ -504,6 +680,8 @@ function pubAsk(st) {
     if (!ask.pending) setTimeout(() => input.focus(), 0);
   }
   pubAskPaint(st);
+  over.querySelector(":scope > .pp-box")?.remove();
+  over.append(invitesBox());
 }
 
 function pubAskPaint(st) {
@@ -522,7 +700,7 @@ function pubAskPaint(st) {
   let ok = false;
   if (pending && !stale) {
     msg.className += " ok";
-    msg.textContent = `Taking @${pending}. My Wikis opens in about a minute.`;
+    msg.textContent = `Taking @${pending}. My wikis opens in about a minute.`;
   } else if (stale) {
     msg.textContent = "The server has not answered yet. You can try again.";
     ok = !pubHandleWhy(v, ask.reserved || []) && !!v;
@@ -565,9 +743,10 @@ function renderPublic(fresh) {
   if (!st || !st.available) {
     link.hidden = true;
     count.textContent = "";
+    // the invitations are read on their own route, so a view that cannot publish still receives
     body.replaceChildren(mkEl("p", "pp-dim", !st
-      ? "My Wikis could not be read."
-      : "This account has no public address yet: the person who runs Silica gives each account its own handle."));
+      ? "My wikis could not be read."
+      : "This account has no public address yet: the person who runs Silica gives each account its own handle."), invitesBox());
     return;
   }
   link.hidden = !st.url;
@@ -578,6 +757,8 @@ function renderPublic(fresh) {
   count.textContent = `${st.vaults.length} of ${st.max} wikis`;
   const v = pubCurVault();
   if (v) pubCur = v.slug;
+  // while the handle is asked, Shared with you is drawn over the question and not twice
+  const asked = !!(st.ask_handle && st.ask_handle.ask);
   if (pubCheck && (!v || pubCheck.slug !== v.slug)) pubCheck = null;
   if (pubCheck) {
     paintCheck();
@@ -639,8 +820,8 @@ function renderPublic(fresh) {
     frag.append(panel);
   }
   if (!v) {
-    frag.append(mkEl("p", "pp-status", `You can publish up to ${st.max} wikis, each a folder of your vault. Readers find them at your address, and in Pages if you list them.`));
-    frag.append(invitesBox());
+    frag.append(mkEl("p", "pp-status", `You can publish up to ${st.max} wikis, each a folder of your vault. Readers find them at your address, and in Wikis if you list them.`));
+    if (!asked) frag.append(invitesBox());
     body.replaceChildren(frag);
     return;
   }
@@ -653,7 +834,7 @@ function renderPublic(fresh) {
       ? "Off since this account became Free: a Private wiki goes Off. Its readers keep the copies they saved."
       : st.hosted || st.url
         ? "Off: this wiki's address says there is nothing there, and your public page does not show it. Its notes keep their globes for when you turn it on."
-        : `Off. Publish writes it${st.dir ? ` into ${st.dir}` : ""}, as files any static host can serve; a wiki on this computer is not listed in Pages.`;
+        : `Off. Publish writes it${st.dir ? ` into ${st.dir}` : ""}, as files any static host can serve; a wiki on this computer is not listed in Wikis.`;
   }
 
   // the head of the vault in hand: its title and line, edited in place
@@ -719,7 +900,7 @@ function renderPublic(fresh) {
   grid.append(goes);
   if (v.visibility === "public" && st.url) grid.append(listingBox(v));
   if (v.visibility === "private") grid.append(readersBox(v));
-  grid.append(invitesBox());
+  if (!asked) grid.append(invitesBox());
   frag.append(grid);
 
   const row = mkEl("div", "pp-actions");
@@ -735,7 +916,7 @@ function renderPublic(fresh) {
     ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
     : "Readers see the wiki as it is when you publish; a note written later in its folder goes out the next time."));
   if (v.visibility === "off") {
-    const rm = mkEl("button", "st-btn", "Remove from My Wikis");
+    const rm = mkEl("button", "st-btn", "Remove from My wikis");
     rm.type = "button";
     rm.title = "the folder and its notes stay as they are";
     rm.addEventListener("click", async () => { const r = await pubPost(`/public/vault/${encodeURIComponent(v.slug)}/remove`); if (r) { pubCur = ""; renderPublic(true); } });
@@ -785,7 +966,7 @@ async function downloadWikiFile(v) {
     r = await fetch(`/public/vault/${encodeURIComponent(v.slug)}/file`);
     if (r.ok) blob = await r.blob();
   } catch {
-    notify("My Wikis could not be reached");
+    notify("My wikis could not be reached");
     return false;
   }
   if (!r.ok) {
@@ -875,7 +1056,7 @@ async function startPublish(v, go, file = false) {
     c = await r.json().catch(() => null);
     if (!r.ok) { notify(c?.detail || "The check could not run"); renderPublic(); return; }
   } catch {
-    notify("My Wikis could not be reached");
+    notify("My wikis could not be reached");
     renderPublic();
     return;
   }
@@ -1271,11 +1452,13 @@ async function openWikiFile(file) {
   if (activeTab === "public") renderPublic();
 }
 
-// A zip dropped on My Wikis opens like the button; dropped elsewhere it is the chat's or nothing.
+// A zip dropped on My wikis opens like the button; dropped elsewhere it is the chat's or nothing.
+// On the catalog tab it is nothing: Open a file… lives in My wikis, and a file opened where its row
+// cannot be seen would be a change the person did not watch happen.
 // Prevented here, so the window's own drop handler (app-notes.js) leaves it alone.
 $("#view-public").addEventListener("drop", (e) => {
   const zip = [...(e.dataTransfer?.files || [])].find((f) => /\.zip$/i.test(f.name));
-  if (!zip) return;
+  if (!zip || wikisTab !== "mine") return;
   e.preventDefault();
   openWikiFile(zip);
 });

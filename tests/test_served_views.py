@@ -212,3 +212,63 @@ def test_every_route_tool_command_and_tab_is_a_views_or_named_shared():
     assert not commands - _owned("commands") - SHARED_COMMANDS, sorted(commands - _owned("commands") - SHARED_COMMANDS)
     tabs = set(re.findall(r'data-tab="([a-z]+)"', (STATIC_SRC / "index.html").read_text(encoding="utf-8")))
     assert tabs == set(VIEWS)
+
+
+# --- ADR-0157 point 1: the view is Wikis, with the catalog and My wikis ---------
+
+def _read(name: str) -> str:
+    return (STATIC_SRC / name).read_text(encoding="utf-8")
+
+
+def _words(html: str, js: str) -> str:
+    """What a person can read: the markup and the script, comments out, since a comment may name
+    the view's old names to say why they went."""
+    return re.sub(r"<!--.*?-->", "", html, flags=re.S) + re.sub(r"^\s*//.*$", "", js, flags=re.M)
+
+
+def test_the_view_is_named_wikis_wherever_a_person_reads_it():
+    html = _read("index.html")
+    rail = re.findall(r'<button[^>]*data-tab="public"[^>]*>.*?</button>', html, re.S)
+    assert len(rail) == 2 and all('data-tip="Wikis: ' in b for b in rail)
+    assert 'aria-label="Wikis"' in rail[0] and rail[1].endswith("<span>Wikis</span></button>")
+    assert '<span class="hp-what">Wikis</span>' in html
+    words = _words(html, _read("app-public.js"))
+    # "Pages" was the catalog's name and "My Wikis" the view's (ADR-0157 point 1 amends both)
+    assert not re.search(r"\bPages\b", words)
+    assert "My Wikis" not in words
+
+
+def test_the_bar_holds_two_tabs_in_explores_grammar_and_remembers_the_last():
+    html = _read("index.html")
+    bar = html[html.index('<div id="public-bar">'):html.index('<div id="public-body">')]
+    tabs = bar[bar.index('<nav id="wikis-tabs"'):bar.index("</nav>")]
+    assert re.findall(r'<button type="button" class="stab[^"]*" data-wtab="(\w+)"[^>]*>([^<]+)</button>', tabs) \
+        == [("wikis", "Wikis"), ("mine", "My wikis")]
+    assert "mbar-title" not in bar
+    js = _read("app-public.js")
+    assert '"silica-wikis-tab"' in js and 'glide($("#wikis-tabs"))' in js
+    css = _read("app-public.css")
+    assert '#wikis-tabs.glide > .stab.active' in css
+
+
+def test_the_catalog_tab_reads_through_the_apps_server_and_sets_its_words_as_text():
+    js = _read("app-public.js")
+    cat = js[js.index("// --- Wikis, the catalog"):js.index("// --- the cover (ADR-0146")]
+    assert '"/wikis/catalog"' in cat and "/wikis/graph?handle=" in cat
+    assert '"Wikis could not be read."' in cat and '"No wiki is in Wikis yet."' in cat
+    assert '"Search Wikis"' in cat and '"Open ↗"' in cat and '"Save to Silica"' in cat
+    assert "IntersectionObserver" in cat
+    assert "openSaveSheet({ url: wikiAddr(w)" in cat
+    # every field of a card is an account's words (ADR-0157 point 2): never markup
+    assert "innerHTML" not in cat
+
+
+def test_shared_with_you_needs_no_handle_and_a_zip_opens_only_on_my_wikis():
+    js = _read("app-public.js")
+    ask = js[js.index("function pubAsk("):js.index("function pubAskPaint(")]
+    assert "invitesBox()" in ask
+    render = js[js.index("function renderPublic("):js.index("// --- Save as a file")]
+    gone = render[render.index("if (!st || !st.available)"):render.index("link.hidden = !st.url")]
+    assert "invitesBox()" in gone
+    drop = js[js.index('$("#view-public").addEventListener("drop"'):]
+    assert 'wikisTab !== "mine"' in drop[:drop.index("openWikiFile(zip)")]
