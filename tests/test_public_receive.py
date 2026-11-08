@@ -139,7 +139,7 @@ def test_the_computer_s_own_folder_is_replaced_whole_and_the_journal_takes_it_ba
     assert (vault / "Memoria" / "Spacing effect.md").read_text(encoding="utf-8") == NOTES["Spacing effect.md"]
 
 
-@pytest.mark.parametrize("row", ["none", "unmarked", "another link"])
+@pytest.mark.parametrize("row", ["none", "unmarked"])
 def test_a_folder_of_the_person_s_own_is_never_replaced(host, row):
     from silica.kernel import publish
 
@@ -147,19 +147,27 @@ def test_a_folder_of_the_person_s_own_is_never_replaced(host, row):
     vault = tmp / "vault"
     (vault / "Memoria").mkdir()
     (vault / "Memoria" / "Mine.md").write_text("my own notes\n", encoding="utf-8")
-    if row != "none":
+    if row == "unmarked":
         publish.add_vault("Memoria")
-    if row == "another link":
-        items = publish.vaults()
-        items[0]["from_link"] = "fedcba9876543210"
-        publish._save_vaults(items, vault)
-        assert publish.find("memoria")["from_link"] == "fedcba9876543210"
     before = _tree(vault)  # vault.yaml with it, so its rows are compared too
     r = send(tc, package())
     assert r.status_code == 409
     assert r.json()["detail"] == ("A folder named Memoria already holds notes of yours: "
                                   "rename one of them to publish this wiki.")
     assert _tree(vault) == before and _leftovers(tmp) == []
+
+
+def test_a_folder_another_link_of_this_account_sent_is_replaced_and_marked_by_the_last(host):
+    """A link lasts 90 days: the same computer linked again has a new id, and its folder is still its own."""
+    from silica.kernel import publish
+
+    tc, tmp = host
+    assert send(tc, package(), link="fedcba9876543210").status_code == 200
+    assert publish.find("memoria")["from_link"] == "fedcba9876543210"
+    r = send(tc, package(notes={"New.md": "After the new link.\n"}, answers={}, assets={}))
+    assert r.status_code == 200, r.text
+    assert sorted(_tree(tmp / "vault" / "Memoria")) == ["New.md"]
+    assert publish.find("memoria")["from_link"] == LINK
 
 
 @pytest.mark.parametrize("link", [None, "", "not-a-link", "0123456789ABCDEF"])

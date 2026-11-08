@@ -736,8 +736,8 @@ def _receive_row(folder: str, link: str, meta: dict, vault: Path) -> str:
 def receive(data: bytes, link: str, vault: Path | None = None) -> dict:
     """A wiki a linked computer sent through the gateway (ADR-0157 point 10), a zip of `wiki.json`,
     `notes/<path>.md` and `assets/<image>`: its notes become the folder of this vault it names,
-    replacing that folder whole when its row came by `link`, and its row carries the link, the
-    author's answers (point 11) and the visibility. Returns {"slug", "folder"}; the caller builds.
+    replacing that folder whole when its row came from any linked computer, and its row carries
+    `link` as the last sender, the author's answers (point 11) and the visibility. Returns {"slug", "folder"}; the caller builds.
 
     ValueError with a sentence for a refused package, FolderTaken for a folder of the person's
     own, and then nothing is written; an OSError is the disk's. The folder is written beside the
@@ -805,7 +805,9 @@ def receive(data: bytes, link: str, vault: Path | None = None) -> dict:
         items = vaults(vault)
         row = next((v for v in items if v["folder"] == folder), None)
         dest = vault / folder
-        ours = row is not None and row["from_link"] == link
+        # Any link's mark and not only this one's: a link lasts 90 days and a new one gets a new
+        # id, so the computer's own folder would refuse it. Point 10 refuses a folder with no mark.
+        ours = row is not None and bool(row["from_link"])
         # A link in the vault's place is the person's too: replacing it would write where it leads.
         if (dest.exists() or dest.is_symlink()) and not (ours and dest.is_dir() and not dest.is_symlink()):
             raise FolderTaken(f"A folder named {folder} already holds notes of yours: "
