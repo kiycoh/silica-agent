@@ -1220,7 +1220,11 @@ function invitesBox() {
   // Open a file (ADR-0157 point 7): a wiki someone sent as a zip becomes an invitation here
   const pick = Object.assign(document.createElement("input"), { type: "file", hidden: true });
   pick.accept = ".zip,application/zip";
-  pick.addEventListener("change", () => { if (pick.files[0]) openWikiFile(pick.files[0]); });
+  pick.addEventListener("change", () => {
+    const f = pick.files[0];
+    pick.value = ""; // a refusal repaints nothing, and the same file picked again must fire change
+    if (f) openWikiFile(f);
+  });
   const open = mkEl("button", "st-btn", "Open a file…");
   open.type = "button";
   open.addEventListener("click", () => pick.click());

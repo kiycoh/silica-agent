@@ -496,7 +496,10 @@ def save_invitation(author: str, slug: str, areas=None, vault: Path | None = Non
 def decline_invitation(author: str, slug: str) -> None:
     d = _invitation(author, slug)
     if _from_file(d):
-        shutil.rmtree(d)
+        try:
+            shutil.rmtree(d)
+        except OSError as exc:
+            raise ValueError(f"that file could not be removed ({exc.strerror or exc})") from None
     else:
         _mark_done(author, slug, _stamp(d))
 
