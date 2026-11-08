@@ -691,9 +691,11 @@ def _head(m, notes: set[str]) -> dict:
                "credit": _said(a.get("credit", ""), rights._CREDIT_MAX)}
         if row["license"] and row["license"] not in rights.LICENSES:
             raise ValueError(_BAD_HEAD)
-        # one for a note that was not sent stands for nothing, and the row is read on every request
-        if rel in notes:
-            answers[rel] = {k: v for k, v in row.items() if v}
+        # Keyed as the note's entry under notes/ is: a sender keying them any other way would lose
+        # every credit in silence, and a credit is what a CC BY source asks for.
+        if rel not in notes:
+            raise ValueError(f"that wiki answers for {rel[:120]!r}, a note it did not send")
+        answers[rel] = {k: v for k, v in row.items() if v}
     return {**head, "visibility": m["visibility"], "answers": answers}
 
 

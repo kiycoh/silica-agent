@@ -331,9 +331,11 @@ async def public_receive(request: Request):
     if not publish.LINK_ID.fullmatch(link):
         raise HTTPException(401, "this computer is not linked to this account")
     data = await _wiki_body(request)
-    # the one serialisation of vault writes the server has (see /vault/import)
+    # The one serialisation of vault writes the server has (see /vault/import). 503 and not the
+    # 409 the other writers answer: here 409 is the folder of the person's own, which the
+    # computer offers to rename, and a busy account only asks for the same Publish again.
     if not _begin_turn():
-        raise HTTPException(409, "this account is busy with a turn: publish again when it ends")
+        raise HTTPException(503, "this account is busy with a turn: publish again when it ends")
     try:
         folder, out = await asyncio.to_thread(_receive, data, link)
     except publish.FolderTaken as exc:

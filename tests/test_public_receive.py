@@ -243,6 +243,7 @@ def _symlink_package() -> bytes:
     (package(folder=7), "wiki.json"),
     (package(answers=["a"]), "wiki.json"),
     (package(answers={"Spacing effect.md": {"answer": "stolen"}}), "wiki.json"),
+    (package(answers={"notes/Spacing effect.md": ANSWERS["Spacing effect.md"]}), "a note it did not send"),
     (package(visibility="off"), "wiki.json"),
     (package(title=None), "wiki.json"),
     (package(license="mine"), "license"),
@@ -253,7 +254,7 @@ def _symlink_package() -> bytes:
     (package(folder=""), "cannot be"),
     (b"not a zip", "zip"),
 ], ids=["slip", "absolute", "backslash", "symlink", "html note", "html page", "script", "svg",
-        "dot folder", "folder type", "answers type", "answer word", "visibility", "title type", "license",
+        "dot folder", "folder type", "answers type", "answer word", "answer key", "visibility", "title type", "license",
         "folder slip", "folder path", "dot folder name", "silica folder", "no folder", "not a zip"])
 def test_a_hostile_package_is_refused_with_a_sentence_and_nothing_written(host, data, said):
     tc, tmp = host
@@ -272,6 +273,16 @@ def test_a_package_without_wiki_json_or_with_a_note_that_is_not_text_is_refused(
         z.writestr("notes/A.md", "a")
     r = send(tc, out.getvalue())
     assert r.status_code == 400 and "wiki.json" in r.json()["detail"]
-    r = send(tc, package(notes={"A.md": b"\x00\xff binary"}))
+    r = send(tc, package(notes={"A.md": b"\x00\xff binary"}, answers={}))
     assert r.status_code == 400 and "not text" in r.json()["detail"]
     assert not (tmp / "vault" / "Memoria").exists() and _leftovers(tmp) == []
+
+
+def test_a_busy_account_asks_for_the_publish_again_and_never_reads_as_a_taken_folder(host, monkeypatch):
+    from silica.ui.web import server
+
+    tc, tmp = host
+    monkeypatch.setattr(server, "_busy", True)
+    r = send(tc, package())
+    assert r.status_code == 503 and "publish again" in r.json()["detail"]
+    assert not (tmp / "vault" / "Memoria").exists()
