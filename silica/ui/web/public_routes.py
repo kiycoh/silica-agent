@@ -381,6 +381,7 @@ async def public_file_save(slug: str):
     except OSError as exc:
         raise HTTPException(400, f"Downloads did not take the file ({exc.strerror or exc})")
     finally:
+        # a folder that will not go is swept by the next build, past its hour
         shutil.rmtree(path.parent, ignore_errors=True)
     return {"path": str(dest), "name": dest.name, "notes": out["notes"], "bytes": out["bytes"]}
 

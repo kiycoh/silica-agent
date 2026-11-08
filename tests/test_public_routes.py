@@ -695,6 +695,7 @@ def test_on_a_computer_the_file_lands_in_downloads(client, monkeypatch):
     monkeypatch.setenv("SILICA_VIEWS", "all")
     assert tc.post("/public/vault/memory/file").status_code == 404
     assert tc.post("/public/reveal", json={"path": first["path"]}).status_code == 404
+    assert tc.get("/public/vault/memory/file").headers["content-type"] == "application/zip"
     assert sorted(p.name for p in dl.iterdir()) == ["Memoria by marta (2).zip", "Memoria by marta.zip"]
 
 
