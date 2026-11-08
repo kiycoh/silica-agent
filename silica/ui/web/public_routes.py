@@ -98,7 +98,9 @@ def _view() -> dict:
     h = publish.handle(vault)
     sel = publish.selection(vault)
     notes, fms, of = sel["notes"], sel["frontmatter"], sel["vault_of"]
-    last = (last_published(h) if h else {}).get("vaults", {})
+    # A computer's own state.json is from a Publish before ADR-0157, when it built its pages: what
+    # its account published is the account's to say, in My wikis there (point 10).
+    last = (last_published(h) if h and hosted() else {}).get("vaults", {})
     page_url = publish.page_url(vault)
     out_paths = {p for p, s in notes.items() if s == "on"}
     deg = _degrees(out_paths)
@@ -124,6 +126,9 @@ def _view() -> dict:
             # "kept by your computer": the link id itself is the gateway's business, not the page's
             "computer": bool(v["from_link"]),
             "sent_listed": v["sent_listed"],
+            # on a computer, whether the linked account holds a copy: `published` may be a local
+            # build's date from before the link, and the account never had that copy
+            "sent": v["sent"],
         })
     return {
         "available": publish.available(vault),
@@ -455,8 +460,8 @@ def _downloads() -> Path:
             # a desktop that cannot answer is one with no folder of its own: ~/Downloads is the
             # folder every other platform uses
             said = ""
-        # With no Downloads set it answers the home folder itself, and the line under the button
-        # says "in Downloads".
+        # With no Downloads set it answers the home folder itself, which is no Downloads folder:
+        # the zip would land at the top of the person's home, among their own files
         if said and Path(said).is_dir() and Path(said).resolve() != home.resolve():
             return Path(said)
     d = home / "Downloads"
@@ -746,7 +751,8 @@ async def _wiki_body(request: Request) -> bytes:
         raise too_big
     # shortcut: held in memory, twice during the join, so 200 MB at the cap beside the 234 MiB a
     # tenant holds on average (2026-11-06); spool it to silica_tmp_dir() and open the zip from
-    # there if a tenant is ever killed during an Open
+    # there at the first tenant the kernel's OOM killer names during an Open or a receive
+    # (journalctl -k on the host), and look again by 2027-02-01 whatever it shows
     chunks, held = [], 0
     async for chunk in request.stream():
         held += len(chunk)

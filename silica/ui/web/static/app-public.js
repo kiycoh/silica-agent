@@ -840,7 +840,7 @@ function renderPublic(fresh) {
         ? "Off. Link an account to publish, or save it as a file."
         : st.hosted || st.url
           ? "Off: this wiki's address says there is nothing there, and your public page does not show it. Its notes keep their globes for when you turn it on."
-          : v.published
+          : v.sent
             ? "Off on this computer. Turn off on your account takes its copy there off its address too."
             : "Off. Publish sends its notes to your account, which publishes them.";
   }
@@ -886,7 +886,8 @@ function renderPublic(fresh) {
   for (const l of st.licenses) ls.append(Object.assign(document.createElement("option"), { value: l, textContent: l, selected: l === v.license }));
   ls.addEventListener("change", () => pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { license: ls.value }));
   lic.append(ls);
-  meta.append(lic, mkEl("span", "", "Published: " + pubDay(v.published)));
+  // on a computer, the account's date alone: `published` may be a build of its own from before the link
+  meta.append(lic, mkEl("span", "", "Published: " + pubDay(st.link && !v.sent ? "" : v.published)));
   head.append(tl, line, meta);
   frag.append(head);
 
@@ -924,7 +925,7 @@ function renderPublic(fresh) {
   if (alone) row.append(file, mkEl("span", "pp-dim", FILE_LINE));
   else {
     // a linked computer's Off wiki that went out before: its copy on the account is what is left to turn off
-    const off = !!st.link && v.visibility === "off" && !!v.published;
+    const off = !!st.link && v.visibility === "off" && !!v.sent;
     const go = mkEl("button", "pp-go", off ? "Turn off on your account"
       : v.visibility === "off" ? `Turn on and publish ${pubCount(v.out)}` : `Publish ${pubCount(v.out)}`);
     go.type = "button";
@@ -1161,6 +1162,9 @@ function listingBox(v) {
   if (pubState.link && v.listed !== v.sent_listed) return v.listed
     ? box("Asked", listingRow("Asked. It reaches your account with your next Publish.", "Withdraw", false, v))
     : box("Withdrawn", listingRow("Withdrawn. It reaches your account with your next Publish.", "Ask to list", true, v));
+  // A computer never hears the review, which is the account's: what became of the request shows there.
+  if (pubState.link && v.listed) return box("Asked", listingRow(
+    `Asked. Your account's review decides; the result shows in Wikis → My wikis on ${linkHost(pubState.link.host)}.`, "Withdraw", false, v));
   // A wiki a computer keeps: its next Publish carries the computer's request and replaces one made here.
   const row = (text, label, listed) => v.computer ? listingRow(`${text} Change it from your computer.`) : listingRow(text, label, listed, v);
   if (!v.listed) return box("Not listed", row("Your wiki is reviewed before it enters Wikis. Until then it is reachable at its address and search engines leave it alone.", "Ask to list", true));
@@ -1495,8 +1499,9 @@ function checkSheet(v) {
   const links = c.count.links ? ` ${prePlural(c.count.links, "image")} ${c.count.links === 1 ? "stays a link" : "stay links"}.` : "";
   line.append(mkEl("span", "q", `Not published: ${prePlural(c.count.stay, "note")}, ${prePlural(c.count.kept, "image")}.${links}`));
   sum.append(line);
+  // a file never enters Wikis or leaves it: the line speaks of a Publish alone
   const wikis = inWikis(v) ? LEAVES_WIKIS : c.wikis;
-  if (wikis) sum.append(mkEl("p", "pp-dim", wikis));
+  if (wikis && !pubCheck.file) sum.append(mkEl("p", "pp-dim", wikis));
   const go = mkEl("button", "pp-go", pubCheck.file ? "Save as a file" : pubCheck.off ? "Turn off on your account"
     : `${v.visibility === "off" ? "Turn on and publish" : "Publish"} ${prePlural(c.count.notes, "note")}`);
   go.type = "button";

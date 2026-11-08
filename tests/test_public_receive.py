@@ -104,7 +104,9 @@ def test_a_new_folder_is_written_marked_and_published_with_the_host_s_renderer(h
     assert "Ebbinghaus 1885" in page and "Image not published" not in page
     m = json.loads((live / "vault.json").read_text(encoding="utf-8"))
     assert m["from"] == "computer"
-    assert {"answer": "open", "license": "CC BY", "credit": "Ebbinghaus 1885", "notes": 1} in m["rights"]["sources"]
+    # the review prints these as the computer's answers, its author's word (ADR-0157 point 11)
+    assert {"answer": "open", "license": "CC BY", "credit": "Ebbinghaus 1885", "notes": 1,
+            "by": "computer"} in m["rights"]["sources"]
     assert not list(live.parent.rglob("*.md.html"))
     assert _leftovers(tmp) == []
     v = tc.get("/public").json()["vaults"][0]

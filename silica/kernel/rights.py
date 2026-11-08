@@ -592,7 +592,8 @@ def statement(wiki: dict, ans: dict, plan: dict, slugs: dict[str, str]) -> dict:
             said[k] = said.get(k, 0) + 1
     for (answer, license, credit), count in sorted(said.items()):
         row = {"answer": answer, "license": license, "credit": credit, "notes": count}
-        sources.append({k: v for k, v in row.items() if v})
+        # tagged, so the review tells the computer's word from an answer this account's ledger backs
+        sources.append({**{k: v for k, v in row.items() if v}, "by": "computer"})
     marked = [slugs[p] for p in sorted(plan["notes"]) if p in slugs and _marked(wiki, ans, p)]
     return {"sources": sources, "rewritten": marked}
 

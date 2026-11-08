@@ -31,6 +31,7 @@ class Gateway:
         self.seen: list[tuple[str, dict, bytes]] = []
         self.confirmed = False
         self.handed = False
+        self.handle = "marta"
         self.start = (200, {"code": CODE, "poll": POLL, "expires_in": 600}, {})
         self.publish = (200, {"slug": "memory", "url": "https://wikis.test/@marta/memory/", "notes": 3,
                               "published_at": "2026-11-08T10:00:00+00:00"}, {})
@@ -44,7 +45,7 @@ class Gateway:
             if not self.confirmed:
                 return 200, {"state": "pending"}, {}
             self.handed = True  # handed out once: the gateway forgets the code with it
-            return 200, {"state": "linked", "token": TOKEN, "handle": "marta"}, {}
+            return 200, {"state": "linked", "token": TOKEN, "handle": self.handle}, {}
         if path == "/link/publish":
             return self.publish
         return 404, {}, {}
@@ -349,7 +350,7 @@ def test_each_answer_of_the_account_is_a_sentence_the_view_shows(memory, gateway
         400: ({"detail": "you can publish 3 wikis at most"}, "Your account refused this wiki: you can publish 3"),
         500: ({"detail": "this account could not write the wiki (No space left on device)"},
               "could not write the wiki \\(No space left on device\\)"),
-        502: ({}, "answered 502"),
+        418: ({}, "answered 418"),
     }
     for status, (body, match) in said.items():
         gateway.publish = (status, body, {})
@@ -573,8 +574,10 @@ def test_a_withdrawal_on_a_computer_also_waits_for_the_next_publish(memory, gate
 def test_a_hosted_wiki_a_computer_keeps_says_where_its_listing_changes():
     box = _listing_box()
     assert 'v.computer ? listingRow(`${text} Change it from your computer.`)' in box
-    # every state with a button goes through that row, so a computer's wiki offers none here
-    assert box.count("listingRow(") == 5 and box.count('row("') + box.count("row(`") == 4
+    # every state with a button goes through that row, so a computer's wiki offers none here; the
+    # three other rows are a computer's own view of its request, behind pubState.link
+    assert box.count("listingRow(") == 6 and box.count('row("') + box.count("row(`") == 4
+    assert box.count("if (pubState.link && v.listed") == 2
 
 
 def test_a_linked_computer_writes_and_sweeps_nothing_of_its_served_page(memory, gateway, client):
@@ -638,6 +641,63 @@ def test_unlink_forgets_what_the_account_was_told(memory, gateway, client, tmp_v
     # linked again, to any account: the request reads as one it has not seen
     link._keep(TOKEN, "marta", gateway.host)
     assert client.get("/public").json()["vaults"][0]["sent_listed"] is False
+
+
+def test_a_link_to_another_account_forgets_what_the_last_one_was_told(memory, gateway, client):
+    """Renewed for the same account, the rows keep what it holds; linked to another, they read as
+    never sent, so an Off wiki offers no "Turn off on your account" for a copy that account never had."""
+    from silica.kernel import account_link as link, publish
+
+    link._keep(TOKEN, "marta", gateway.host)
+    client.post("/public/vault/memory", json={"visibility": "public", "listed": True})
+    assert client.post("/public/publish", json={"vault": "memory"}).status_code == 200
+    sent = publish.find("memory")
+    assert sent["sent"] and sent["sent_listed"] and sent["published"]
+
+    def relink(handle: str) -> dict:
+        gateway.confirmed, gateway.handed, gateway.handle = True, False, handle
+        link.start()
+        assert link.poll(POLL)["state"] == "linked"
+        return publish.find("memory")
+
+    assert relink("marta") == sent
+    v = relink("luca")
+    assert (v["sent"], v["sent_listed"], v["published"], v["listed"]) == (False, False, "", True)
+    assert client.get("/public").json()["vaults"][0]["sent"] is False
+
+
+def test_a_computer_shows_no_publication_of_its_own_from_before_the_link(memory, gateway, client):
+    """A computer's state.json is from a build before ADR-0157: what its account published is the
+    account's to say, so the view reads no date, no count of new notes and no blocked reason from it."""
+    from silica.kernel import account_link as link
+
+    root = memory.parent / "public" / "marta"
+    root.mkdir(parents=True)
+    (root / "state.json").write_text(json.dumps({"vaults": {"memory": {
+        "published_at": "2026-10-01T10:00:00+00:00", "notes": ["Memory/Old.md"], "blocked": ["a reason"]}}}))
+    link._keep(TOKEN, "marta", gateway.host)
+    client.post("/public/vault/memory", json={"visibility": "public"})
+    v = client.get("/public").json()["vaults"][0]
+    assert (v["published_at"], v["new"], v["blocked"], v["review"], v["sent"]) == ("", 0, [], {}, False)
+    # with no review to read, a request the account holds says where its answer is, never "Waiting"
+    box = _listing_box()
+    assert box.index("if (pubState.link && v.listed) return") < box.index('return box("Waiting"')
+    assert "Asked. Your account's review decides; the result shows in Wikis → My wikis on ${linkHost(" in box
+
+
+@pytest.mark.parametrize("status", [502, 504, 524])
+def test_an_edge_that_cuts_the_publish_says_to_check_the_account_first(memory, gateway, client, status):
+    """The edge cut a 53 MB POST at 125 s (2026-11-02): the account may have taken the wiki."""
+    from silica.kernel import account_link as link
+
+    link._keep(TOKEN, "marta", gateway.host)
+    gateway.publish = (status, {}, {})
+    client.post("/public/vault/memory", json={"visibility": "public"})
+    r = client.post("/public/publish", json={"vault": "memory"})
+    h = gateway.host.removeprefix("http://")
+    assert (r.status_code, r.json()["detail"]) == (400, (
+        f"The connection to {h} was cut before your account answered; a large wiki may need a faster "
+        f"connection. Check Wikis → My wikis on {h} before publishing again."))
 
 
 def test_the_account_s_tier_refusal_reaches_the_view_as_its_sentence(memory, gateway, client):

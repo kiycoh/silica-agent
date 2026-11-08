@@ -117,13 +117,17 @@ def state() -> dict:
 
 
 def unlink() -> None:
-    """Forget the link on this computer. The account's Settings remove it on the host's side.
-    What the account was told goes with it: the listing request each row's last Publish carried
-    and a published date only a Publish set, so a link to another account reads as never sent."""
+    """Forget the link on this computer. The account's Settings remove it on the host's side."""
+    _path().unlink(missing_ok=True)
+    _forget_sent()
+
+
+def _forget_sent() -> None:
+    """Forget what an account was told: the listing request each row's last Publish carried and a
+    published date only a Publish set, so a link to another account reads as never sent."""
     from silica.config import CONFIG
     from silica.kernel import publish
 
-    _path().unlink(missing_ok=True)
     if not CONFIG.vault_path:
         return
     vault = Path(CONFIG.vault_path)
@@ -136,9 +140,21 @@ def unlink() -> None:
                 v["sent"] = v["sent_listed"] = False
             publish._save_vaults(items, vault)
     except (OSError, ValueError) as exc:
-        # The token is gone, which is what Unlink is for; only the view's "Asked" and "Published"
-        # lines read one Publish late, until the next one (ValueError: vault.yaml not UTF-8)
-        logger.warning("account link: rows not cleared on unlink (%s)", type(exc).__name__)
+        # The link is gone or new, which is what was asked for; only the view's "Asked" and
+        # "Published" lines read one Publish late, until the next one (ValueError: vault.yaml not
+        # UTF-8, or one that does not parse, which vault_manifest refuses to write over)
+        logger.warning("account link: rows not cleared (%s)", type(exc).__name__)
+
+
+def _linked_to() -> tuple[str, str] | None:
+    """(host, handle) the link file names, past its 90 days too: a link renewed to the same account
+    keeps what that account was told. None with no file, or one that cannot say."""
+    try:
+        raw = json.loads(_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # no file, or one no Publish could use: nothing says which account the rows were sent to
+        return None
+    return (raw.get("host"), raw.get("handle")) if isinstance(raw, dict) else None
 
 
 def _named(at: str) -> str:
@@ -175,6 +191,8 @@ def _body(r, at: str) -> dict:
     try:
         out = r.json()
     except ValueError:
+        # An edge's HTML error page, or an empty body: no field is read from it, and each caller's
+        # check of the status and the fields it needs says what went wrong in a sentence of its own
         return {}
     return out if isinstance(out, dict) else {}
 
@@ -224,7 +242,12 @@ def poll(poll: str) -> dict:
     if not (isinstance(token, str) and _TOKEN.fullmatch(token)):
         raise ValueError(f"{_named(at)} answered with a link this Silica cannot keep. Link again.")
     handle = handle if isinstance(handle, str) and _HANDLE.fullmatch(handle) else ""
+    before = _linked_to()
     _keep(token, handle, at)
+    if before != (at, handle):
+        # another account, or one this computer cannot tell is the same: it holds none of the copies
+        # the rows say were sent, and its "Turn off on your account" would upload them
+        _forget_sent()
     logger.info("account link: this computer is linked to @%s on %s", handle or "?", at)
     if handle:
         _take_handle(handle)
@@ -254,7 +277,9 @@ def _answer(files: list[str], said: dict) -> dict:
     """The author's answer for a note's sources, as the receiver keys it, {} for a note made from
     none. An open answer first, whose license and credit the page must print.
     shortcut: a note made from two files sends one answer, since the receiver keeps one a note
-    (Task 10); a list per note there first, before a second license can travel."""
+    (Task 10), so the second file's license and credit never reach the review. 325 of the 1,052
+    notes made from a file in alex_second_brain came from two or more (2026-11-08); a list per note
+    on the receiver first, then here, by 2027-02-01 or at the first wiki the review finds short."""
     from silica.kernel import rights
 
     rows = [said.get(f) if isinstance(said.get(f), dict) else {} for f in sorted(files)]
@@ -383,6 +408,12 @@ def _hosted_folder(folder: str) -> str:
 def _refusal(status: int, detail: str, at: str) -> str:
     """The sentence the view shows for an answer of the account other than 200 and 401."""
     detail = " ".join(detail.split())[:300].rstrip(".")
+    if status in (502, 504, 524):
+        # The edge between: it cut one 53 MB POST at 125 s on a slow uplink (measured 2026-11-02), so
+        # the account may still have taken the wiki, and a second Publish would send it all again
+        h = _named(at)
+        return (f"The connection to {h} was cut before your account answered; a large wiki may need a "
+                f"faster connection. Check Wikis → My wikis on {h} before publishing again.")
     if status == 409:
         # The account's own words name the folder; a folder of the person's own is never replaced
         # (ADR-0157 point 10), so one of the two is renamed
