@@ -367,12 +367,16 @@ def build(slug: str, vault: Path | None = None) -> dict:
     visibility says: served when Public, beside the served folder for the
     relay when Private (ADR-0151 points 3, 9). Returns what went out, for
     the view's line after Publish."""
+    from silica.config import hosted
+
     vault = vault or publish._vault()
-    if not publish.can_publish():
-        # a computer alone saves files; linked, it sends notes and its account builds (ADR-0157 point 4)
+    if not hosted():
+        # Alone, a computer saves files; linked, it sends notes and its account builds them (ADR-0157
+        # points 4 and 10). Either way it writes nothing under live/, which a person may be serving.
         from silica.kernel.account_link import NOT_LINKED
 
-        raise ValueError(NOT_LINKED)
+        raise ValueError(NOT_LINKED if not publish.can_publish()
+                         else "A linked computer sends its notes to your account, which builds the pages.")
     h = publish.handle(vault)
     if not publish.available(vault):
         raise ValueError("this account has no public address yet")
@@ -731,11 +735,11 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
         + "".join(f'<li><a href="{_esc(site.note(vslug, s, 1))}">{_esc(t)}</a></li>'
                   for t, s in sorted(by_area.get(i, []), key=lambda x: x[0].lower()))
         + "</ul></details>" for i, name, size in rows)
-    # a file has no host to save from, but any Silica opens the zip itself (ADR-0157 point 7)
+    # a file has no host to save from, but any Silica opens the zip itself (ADR-0157 point 7); every
+    # other build is the hosted service's, which has an address
     save = (_save_form(url, f"Save {_plural(count['notes'], 'note')} to Silica") if site.base else
             '<p class="dim">Using Silica? Keep it in your vault from Wikis → My wikis → Open a file, and '
-            'choose the zip this wiki came in.</p>' if site.file else
-            '<p class="dim">Saving needs the wiki on a Silica host.</p>')
+            'choose the zip this wiki came in.</p>')
     crumb = ('<nav class="crumb" aria-label="Breadcrumb">'
              + (f'<a href="{_esc(site.catalog())}">Wikis</a> / ' if site.base else "")
              + f'<a href="{_esc(site.page(1))}">@{_esc(h)}</a> / {_esc(m["title"])}</nav>')
@@ -780,8 +784,8 @@ def write_page(vault: Path | None = None) -> None:
     from their published manifests, and `vaults.json`, which a vault's page
     reads for "Also by". One Public vault is one map to open, so `data-one`
     sends the script there (amendment of 2026-11-06, item 3). With no Public
-    vault the Page goes, so its address answers that there is no page; a
-    laptop's copy of the sheet goes with it."""
+    vault the Page goes, so its address answers that there is no page. The
+    hosted service's alone: a computer has no Page of its own (ADR-0157 point 4)."""
     from silica.config import hosted
 
     vault = vault or publish._vault()
@@ -801,12 +805,11 @@ def write_page(vault: Path | None = None) -> None:
             entries.append(json.loads((live / slug / "vault.json").read_text(encoding="utf-8")))
         except (OSError, ValueError):
             continue
-    rows = {v["slug"] for v in publish.vaults(vault)}
     if live.is_dir():
-        # A wiki Off or Private whose folder stayed, after a crash between two renames. Only a row
-        # that still exists: an unlinked computer removes a Public row and leaves its served folder
-        # where it is, since the person may be serving it (ADR-0157, Consequences).
-        for stale in [p for p in live.iterdir() if p.is_dir() and p.name in rows - public]:
+        # A wiki removed from the account, or Off or Private and its folder still here after a crash
+        # between two renames: its address answers that nothing is there. The host serves this
+        # live/, never a person, so nothing in it is anyone's to keep (ADR-0157, Consequences).
+        for stale in [p for p in live.iterdir() if p.is_dir() and p.name not in public and p.name != "_s"]:
             shutil.rmtree(stale)
     if not entries:
         for name in ("index.html", "vaults.json"):

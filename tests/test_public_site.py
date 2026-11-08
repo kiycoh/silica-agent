@@ -10,12 +10,14 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
 
 @pytest.fixture
-def marta(tmp_vault, tmp_path, monkeypatch, linked):
+def marta(tmp_vault, tmp_path, monkeypatch):
+    """An account on the hosted service with one wiki: only the hosted service builds pages, since a
+    computer sends its notes to its account and writes nothing under live/ (ADR-0157 point 10)."""
     from silica.kernel.vault_manifest import reset_manifest_cache
 
     monkeypatch.setenv("SILICA_PUBLIC_DIR", str(tmp_path / "public"))
     monkeypatch.setenv("SILICA_PUBLIC_HANDLE", "marta")
-    monkeypatch.delenv("SILICA_PUBLIC_BASE", raising=False)
+    _on_host(monkeypatch)
     monkeypatch.delenv("SILICA_PUBLIC_REPORT", raising=False)
     reset_manifest_cache()
     v = tmp_vault
@@ -67,7 +69,6 @@ def _live(marta: Path) -> Path:
 def test_the_vault_carries_its_notes_and_nothing_private(marta, monkeypatch):
     from silica.ui.web.public_site import build
 
-    _on_host(monkeypatch)
     out = build("memory")
     live = _live(marta)
     vault = live / "memory"
@@ -109,14 +110,13 @@ def test_a_link_to_a_private_note_is_its_words_and_a_vault_note_a_link(marta):
 
     build("memory")
     page = (_live(marta) / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
-    assert 'href="forgetting-curve.html">Forgetting curve</a>' in page
+    assert 'href="/@marta/memory/forgetting-curve">Forgetting curve</a>' in page
     assert "see Exam plan June." in page and "exam-plan-june" not in page
     assert "A draft: Working memory." in page
     # the title is the page's heading once, not twice
     assert page.count(">Spacing effect</h1>") == 1
-    assert 'href="../_s/pages.css"' in page and 'src="../_s/pages.js"' in page
     md = (_live(marta) / "memory" / "spacing-effect.md").read_text(encoding="utf-8")
-    assert "[Forgetting curve](forgetting-curve.html)" in md
+    assert "[Forgetting curve](https://pages.test/@marta/memory/forgetting-curve)" in md
     assert "see Exam plan June." in md and "[[" not in md
     assert md.startswith("---\ntitle: Spacing effect\ntags:")
 
@@ -203,7 +203,7 @@ def test_only_images_a_published_note_cites_are_copied(marta):
     assert [a for a in assets if a.endswith(".png")] == ["1-hypnogram.png"]
     assert out["images"] == 1
     page = (_live(marta) / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
-    assert 'src="assets/1-hypnogram.png"' in page
+    assert 'src="/@marta/memory/assets/1-hypnogram.png"' in page
 
 
 def test_a_republished_copy_credits_its_author_and_points_at_the_original(marta, monkeypatch):
@@ -259,19 +259,10 @@ def test_a_vault_and_a_note_name_the_room_and_keep_their_page_for_a_reader_witho
     assert "data-other" not in index + note  # another address is the room's to ask, behind a link
 
 
-def test_a_page_built_without_a_host_tells_the_room_its_files_end_in_html(marta):
-    from silica.ui.web.public_site import build
-
-    build("memory")
-    index = (_live(marta) / "memory" / "index.html").read_text(encoding="utf-8")
-    assert 'data-room="vault.json" data-here="" data-vaults="../vaults.json" data-ext=".html"' in index
-
-
 def test_a_page_of_one_public_vault_sends_the_script_to_that_map(marta, monkeypatch):
     from silica.kernel.publish import add_vault, set_visibility
     from silica.ui.web.public_site import build
 
-    _on_host(monkeypatch)
     build("memory")
     page = (_live(marta) / "index.html").read_text(encoding="utf-8")
     assert 'data-one="/@marta/memory/"' in page and "vcard" in page  # the card stays for no script
@@ -281,23 +272,38 @@ def test_a_page_of_one_public_vault_sends_the_script_to_that_map(marta, monkeypa
     assert "data-one" not in (_live(marta) / "index.html").read_text(encoding="utf-8")
 
 
-def test_without_an_address_there_is_no_save_and_a_computer_writes_no_page(marta):
-    """A computer no longer serves its own Page (ADR-0157 point 4): its wiki goes out as a file,
-    whose own `_s/` and index test_wiki_file covers, or through its account."""
+@pytest.mark.parametrize("is_linked", [False, True], ids=["alone", "linked"])
+def test_a_computer_builds_no_page_linked_or_not(marta, monkeypatch, is_linked):
+    """A computer's wiki goes out as a file, or as notes its account builds (ADR-0157 points 4 and
+    10): no build writes its live/, which a person may be serving, even once linked."""
+    from silica.kernel import account_link
     from silica.ui.web.public_site import build
+
+    monkeypatch.delenv("SILICA_HOSTED")
+    if is_linked:
+        account_link._keep("t" * 43, "marta", "https://link.test")
+    with pytest.raises(ValueError, match="builds the pages" if is_linked else "Link a Silica account"):
+        build("memory")
+    assert not (marta / "public").exists()
+
+
+def test_the_page_sweeps_a_served_folder_whose_wiki_is_gone(marta):
+    """A wiki removed from the hosted account, or left Off by a crash between two renames, leaves
+    its address; the Page's own `_s/` stays."""
+    from silica.ui.web.public_site import build, write_page
 
     build("memory")
     live = _live(marta)
-    page = (live / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
-    assert "Save to Silica" not in page and "canonical" not in page and "_report" not in page
-    assert not (live / "index.html").exists() and not (live / "vaults.json").exists() and not (live / "_s").exists()
+    for name in ("removed", "_s"):
+        (live / name).mkdir()
+    write_page()
+    assert not (live / "removed").exists() and (live / "_s").is_dir() and (live / "memory").is_dir()
 
 
 def test_off_takes_the_vault_and_the_page_down_and_a_republish_replaces_the_paused_copy(marta, monkeypatch):
     from silica.kernel.publish import set_note, set_visibility
     from silica.ui.web.public_site import build, write_page
 
-    _on_host(monkeypatch)
     build("memory")
     live = _live(marta)
     assert (live / "index.html").is_file()
@@ -341,7 +347,6 @@ def test_two_vaults_share_the_page_and_each_lists_the_other(marta, tmp_path, mon
     from silica.kernel.publish import add_vault, set_visibility
     from silica.ui.web.public_site import build
 
-    _on_host(monkeypatch)
     (Path(tmp_path) / "vault" / "Courses").mkdir(exist_ok=True)
     add_vault("Courses")
     set_visibility("courses", "public")
@@ -360,7 +365,6 @@ def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta, monkey
 
     from silica.ui.web.public_site import build
 
-    _on_host(monkeypatch)
     old = os.umask(0o077)  # the hosted unit's
     try:
         build("memory")
@@ -426,7 +430,6 @@ def test_the_catalog_lists_only_what_the_host_approved_under_the_handle_it_gave(
 def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(marta, tmp_vault, monkeypatch):
     from silica.ui.web.public_site import build
 
-    _on_host(monkeypatch)
     tmp_vault.note("Memory/Forgetting curve.md",
                "Ebbinghaus measured it. Back to [[Spacing effect]].\n\n"
                "```mermaid\nflowchart LR\n  A[\"<b>learn</b>\"] --> B[forget]\n```\n")

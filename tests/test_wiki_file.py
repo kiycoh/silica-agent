@@ -69,6 +69,9 @@ def test_a_wiki_file_holds_pages_data_and_notes(build_file):
     assert 'href="forgetting-curve.html"' in note
     top = _read(path, "index.html")
     assert 'url=memory/index.html"' in top and 'href="memory/index.html"' in top
+    # from disk the room asks for each note by its file's name
+    room = 'data-room="vault.json" data-here="" data-vaults="../vaults.json" data-ext=".html"'
+    assert room in _read(path, "memory/index.html")
 
 
 def test_mermaid_goes_in_only_when_a_note_draws_a_diagram(build_file, tmp_vault):
@@ -135,15 +138,15 @@ OPEN_A_FILE = ("Using Silica? Keep it in your vault from Wikis → My wikis → 
                "and choose the zip this wiki came in.")
 
 
-def test_a_file_tells_a_silica_reader_to_open_it_and_a_published_wiki_keeps_its_line(marta, build_file):
+def test_a_file_tells_a_silica_reader_to_open_it_and_a_published_wiki_keeps_its_save(marta, build_file):
     from silica.ui.web.public_site import build
 
     path, _ = build_file("memory")
     page = _read(path, "memory/index.html")
-    assert OPEN_A_FILE in page and "Saving needs the wiki on a Silica host." not in page
+    assert OPEN_A_FILE in page and "Save 3 notes to Silica" not in page
     build("memory")
     page = (marta / "public" / "marta" / "live" / "memory" / "index.html").read_text(encoding="utf-8")
-    assert "Saving needs the wiki on a Silica host." in page and OPEN_A_FILE not in page
+    assert "Save 3 notes to Silica" in page and OPEN_A_FILE not in page
 
 
 def test_the_file_name_is_title_by_handle(build_file):
