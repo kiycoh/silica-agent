@@ -782,10 +782,12 @@ def write_page(vault: Path | None = None) -> None:
     sends the script there (amendment of 2026-11-06, item 3). With no Public
     vault the Page goes, so its address answers that there is no page; a
     laptop's copy of the sheet goes with it."""
+    from silica.config import hosted
+
     vault = vault or publish._vault()
-    if not publish.can_publish():
-        # A computer alone publishes nothing, and its live/ is left to the person who may be
-        # serving it (ADR-0157, Consequences): no write, and no sweep of any of its files.
+    if not hosted():
+        # A computer's Page is its account's, on the host; its live/ is left to the person who may
+        # be serving it (ADR-0157, Consequences): no write, and no sweep of any of its files.
         return
     h = publish.handle(vault)
     if not h:

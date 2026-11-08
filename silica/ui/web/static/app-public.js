@@ -1156,13 +1156,18 @@ function listingBox(v) {
   const since = r.since ? ` since ${pubDay(r.since)}` : "";
   const box = (status, body) => { const b = ppBox("In Wikis", status, { wide: true }); b.append(body); return b; };
   if (v.blocked.length) return box("Not listed", listingRow(v.blocked.join(" ")));
-  if (!v.listed) return box("Not listed", listingRow("Your wiki is reviewed before it enters Wikis. Until then it is reachable at its address and search engines leave it alone.", "Ask to list", true, v));
-  // a computer's request travels with its Publish: until one has carried it, the account has not seen it
-  if (pubState.link && !v.sent_listed) return box("Asked", listingRow("Asked. It reaches your account with your next Publish.", "Withdraw", false, v));
-  if (r.state === "in") return box("Listed", listingRow(`In Wikis${since}. A Publish takes it out until it is reviewed again.`, "Leave Wikis", false, v));
-  if (r.state === "out") return box("Changed", listingRow("Out of Wikis: it was published again after its review. It is waiting for review again, and it stays public at its address."));
+  // A computer's request travels with its Publish: until one has carried it, the account holds the
+  // one before, asked or withdrawn.
+  if (pubState.link && v.listed !== v.sent_listed) return v.listed
+    ? box("Asked", listingRow("Asked. It reaches your account with your next Publish.", "Withdraw", false, v))
+    : box("Withdrawn", listingRow("Withdrawn. It reaches your account with your next Publish.", "Ask to list", true, v));
+  // A wiki a computer keeps: its next Publish carries the computer's request and replaces one made here.
+  const row = (text, label, listed) => v.computer ? listingRow(`${text} Change it from your computer.`) : listingRow(text, label, listed, v);
+  if (!v.listed) return box("Not listed", row("Your wiki is reviewed before it enters Wikis. Until then it is reachable at its address and search engines leave it alone.", "Ask to list", true));
+  if (r.state === "in") return box("Listed", row(`In Wikis${since}. A Publish takes it out until it is reviewed again.`, "Leave Wikis", false));
+  if (r.state === "out") return box("Changed", row("Out of Wikis: it was published again after its review. It is waiting for review again, and it stays public at its address."));
   if (r.state === "no") return box("Refused", listingNotice(r));
-  return box("Waiting", listingRow(`Waiting for review${since}. Your wiki stays public at its address meanwhile.`, "Withdraw", false, v));
+  return box("Waiting", row(`Waiting for review${since}. Your wiki stays public at its address meanwhile.`, "Withdraw", false));
 }
 
 // --- the check before Publish (ADR-0153 points 9, 20 and 26) -----------------------

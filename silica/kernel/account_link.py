@@ -117,8 +117,28 @@ def state() -> dict:
 
 
 def unlink() -> None:
-    """Forget the link on this computer. The account's Settings remove it on the host's side."""
+    """Forget the link on this computer. The account's Settings remove it on the host's side.
+    What the account was told goes with it: the listing request each row's last Publish carried
+    and a published date only a Publish set, so a link to another account reads as never sent."""
+    from silica.config import CONFIG
+    from silica.kernel import publish
+
     _path().unlink(missing_ok=True)
+    if not CONFIG.vault_path:
+        return
+    vault = Path(CONFIG.vault_path)
+    try:
+        items = publish.vaults(vault)
+        if any(v["sent"] or v["sent_listed"] for v in items):
+            for v in items:
+                if v["sent"]:
+                    v["published"] = ""
+                v["sent"] = v["sent_listed"] = False
+            publish._save_vaults(items, vault)
+    except (OSError, ValueError) as exc:
+        # The token is gone, which is what Unlink is for; only the view's "Asked" and "Published"
+        # lines read one Publish late, until the next one (ValueError: vault.yaml not UTF-8)
+        logger.warning("account link: rows not cleared on unlink (%s)", type(exc).__name__)
 
 
 def _named(at: str) -> str:
@@ -151,7 +171,7 @@ def _body(r, at: str) -> dict:
     # shortcut: httpx has read the body whole before this check; stream the response if a gateway
     # ever answers megabytes, which no answer of bin/gateway or a tenant does (2026-11-08)
     if len(r.content) > _ANSWER_MAX:
-        raise ValueError(f"{_named(at)} answered with more than an answer of its holds. Try again in a minute.")
+        raise ValueError(f"{_named(at)} answered with more than Silica reads. Try again in a minute.")
     try:
         out = r.json()
     except ValueError:
@@ -438,7 +458,7 @@ def send(slug: str, vault: Path | None = None, visibility: str | None = None) ->
         if v["slug"] == slug:
             v["sent_listed"] = conf["listed"]
             if not off:
-                v["published"] = datetime.date.today().isoformat()
+                v["published"], v["sent"] = datetime.date.today().isoformat(), True
     publish._save_vaults(items, vault)
     return {"vault": slug, "notes": notes, "url": url,
             "published_at": out.get("published_at") if isinstance(out.get("published_at"), str) else "",

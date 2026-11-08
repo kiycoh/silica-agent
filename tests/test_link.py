@@ -481,7 +481,7 @@ def test_no_exception_carries_the_request_and_the_gateway_s_answers_are_bounded(
     gateway.start = (200, {"code": CODE, "poll": POLL, "expires_in": 99999}, {})
     assert link.start()["expires_in"] == 600
     gateway.start = (200, {"code": CODE, "poll": POLL, "expires_in": 600, "pad": "x" * 70000}, {})
-    with pytest.raises(ValueError, match="more than an answer"):
+    with pytest.raises(ValueError, match="answered with more than Silica reads"):
         link.start()
 
 
@@ -544,7 +544,76 @@ def test_a_listing_asked_on_a_computer_waits_for_the_next_publish_to_reach_the_a
     assert client.get("/public").json()["vaults"][0]["sent_listed"] is True
     js = (Path(__file__).parents[1] / "silica" / "ui" / "web" / "static" / "app-public.js").read_text(encoding="utf-8")
     box = js[js.index("function listingBox("):js.index("// --- the check before Publish")]
-    assert 'if (pubState.link && !v.sent_listed) return box("Asked", listingRow("Asked. It reaches your account with your next Publish."' in box
+    assert 'box("Asked", listingRow("Asked. It reaches your account with your next Publish.", "Withdraw", false, v))' in box
+
+
+def _listing_box() -> str:
+    js = (Path(__file__).parents[1] / "silica" / "ui" / "web" / "static" / "app-public.js").read_text(encoding="utf-8")
+    return js[js.index("function listingBox("):js.index("// --- the check before Publish")]
+
+
+def test_a_withdrawal_on_a_computer_also_waits_for_the_next_publish(memory, gateway, client):
+    from silica.kernel import account_link as link
+
+    link._keep(TOKEN, "marta", gateway.host)
+    client.post("/public/vault/memory", json={"visibility": "public", "listed": True})
+    client.post("/public/publish", json={"vault": "memory"})
+    v = client.post("/public/vault/memory", json={"listed": False}).json()["vaults"][0]
+    # the account still holds the request the last Publish carried
+    assert (v["listed"], v["sent_listed"]) == (False, True)
+    box = _listing_box()
+    # before the plain "Not listed", which would say search engines leave it alone
+    assert box.index("v.listed !== v.sent_listed") < box.index('if (!v.listed) return box("Not listed"')
+    assert '"Withdrawn. It reaches your account with your next Publish.", "Ask to list", true, v' in box
+    client.post("/public/publish", json={"vault": "memory"})
+    assert json.loads(_sent(gateway)[1].read("wiki.json"))["listed"] is False
+    assert client.get("/public").json()["vaults"][0]["sent_listed"] is False
+
+
+def test_a_hosted_wiki_a_computer_keeps_says_where_its_listing_changes():
+    box = _listing_box()
+    assert 'v.computer ? listingRow(`${text} Change it from your computer.`)' in box
+    # every state with a button goes through that row, so a computer's wiki offers none here
+    assert box.count("listingRow(") == 5 and box.count('row("') + box.count("row(`") == 4
+
+
+def test_a_linked_computer_writes_and_sweeps_nothing_of_its_served_page(memory, gateway, client):
+    from silica.kernel import account_link as link
+    from silica.ui.web.public_site import write_page
+
+    link._keep(TOKEN, "marta", gateway.host)
+    live = memory.parent / "public" / "marta" / "live"
+    (live / "_s").mkdir(parents=True)
+    for name, text in (("index.html", "the person's page"), ("vaults.json", "[]"), ("_s/pages.css", "css")):
+        (live / name).write_text(text, encoding="utf-8")
+    client.post("/public/vault/memory", json={"visibility": "public"})
+    client.post("/public/vault/memory", json={"visibility": "off"})
+    write_page()
+    assert {p.relative_to(live).as_posix(): p.read_text(encoding="utf-8") for p in live.rglob("*") if p.is_file()} \
+        == {"index.html": "the person's page", "vaults.json": "[]", "_s/pages.css": "css"}
+
+
+def test_unlink_forgets_what_the_account_was_told(memory, gateway, client, tmp_vault):
+    from silica.kernel import account_link as link, publish
+
+    (memory / "Explore").mkdir()
+    (memory / "Explore" / "A.md").write_text("a\n", encoding="utf-8")
+    publish.add_vault("Explore")
+    items = publish.vaults()
+    items[1]["published"] = "2026-10-01"  # a build of this computer's own, before ADR-0157
+    publish._save_vaults(items, memory)
+    link._keep(TOKEN, "marta", gateway.host)
+    client.post("/public/vault/memory", json={"visibility": "public", "listed": True})
+    client.post("/public/publish", json={"vault": "memory"})
+    v = publish.find("memory")
+    assert v["sent"] and v["sent_listed"] and v["published"]
+    assert client.post("/link/unlink").json()["linked"] is False
+    v, e = publish.find("memory"), publish.find("explore")
+    assert (v["sent"], v["sent_listed"], v["published"], v["listed"]) == (False, False, "", True)
+    assert e["published"] == "2026-10-01"
+    # linked again, to any account: the request reads as one it has not seen
+    link._keep(TOKEN, "marta", gateway.host)
+    assert client.get("/public").json()["vaults"][0]["sent_listed"] is False
 
 
 def test_the_account_s_tier_refusal_reaches_the_view_as_its_sentence(memory, gateway, client):

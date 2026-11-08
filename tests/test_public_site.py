@@ -47,6 +47,14 @@ def marta(tmp_vault, tmp_path, monkeypatch, linked):
     reset_manifest_cache()
 
 
+def _on_host(monkeypatch) -> None:
+    """The Page (`/@handle/`, its listing and `_s/`) is written on the hosted service alone: a
+    computer's live/ is left to the person who may be serving it (ADR-0157, Consequences)."""
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
+
+
 def _all_text(live: Path) -> str:
     return "\n".join(p.read_text(encoding="utf-8") for p in live.rglob("*")
                      if p.is_file() and p.suffix in (".html", ".md", ".css", ".json"))
@@ -56,9 +64,10 @@ def _live(marta: Path) -> Path:
     return marta / "public" / "marta" / "live"
 
 
-def test_the_vault_carries_its_notes_and_nothing_private(marta):
+def test_the_vault_carries_its_notes_and_nothing_private(marta, monkeypatch):
     from silica.ui.web.public_site import build
 
+    _on_host(monkeypatch)
     out = build("memory")
     live = _live(marta)
     vault = live / "memory"
@@ -262,7 +271,7 @@ def test_a_page_of_one_public_vault_sends_the_script_to_that_map(marta, monkeypa
     from silica.kernel.publish import add_vault, set_visibility
     from silica.ui.web.public_site import build
 
-    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
+    _on_host(monkeypatch)
     build("memory")
     page = (_live(marta) / "index.html").read_text(encoding="utf-8")
     assert 'data-one="/@marta/memory/"' in page and "vcard" in page  # the card stays for no script
@@ -272,24 +281,26 @@ def test_a_page_of_one_public_vault_sends_the_script_to_that_map(marta, monkeypa
     assert "data-one" not in (_live(marta) / "index.html").read_text(encoding="utf-8")
 
 
-def test_without_an_address_there_is_no_save_and_the_folder_opens_from_disk(marta):
+def test_without_an_address_there_is_no_save_and_a_computer_writes_no_page(marta):
+    """A computer no longer serves its own Page (ADR-0157 point 4): its wiki goes out as a file,
+    whose own `_s/` and index test_wiki_file covers, or through its account."""
     from silica.ui.web.public_site import build
 
     build("memory")
     live = _live(marta)
     page = (live / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
     assert "Save to Silica" not in page and "canonical" not in page and "_report" not in page
-    assert (live / "_s" / "pages.css").is_file() and (live / "_s" / "pages.js").is_file()
-    index = (live / "index.html").read_text(encoding="utf-8")
-    assert 'href="memory/index.html"' in index and 'data-graph="memory/vault.json"' in index
+    assert not (live / "index.html").exists() and not (live / "vaults.json").exists() and not (live / "_s").exists()
 
 
-def test_off_takes_the_vault_and_the_page_down_and_a_republish_replaces_the_paused_copy(marta):
+def test_off_takes_the_vault_and_the_page_down_and_a_republish_replaces_the_paused_copy(marta, monkeypatch):
     from silica.kernel.publish import set_note, set_visibility
     from silica.ui.web.public_site import build, write_page
 
+    _on_host(monkeypatch)
     build("memory")
     live = _live(marta)
+    assert (live / "index.html").is_file()
     set_visibility("memory", "off")
     write_page()
     assert not (live / "memory").exists() and not (live / "index.html").exists()
@@ -324,12 +335,13 @@ def test_a_private_vault_is_built_beside_the_served_folder_with_its_readers(mart
     assert "![hypnogram.png](assets/1-hypnogram.png)" in notes["spacing-effect"]
 
 
-def test_two_vaults_share_the_page_and_each_lists_the_other(marta, tmp_path):
+def test_two_vaults_share_the_page_and_each_lists_the_other(marta, tmp_path, monkeypatch):
     import json
 
     from silica.kernel.publish import add_vault, set_visibility
     from silica.ui.web.public_site import build
 
+    _on_host(monkeypatch)
     (Path(tmp_path) / "vault" / "Courses").mkdir(exist_ok=True)
     add_vault("Courses")
     set_visibility("courses", "public")
@@ -342,12 +354,13 @@ def test_two_vaults_share_the_page_and_each_lists_the_other(marta, tmp_path):
     assert "2 wikis ·" in index and "Memoria" in index and "Courses" in index
 
 
-def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta):
+def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta, monkeypatch):
     import os
     import stat
 
     from silica.ui.web.public_site import build
 
+    _on_host(monkeypatch)
     old = os.umask(0o077)  # the hosted unit's
     try:
         build("memory")
@@ -410,9 +423,10 @@ def test_the_catalog_lists_only_what_the_host_approved_under_the_handle_it_gave(
     assert json.loads((out / "index.json").read_text(encoding="utf-8")) == []
 
 
-def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(marta, tmp_vault):
+def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(marta, tmp_vault, monkeypatch):
     from silica.ui.web.public_site import build
 
+    _on_host(monkeypatch)
     tmp_vault.note("Memory/Forgetting curve.md",
                "Ebbinghaus measured it. Back to [[Spacing effect]].\n\n"
                "```mermaid\nflowchart LR\n  A[\"<b>learn</b>\"] --> B[forget]\n```\n")
@@ -422,4 +436,5 @@ def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(mart
     # the source, escaped, in the block pages.js hands to mermaid; no script of the note's own
     assert '<pre class="mermaid">' in page and "&lt;b&gt;learn&lt;/b&gt;" in page
     assert "<script>" not in page and page.count("<script") == 1  # pages.js alone
-    assert (live / "_s" / "mermaid.min.js").is_file()
+    # the host's one copy under /_s/, where pages.js finds mermaid.min.js beside it
+    assert '/_s/pages.js"' in page

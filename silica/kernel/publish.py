@@ -261,6 +261,8 @@ def _clean_vault(raw) -> dict | None:
         # on a linked computer: the listing request its last Publish carried, so the view can say
         # that one asked since has not reached the account yet
         "sent_listed": raw.get("sent_listed") is True,
+        # the published date is the linked account's, set by a Publish sent there: it goes on unlink
+        "sent": raw.get("sent") is True,
         "answers": {k: v for k, v in said.items() if isinstance(k, str) and isinstance(v, dict)},
     }
 
@@ -299,7 +301,7 @@ def _save_vaults(items: list[dict], vault: Path) -> None:
     # from_link above all: a row written without it would turn the computer's folder into one
     # of the person's, and its next Publish would be refused (ADR-0157 point 10)
     keep = ("folder", "slug", "title", "line", "license", "visibility", "listed", "readers", "published",
-            "from_link", "answers", "sent_listed")
+            "from_link", "answers", "sent_listed", "sent")
     rows = [{k: v[k] for k in keep if v.get(k) not in ("", [], {}, None, False)}
             | ({"downgraded": True} if v.get("downgraded") else {}) for v in items]
     set_block_key(vault, PUBLIC_KEY, "vaults", rows)
