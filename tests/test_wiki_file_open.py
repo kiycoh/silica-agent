@@ -170,6 +170,58 @@ def test_a_relay_save_keeps_its_relative_links_as_written(homes):
     assert "Read [the paper](paper.pdf) and [a page](sub/x.html)." in text
 
 
+def test_a_relay_save_links_its_own_slugs_and_keeps_any_other(homes):
+    """A relay's `<slug>.md` to a note it saves is a wikilink; one whose name is no slug of its
+    manifest is not one of its notes, and stays as written."""
+    from silica.sources import saved_page
+
+    d = _relay(homes)
+    (d / "vault.json").write_text(json.dumps(
+        {"title": "Memoria", "unlinked": [["Relay", "spacing-effect"], ["Other", "other-note"]]}))
+    (d / "notes.json").write_text(json.dumps({
+        "spacing-effect": "---\ntitle: Relay\n---\n[y](not-in-manifest.html), [d](readme.md), [o](other-note.md).\n",
+        "other-note": "---\ntitle: Other\n---\nBack to [s](spacing-effect.md).\n"}))
+    r = saved_page.save_invitation("marta", "memory")
+    folder = homes / "vault" / r["folder"]
+    assert ("[y](not-in-manifest.html), [d](readme.md), [[Saved/@marta/Memoria/Other|o]]."
+            in (folder / "Relay.md").read_text(encoding="utf-8"))
+    assert "Back to [[Saved/@marta/Memoria/Relay|s]]." in (folder / "Other.md").read_text(encoding="utf-8")
+
+
+def _file_with(wiki_zip: bytes, slug: str, extra: str) -> bytes:
+    with zipfile.ZipFile(io.BytesIO(wiki_zip)) as z:
+        notes = json.loads(z.read("memory/notes.json"))
+    notes[slug] += extra
+    return _rezip(wiki_zip, change={"memory/notes.json": json.dumps(notes).encode()})
+
+
+def test_a_file_save_never_rewrites_code(wiki_zip, homes):
+    """`callbacks[i](arg)` reads as a relative link to a regex, and a code span or a fenced
+    block is the author's code: only a link outside code is rewritten."""
+    from silica.sources import saved_page
+
+    fence = "```js\ncallbacks[i](arg);\nsee [f](forgetting-curve.html) and [p](paper.pdf)\n```\n"
+    saved_page.open_file(_file_with(wiki_zip, "spacing-effect", (
+        "\nCall `callbacks[i](arg)` or ``a [`q`](x.html)`` then read [the paper](paper.pdf), "
+        "[`fc`](forgetting-curve.html).\n\n" + fence)))
+    r = saved_page.save_invitation("marta", "memory")
+    text = (homes / "vault" / r["folder"] / "Spacing effect.md").read_text(encoding="utf-8")
+    assert ("Call `callbacks[i](arg)` or ``a [`q`](x.html)`` then read the paper, "
+            "[[Saved/@marta/Memoria/Forgetting curve|`fc`]].\n\n" + fence) in text
+
+
+def test_a_files_link_to_a_heading_of_its_note_is_a_wikilink_to_the_note(wiki_zip, homes):
+    """An html id is no heading's text, so the anchor goes and the link opens the note."""
+    from silica.sources import saved_page
+
+    saved_page.open_file(_file_with(wiki_zip, "spacing-effect",
+                                    "\nSee [method](forgetting-curve.html#method) and [x](forgetting-curve.md#x).\n"))
+    r = saved_page.save_invitation("marta", "memory")
+    text = (homes / "vault" / r["folder"] / "Spacing effect.md").read_text(encoding="utf-8")
+    assert ("See [[Saved/@marta/Memoria/Forgetting curve|method]] and "
+            "[[Saved/@marta/Memoria/Forgetting curve|x]].") in text
+
+
 def test_pages_scripts_and_what_is_not_an_image_are_never_written(wiki_zip, homes):
     from silica.sources import saved_page
 

@@ -31,9 +31,16 @@ _FOLDER_UNSAFE = re.compile(r'[\\/:*?"<>|#^\[\]]+')
 _MD_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
 # A wiki file has no address, so its notes link each other by slug alone, `<slug>.html` (a Private
 # build with no host writes `<slug>.md`): nothing before the slug, and `in names` checks the slug itself.
-_REL_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\(([^)\s/:]+)\.(?:html|md)\)")
+# An anchor after it is dropped: it is an html id, which no heading of the saved note is named.
+_REL_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\(([^)\s/:#]+)\.(?:html|md)(?:#[^)\s]*)?\)")
 # Any other link with no scheme. Not `#...`, which points within the note and still works there.
 _ANY_REL_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\((?![A-Za-z][A-Za-z0-9+.-]*:|#)[^)\s]+\)")
+# A fenced block, to its closing fence or the end, and a code span within one paragraph: the
+# author's code, where `callbacks[i](arg)` reads as a relative link to the two patterns above.
+# shortcut: an indented code block (four spaces) is not seen, so a link-shaped line in one is
+# rewritten; recognise it if a saved note ever shows one changed.
+_CODE = re.compile(r"^ {0,3}((`|~)\2{2,})[^\n]*\n.*?(?:^ {0,3}\1\2*[ \t]*$|\Z)"
+                   r"|(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n).)+?(?<!`)\3(?!`)", re.M | re.S)
 _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")
 # ADR-0157 Open 4: a wiki file may not pass 100 MB unpacked. Decimal megabytes, as Caddy reads the
 # edge's `max_size 100MB`, so the limit the file is built under is the one its upload meets.
@@ -84,6 +91,21 @@ def _wikilink(m: re.Match, path: str, words: str) -> str:
     row = m.string[m.string.rfind("\n", 0, m.start()) + 1:].lstrip()
     bar = "\\|" if row.startswith("|") else "|"
     return f"[[{path}{bar}{words}]]"
+
+
+def _outside_code(pattern: re.Pattern, fn, text: str) -> str:
+    """pattern.sub(fn, text), leaving a match that touches code as it is. A code span inside the
+    link's words is not code around it: `[`f`](f.html)` is a link, while in `a[i](b)` the brackets
+    are the code's own."""
+    code = [c.span() for c in _CODE.finditer(text)]
+
+    def sub(m: re.Match) -> str:
+        s, e = m.span(1)
+        if any(a < m.end() and m.start() < b and not (s <= a and b <= e) for a, b in code):
+            return m.group(0)
+        return fn(m)
+
+    return pattern.sub(sub, text)
 
 
 def _folder_name(title: str) -> str:
@@ -290,6 +312,7 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
     titles: dict[str, str] = {}
     taken: set[str] = set()
     already: set[str] = set()
+    listed = set(_chosen(manifest, None))
     for slug in chosen:
         props, _raw, _body = fm.split(notes[slug])
         props = props or {}
@@ -320,6 +343,9 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
             if m.re is _REL_LINK:
                 if target in names:
                     return _wikilink(m, names[target], words)
+                if target not in listed:
+                    # no note of this wiki: a relay's stays as written, a file's goes to words below
+                    return m.group(0)
             else:
                 tail = target.rsplit("/", 1)[-1].removesuffix(".md")
                 # Only under the wiki's own address. A file's manifest has none, and with "" this
@@ -332,11 +358,11 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
             # a Private vault's address is never served: a link to a note not saved is its words
             return words if private else m.group(0)
 
-        new_body = _REL_LINK.sub(relink, _MD_LINK.sub(relink, body))
+        new_body = _outside_code(_REL_LINK, relink, _MD_LINK.sub(relink, body))
         if file:
             # ADR-0157 point 8: a file's other relative links keep their words, since nothing at
             # their address is in the reader's vault. A relay's or a web save's stay as written.
-            new_body = _ANY_REL_LINK.sub(lambda m: m.group(1), new_body)
+            new_body = _outside_code(_ANY_REL_LINK, lambda m: m.group(1), new_body)
         tags = props.get("tags") if isinstance(props.get("tags"), list) else []
         # a note the author saved from someone else credits that someone (ADR-0143 point 10)
         author, src = _credit(props, handle, base + slug if base else "")
