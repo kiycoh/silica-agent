@@ -438,15 +438,24 @@ def _write_wiki(slug: str, conf: dict, vault: Path, site: _Site, build_dir: Path
     (build_dir / "assets").mkdir(parents=True)
 
     copied: dict[str, str] = {}
+    held = 0
 
     def copy_asset(target: str) -> str:
         """The vault's name for an image a published note cites, copied once."""
+        nonlocal held
         if target in copied:
             return copied[target]
         found = plan["files"].get(target) or _find_asset(target)
         if found is None:
             copied[target] = ""
             return ""
+        # Images are what grows without bound, so a wiki file stops before reading the one that
+        # passes its cap, and a wiki citing gigabytes of photos never lands them on disk first.
+        # shortcut: the notes' text is counted only once written; count it per note if a refused
+        # wiki ever holds 100 MB of text
+        held += found.stat().st_size
+        if site.file and held > WIKI_FILE_MAX:
+            raise _past_cap()
         name = f"{len(copied) + 1}-{publish.slugify(found.stem) or 'image'}{found.suffix.lower()}"
         (build_dir / "assets" / name).write_bytes(strip_location(found.read_bytes()))
         copied[target] = name
@@ -551,16 +560,21 @@ def build_file(slug: str, vault: Path | None = None) -> tuple[Path, dict]:
     """A wiki file (ADR-0157 point 5): the wiki as a Public build with relative links, its data
     as a script and a top `index.html` that opens it, zipped, in any visibility, Off included.
     Nothing is written under the page's folder, so what is served, paused or relayed, its state
-    and the wiki's published date stay as they were. Returns the zip, alone in a temporary folder
-    the caller moves or removes, and {"name", "notes", "bytes"}, `bytes` being the zip's size."""
+    and the wiki's published date stay as they were. Returns the zip, alone in a folder under
+    ~/.silica/tmp the caller moves or removes, and {"name", "notes", "bytes"}, `bytes` being the
+    zip's size. Past WIKI_FILE_MAX unpacked it stops with ValueError and leaves nothing behind."""
     vault = vault or publish._vault()
     h = publish.handle(vault)
     if not h:
         # a hosted account before its handle is granted: the file says whose it is, and the
         # Silica that opens it refuses one with no handle (ADR-0157 point 7)
         raise ValueError("this account has no handle yet")
+    from silica.kernel.recall.paths import silica_tmp_dir
+
     conf = publish.find(slug, vault)
-    tmp = Path(tempfile.mkdtemp(prefix="silica-wiki-"))
+    # On disk under ~/.silica and not in the system's temp, which is RAM where /tmp is tmpfs (the
+    # owner's machine) and shared by every tenant on the hosted service.
+    tmp = Path(tempfile.mkdtemp(prefix="wiki-file-", dir=silica_tmp_dir()))
     try:
         tree = tmp / "wiki"
         w = _write_wiki(slug, conf, vault, _Site(h, "", file=True), tree / slug, private=False)
@@ -583,8 +597,7 @@ def build_file(slug: str, vault: Path | None = None) -> tuple[Path, dict]:
         files = sorted(p for p in tree.rglob("*") if p.is_file())
         size = sum(p.stat().st_size for p in files)
         if size > WIKI_FILE_MAX:
-            raise ValueError(f"this wiki is {size / 1e6:.0f} MB unpacked, past the "
-                             f"{WIKI_FILE_MAX / 1e6:g} MB a wiki file may hold")
+            raise _past_cap()
         path = tmp / f"{slug}.zip"
         with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
             for p in files:
@@ -596,6 +609,10 @@ def build_file(slug: str, vault: Path | None = None) -> tuple[Path, dict]:
     # the name lands in a Downloads folder: no character a file system refuses, no path in it
     title = " ".join(re.sub(r'[\\/:*?"<>|\x00-\x1f]', " ", conf["title"]).split()) or slug
     return path, {"name": f"{title} by {h}.zip", "notes": len(w["shown"]), "bytes": path.stat().st_size}
+
+
+def _past_cap() -> ValueError:
+    return ValueError(f"this wiki is past the {WIKI_FILE_MAX / 1e6:g} MB unpacked a wiki file may hold")
 
 
 def _mark_published(slug: str, day: str, vault: Path) -> None:
