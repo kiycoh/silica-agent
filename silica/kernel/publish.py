@@ -447,8 +447,10 @@ def remove_vault(slug: str, vault: Path | None = None) -> None:
     # point 4); its served folder is left where it is, as below
     if v["visibility"] != "off" and can_publish():
         raise ValueError("turn the wiki Off before removing it")
-    root = site_root(handle(vault))
-    shutil.rmtree(root / "paused" / slug, ignore_errors=True)
+    from silica.config import hosted
+
+    if hosted():  # a computer's paused/ is the person's, as set_visibility leaves it
+        shutil.rmtree(site_root(handle(vault)) / "paused" / slug, ignore_errors=True)
     _save_vaults([x for x in items if x["slug"] != slug], vault)
 
 
@@ -630,8 +632,12 @@ def set_visibility(slug: str, vis: str, vault: Path | None = None) -> dict:
         raise ValueError(f"no wiki {slug!r} on this page")
     v["visibility"], v["downgraded"] = vis, False
     _save_vaults(items, vault)
+    from silica.config import hosted
+
     h = handle(vault)
-    if h:
+    # On a computer its live/ and paused/ are left to the person who may be serving them (ADR-0157,
+    # Consequences): the account's copy is turned on or off by a Publish, never by moving these.
+    if h and hosted():
         root = site_root(h)
         live, paused = root / "live" / slug, root / "paused" / slug
         if vis == "public" and not live.exists() and paused.exists():

@@ -85,9 +85,14 @@ def _published(marta: Path) -> dict[str, bytes]:
     return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
 
-def test_an_off_or_public_wiki_saves_without_touching_its_publication(marta, build_file):
+def test_an_off_or_public_wiki_saves_without_touching_its_publication(marta, build_file, monkeypatch):
     from silica.kernel.publish import find, set_visibility
     from silica.ui.web.public_site import build
+
+    # where a publication lives and moves between live/ and paused/: a computer's are the person's
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
 
     set_visibility("memory", "off")
     before = (_published(marta), find("memory")["published"])

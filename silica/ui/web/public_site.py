@@ -841,7 +841,12 @@ def write_page(vault: Path | None = None) -> None:
 
 def set_listed(slug: str, listed: bool, vault: Path | None = None) -> None:
     """Ask to list reaches the published manifest at once, since the host reads
-    the request there; the rest of the vault waits for Publish."""
+    the request there; the rest of the vault waits for Publish. Hosted alone: a computer's
+    request travels with its Publish, and its live/ is the person's (ADR-0157, Consequences)."""
+    from silica.config import hosted
+
+    if not hosted():
+        return
     vault = vault or publish._vault()
     h = publish.handle(vault)
     path = publish.site_root(h) / "live" / slug / "vault.json" if h else None

@@ -593,6 +593,30 @@ def test_a_linked_computer_writes_and_sweeps_nothing_of_its_served_page(memory, 
         == {"index.html": "the person's page", "vaults.json": "[]", "_s/pages.css": "css"}
 
 
+def test_a_linked_computer_moves_and_writes_nothing_in_its_served_folders(memory, gateway, client):
+    from silica.kernel import account_link as link
+
+    link._keep(TOKEN, "marta", gateway.host)
+    root = memory.parent / "public" / "marta"
+    (root / "live" / "memory").mkdir(parents=True)
+    (root / "paused" / "old").mkdir(parents=True)
+    manifest = b'{"slug": "memory", "listed": false, "the person": "serving this"}'
+    (root / "live" / "memory" / "vault.json").write_bytes(manifest)
+    (root / "paused" / "old" / "index.html").write_bytes(b"kept aside by hand")
+
+    def files() -> dict[str, bytes]:
+        return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+    before = files()
+    for change in ({"visibility": "public"}, {"listed": True}, {"listed": False}, {"visibility": "private"},
+                   {"visibility": "off"}, {"visibility": "public"}):
+        assert client.post("/public/vault/memory", json=change).status_code == 200, change
+        assert files() == before, change
+    client.post("/public/vault/memory", json={"visibility": "off"})
+    assert client.post("/public/vault/memory/remove").status_code == 200
+    assert files() == before
+
+
 def test_unlink_forgets_what_the_account_was_told(memory, gateway, client, tmp_vault):
     from silica.kernel import account_link as link, publish
 

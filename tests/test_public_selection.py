@@ -180,9 +180,12 @@ def test_readers_are_handles_and_never_the_author(vault, monkeypatch):
         update_vault("memory", {"readers": ["not a handle"]})
 
 
-def test_off_moves_a_vault_aside_and_public_brings_it_back(vault, tmp_path, linked):
+def test_off_moves_a_vault_aside_and_public_brings_it_back(vault, tmp_path, monkeypatch):
     from silica.kernel.publish import add_vault, handle, set_visibility, site_root
 
+    # the hosted service's folders; a computer's are left where they are (tests/test_link.py)
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_PUBLIC_HANDLE", "marta")
     add_vault("Memory")
     root = site_root(handle())
     (root / "live" / "memory").mkdir(parents=True)
