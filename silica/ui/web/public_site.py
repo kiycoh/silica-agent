@@ -699,7 +699,10 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
         + "".join(f'<li><a href="{_esc(site.note(vslug, s, 1))}">{_esc(t)}</a></li>'
                   for t, s in sorted(by_area.get(i, []), key=lambda x: x[0].lower()))
         + "</ul></details>" for i, name, size in rows)
+    # a file has no host to save from, but any Silica opens the zip itself (ADR-0157 point 7)
     save = (_save_form(url, f"Save {_plural(count['notes'], 'note')} to Silica") if site.base else
+            '<p class="dim">Using Silica? Keep it in your vault from Wikis → My wikis → Open a file, and '
+            'choose the zip this wiki came in.</p>' if site.file else
             '<p class="dim">Saving needs the wiki on a Silica host.</p>')
     crumb = ('<nav class="crumb" aria-label="Breadcrumb">'
              + (f'<a href="{_esc(site.catalog())}">Pages</a> / ' if site.base else "")

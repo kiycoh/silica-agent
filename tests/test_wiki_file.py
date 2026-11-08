@@ -109,6 +109,21 @@ def test_the_file_says_it_was_shared_as_a_file(marta):
             assert "chose to publish" not in page, name
 
 
+OPEN_A_FILE = ("Using Silica? Keep it in your vault from Wikis → My wikis → Open a file, "
+               "and choose the zip this wiki came in.")
+
+
+def test_a_file_tells_a_silica_reader_to_open_it_and_a_published_wiki_keeps_its_line(marta):
+    from silica.ui.web.public_site import build, build_file
+
+    path, _ = build_file("memory")
+    page = _read(path, "memory/index.html")
+    assert OPEN_A_FILE in page and "Saving needs the wiki on a Silica host." not in page
+    build("memory")
+    page = (marta / "public" / "marta" / "live" / "memory" / "index.html").read_text(encoding="utf-8")
+    assert "Saving needs the wiki on a Silica host." in page and OPEN_A_FILE not in page
+
+
 def test_the_file_name_is_title_by_handle(marta):
     from silica.kernel.publish import update_vault
     from silica.ui.web.public_site import build_file
