@@ -6,16 +6,19 @@
 `/public*` is the view: the vaults, their choices, Publish; ADR-0140 gates it
 by its prefix like any view. `/vault/save*` is Save to Silica and
 `/vault/invitations*` the Private vaults shared with the account, which every
-account gets, beside `/vault/fetch`.
+account gets, beside `/vault/fetch`. `/wikis/*` is the catalog the view shows,
+read from the public host (ADR-0157 point 2).
 """
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -625,3 +628,110 @@ def invitation_decline(payload: dict):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {"invitations": saved_page.invitations()}
+
+
+# Wikis, the catalog and a card's cover (ADR-0157 point 2), read from the public host by this
+# server and never by the browser, so no host widens CORS. Ten minutes is the ADR's number: the
+# host rewrites the catalog every two. Only an answer is kept, so a failed read is asked again.
+_KEEP = 600
+_WIKIS: dict[str, tuple[float, dict]] = {}
+# the cache's clock, patched by the tests: time.monotonic itself is the event loop's too
+_now = time.monotonic
+# what one card's cover may draw; a vault.json is an account's file, so its size is not trusted
+_NODES, _EDGES = 4000, 20000
+
+
+def _finite(v) -> bool:
+    # compared, never converted: NaN fails both comparisons, and float(10**400) raises OverflowError
+    return type(v) in (int, float) and -1e308 < v < 1e308
+
+
+def _catalog(raw, host: str) -> dict | None:
+    """index.json's entries as the host wrote them (pages_catalog.entry), each field of its own
+    type and length or emptied; an entry whose handle or slug is not a name is left out, and
+    its address is the one they make, so no entry links anywhere else."""
+    from silica.sources.saved_page import _NAME, _text
+    from silica.ui.web.pages_catalog import _int
+
+    if not isinstance(raw, list):
+        return None
+    wikis = []
+    for e in raw:
+        h, s = (e.get("handle"), e.get("slug")) if isinstance(e, dict) else (None, None)
+        if not (isinstance(h, str) and isinstance(s, str) and _NAME.fullmatch(h) and _NAME.fullmatch(s)):
+            continue
+        count = c if isinstance(c := e.get("count"), dict) else {}
+        areas = a if isinstance(a := e.get("areas"), list) else []
+        wikis.append({
+            "handle": h, "slug": s, "title": _text(e.get("title"), 80) or s,
+            "line": _text(e.get("line"), 160), "published": _text(e.get("published"), 10),
+            "count": {"notes": _int(count.get("notes")), "areas": _int(count.get("areas"))},
+            # 200 and 80 are the host's own caps in pages_catalog.entry
+            "areas": [[_text(r[0], 80), _int(r[1])] for r in areas[:200] if isinstance(r, list) and len(r) == 2],
+            "license": _text(e.get("license"), 80), "url": f"/@{h}/{s}/",
+        })
+        if len(wikis) == 500:
+            break
+    return {"host": host, "wikis": wikis,
+            "read_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+
+
+def _graph(raw) -> dict | None:
+    """A card's cover from a wiki's vault.json: each note's place and degree, and the links. A
+    malformed note is dropped and the links renumbered past it, so no link joins two other notes."""
+    if not (isinstance(raw, dict) and isinstance(raw.get("n"), list) and isinstance(raw.get("e"), list)):
+        return None
+    n, at = [], {}
+    for i, r in enumerate(raw["n"]):
+        if len(n) == _NODES:
+            break
+        # a row is [x, y, area, deg, title, slug]
+        if isinstance(r, list) and len(r) >= 4 and _finite(r[0]) and _finite(r[1]) \
+                and type(r[3]) is int and 0 <= r[3] < 10**7:  # the host's own ceiling, pages_catalog._int
+            at[i] = len(n)
+            n.append([min(1, max(0, r[0])), min(1, max(0, r[1])), r[3]])
+    # type first: True and 1.0 are keys of `at` too, and a list is no key at all
+    e = [[at[r[0]], at[r[1]]] for r in raw["e"]
+         if isinstance(r, list) and len(r) == 2 and all(type(i) is int and i in at for i in r)]
+    return {"n": n, "e": e[:_EDGES]}
+
+
+async def _wikis_read(url: str, shape) -> dict | None:
+    """What `shape` makes of the JSON at `url`, kept _KEEP seconds; None when it could not be read.
+    The routes are async so the cache is only touched on the event loop's thread."""
+    from silica.sources import saved_page
+
+    now = _now()
+    if (hit := _WIKIS.get(url)) and now - hit[0] < _KEEP:
+        return hit[1]
+    try:
+        out = await asyncio.to_thread(lambda: shape(saved_page._fetch_json(url)))
+    except Exception as exc:
+        # httpx's own errors, a body that is not JSON, the host guard's refusal: the Wikis tab says
+        # it could not read the host and My wikis, which reads none of this, keeps working
+        logger.warning("wikis: %s not read: %s: %s", url, type(exc).__name__, exc)
+        return None
+    if out is not None:
+        for k in [k for k, (t, _) in _WIKIS.items() if now - t >= _KEEP]:
+            del _WIKIS[k]
+        _WIKIS[url] = (now, out)
+    return out
+
+
+@router.get("/wikis/catalog")
+async def wikis_catalog():
+    from silica.sources.saved_page import catalog_host
+
+    host = catalog_host()
+    out = await _wikis_read(f"https://{host}/index.json", lambda raw: _catalog(raw, host))
+    return out or {"error": "Wikis could not be read."}
+
+
+@router.get("/wikis/graph")
+async def wikis_graph(handle: str = "", slug: str = ""):
+    from silica.sources.saved_page import _NAME, catalog_host
+
+    if not (_NAME.fullmatch(handle) and _NAME.fullmatch(slug)):
+        raise HTTPException(400, "that is not a wiki's handle and name")
+    out = await _wikis_read(f"https://{catalog_host()}/@{handle}/{slug}/vault.json", _graph)
+    return out or {"error": "This wiki's graph could not be read."}

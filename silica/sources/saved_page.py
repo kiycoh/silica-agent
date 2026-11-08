@@ -47,10 +47,20 @@ _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")
 WIKI_FILE_MAX = 100_000_000
 
 
-def allowed_hosts() -> set[str]:
+def _public_hosts() -> list[str]:
     # the hosted pages' host (ADR-0143 point 6): the apex is the landing, on GitHub Pages
     raw = os.environ.get("SILICA_PUBLIC_HOSTS", "").strip() or "wikis.silica-agent.dev"
-    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+    return [h.strip().lower() for h in raw.split(",") if h.strip()]
+
+
+def allowed_hosts() -> set[str]:
+    return set(_public_hosts())
+
+
+def catalog_host() -> str:
+    """The host the Wikis catalog is read from (ADR-0157 point 2): the first one listed, since
+    Save takes any of them but the app shows one catalog."""
+    return next(iter(_public_hosts()), "")
 
 
 def _on_host(url: str):
