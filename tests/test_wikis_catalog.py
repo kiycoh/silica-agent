@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 HOST = "https://wikis.silica-agent.dev"
+caps: dict = {}
 ERROR = {"error": "Wikis could not be read."}
 
 
@@ -18,7 +19,8 @@ def _wiki(handle="marta", slug="memoria", **over):
 
 @pytest.fixture
 def wikis(tmp_vault, monkeypatch):
-    """(client, fetched urls, answers by url, clock). An answer that is an exception is raised."""
+    """(client, fetched urls, answers by url, clock). An answer that is an exception is raised; the
+    cap a read asks for is kept in `caps` by url."""
     from silica.sources import saved_page
     from silica.ui.web import public_routes, server
 
@@ -27,9 +29,11 @@ def wikis(tmp_vault, monkeypatch):
     fetched: list[str] = []
     answers: dict = {}
     clock = [1000.0]
+    caps.clear()
 
-    def fetch(url):
+    def fetch(url, **kw):
         fetched.append(url)
+        caps[url] = kw.get("cap")
         a = answers[url]
         if isinstance(a, Exception):
             raise a
@@ -187,3 +191,38 @@ def test_hosted_without_the_wikis_view_has_no_catalog(wikis, monkeypatch):
     assert tc.get("/wikis/catalog").status_code == 404
     assert tc.get("/wikis/graph", params={"handle": "marta", "slug": "memoria"}).status_code == 404
     assert fetched == []
+
+
+def test_a_cover_is_read_under_the_hosts_own_manifest_cap(wikis):
+    """A vault.json is parsed whole, and parsing grows it: the cover reads at most what the host
+    would list, while the catalog keeps the default."""
+    from silica.ui.web.pages_catalog import _MAX_MANIFEST
+
+    tc, _, answers, _ = wikis
+    answers[HOST + "/@marta/memoria/vault.json"] = {"n": [], "e": []}
+    answers[HOST + "/index.json"] = []
+    tc.get("/wikis/graph", params={"handle": "marta", "slug": "memoria"})
+    tc.get("/wikis/catalog")
+    assert _MAX_MANIFEST == 2_000_000
+    assert caps == {HOST + "/@marta/memoria/vault.json": _MAX_MANIFEST, HOST + "/index.json": None}
+
+
+def test_the_cap_reaches_the_fetch(monkeypatch):
+    from silica.sources import saved_page, web_fetch
+
+    asked = {}
+
+    class Resp:
+        def json(self):
+            return {"n": [], "e": []}
+
+    def fake(url, types=(), cap=0):
+        asked["cap"] = cap
+        return Resp(), url
+
+    monkeypatch.delenv("SILICA_PUBLIC_HOSTS", raising=False)
+    monkeypatch.setattr(web_fetch, "_fetch", fake)
+    saved_page._fetch_json(HOST + "/@marta/memoria/vault.json", cap=2_000_000)
+    assert asked["cap"] == 2_000_000
+    saved_page._fetch_json(HOST + "/@marta/memoria/vault.json")
+    assert asked["cap"] == 64 * 1024 * 1024

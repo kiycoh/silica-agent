@@ -260,10 +260,10 @@ def room(adding_notes: int, adding_bytes: int, vault: Path | None = None) -> dic
             "short": "; ".join(short)}
 
 
-def _fetch_json(url: str):
+def _fetch_json(url: str, *, cap: int = 64 * 1024 * 1024):
     from silica.sources.web_fetch import _fetch
 
-    resp, final = _fetch(url, types=("application/json", "text/"), cap=64 * 1024 * 1024)
+    resp, final = _fetch(url, types=("application/json", "text/"), cap=cap)
     if (urlsplit(final).hostname or "").lower() not in allowed_hosts():
         raise ValueError("that wiki moved to a host Silica does not save from")
     return resp.json()

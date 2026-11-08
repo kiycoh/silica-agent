@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import time
+from itertools import islice
 from pathlib import Path
 from urllib.parse import quote
 
@@ -691,21 +692,22 @@ def _graph(raw) -> dict | None:
             at[i] = len(n)
             n.append([min(1, max(0, r[0])), min(1, max(0, r[1])), r[3]])
     # type first: True and 1.0 are keys of `at` too, and a list is no key at all
-    e = [[at[r[0]], at[r[1]]] for r in raw["e"]
-         if isinstance(r, list) and len(r) == 2 and all(type(i) is int and i in at for i in r)]
-    return {"n": n, "e": e[:_EDGES]}
+    e = islice(([at[r[0]], at[r[1]]] for r in raw["e"]
+                if isinstance(r, list) and len(r) == 2 and all(type(i) is int and i in at for i in r)), _EDGES)
+    return {"n": n, "e": list(e)}
 
 
-async def _wikis_read(url: str, shape) -> dict | None:
-    """What `shape` makes of the JSON at `url`, kept _KEEP seconds; None when it could not be read.
-    The routes are async so the cache is only touched on the event loop's thread."""
+async def _wikis_read(url: str, shape, **fetch) -> dict | None:
+    """What `shape` makes of the JSON at `url` (`fetch` goes to _fetch_json), kept _KEEP seconds;
+    None when it could not be read. The routes are async so the cache is only touched on the
+    event loop's thread."""
     from silica.sources import saved_page
 
     now = _now()
     if (hit := _WIKIS.get(url)) and now - hit[0] < _KEEP:
         return hit[1]
     try:
-        out = await asyncio.to_thread(lambda: shape(saved_page._fetch_json(url)))
+        out = await asyncio.to_thread(lambda: shape(saved_page._fetch_json(url, **fetch)))
     except Exception as exc:
         # httpx's own errors, a body that is not JSON, the host guard's refusal: the Wikis tab says
         # it could not read the host and My wikis, which reads none of this, keeps working
@@ -730,8 +732,12 @@ async def wikis_catalog():
 @router.get("/wikis/graph")
 async def wikis_graph(handle: str = "", slug: str = ""):
     from silica.sources.saved_page import _NAME, catalog_host
+    from silica.ui.web.pages_catalog import _MAX_MANIFEST
 
     if not (_NAME.fullmatch(handle) and _NAME.fullmatch(slug)):
         raise HTTPException(400, "that is not a wiki's handle and name")
-    out = await _wikis_read(f"https://{catalog_host()}/@{handle}/{slug}/vault.json", _graph)
+    # Bounded before the parse, which grows it (9 MB of [] held 192 MiB, 06c69d5): the host lists no
+    # vault.json past this cap, and the route takes any name, so a bigger one is no listed wiki's.
+    out = await _wikis_read(f"https://{catalog_host()}/@{handle}/{slug}/vault.json", _graph,
+                            cap=_MAX_MANIFEST)
     return out or {"error": "This wiki's graph could not be read."}
