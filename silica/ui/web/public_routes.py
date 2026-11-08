@@ -610,6 +610,9 @@ async def invitation_file(request: Request):
         out = await asyncio.to_thread(saved_page.open_file, b"".join(chunks))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    except OSError as exc:
+        # this account's own folder, full or not writable: said in a sentence, as a refused file is
+        raise HTTPException(400, f"the file could not be unpacked here ({exc.strerror or exc})")
     return {"opened": out, "invitations": saved_page.invitations()}
 
 

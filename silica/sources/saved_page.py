@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import datetime
 import json
-import math
 import os
 import re
 import shutil
@@ -270,7 +269,8 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
         handle, vslug = manifest.get("handle", ""), manifest.get("slug", "")
     if not isinstance(manifest, dict) or not isinstance(notes, dict):
         raise ValueError("that wiki could not be read")
-    title = t if isinstance(t := manifest.get("title"), str) else vslug
+    # an empty title is none: a manifest without one saves under its slug, not "Saved vault"
+    title = t if isinstance(t := manifest.get("title"), str) and t.strip() else vslug
     chosen = [s for s in _chosen(manifest, areas, named) if isinstance(notes.get(s), str)]
     today = datetime.date.today().isoformat()
     folder = in_write_dir(f"{SAVED_DIR}/@{handle}/{_folder_name(title)}")
@@ -445,7 +445,9 @@ def invitations() -> list[dict]:
 
 
 def _text(v, n: int) -> str:
-    return v[:n] if isinstance(v, str) else ""
+    # A lone surrogate is valid JSON and no UTF-8: the response carrying it could not be encoded,
+    # so one such title made every GET of the list a 500.
+    return v[:n].encode("utf-8", "replace").decode("utf-8") if isinstance(v, str) else ""
 
 
 def _int(v) -> int:
@@ -453,7 +455,9 @@ def _int(v) -> int:
 
 
 def _num(v) -> float:
-    return v if type(v) in (int, float) and math.isfinite(v) else 0
+    # compared, never converted: math.isfinite(10**400) raises OverflowError, and NaN or an
+    # infinity fails both comparisons
+    return v if type(v) in (int, float) and -1e308 < v < 1e308 else 0
 
 
 def _manifest(m) -> dict:
@@ -605,6 +609,19 @@ def _part_too_big(name: str, cap: int) -> ValueError:
     return ValueError(f"that wiki file's {name} is past the {cap / 1e6:g} MB a wiki's may hold")
 
 
+def _zip_read(said: str, fn, *args):
+    """fn(*args) on the zip, which is anyone's. zipfile, zlib, bz2, lzma and struct each raise
+    their own on a crafted archive (an OSError from bz2, an LZMAError), and the list grows with
+    Python: every one of them is a file that cannot be read, a 400 with `said` and not a 500. A
+    refusal of ours, a ValueError, passes as it was."""
+    try:
+        return fn(*args)
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"{said} ({type(exc).__name__})") from None
+
+
 def _unpacked(z, keep: dict, into: Path) -> None:
     """Each kept entry into `into`, counting what comes out: a zip's sizes are its own claim."""
     held = 0
@@ -665,7 +682,6 @@ def open_file(data: bytes) -> dict:
     import tempfile
     import time
     import zipfile
-    import zlib
 
     if len(data) > WIKI_FILE_MAX:
         raise _file_too_big()
@@ -674,11 +690,7 @@ def open_file(data: bytes) -> dict:
     # starts with this signature, so its count bounds them, before a byte is parsed.
     if data.count(b"PK\x01\x02") > _ENTRIES_MAX:
         raise ValueError(f"that file holds more than {_ENTRIES_MAX:,} entries, which no wiki file does")
-    try:
-        z = zipfile.ZipFile(io.BytesIO(data))
-    except zipfile.BadZipFile:
-        raise ValueError("that file is not a zip Silica can read") from None
-    unreadable = (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError, RuntimeError)
+    z = _zip_read("that file is not a zip Silica can read", zipfile.ZipFile, io.BytesIO(data))
     with z:
         for info in z.infolist():
             name = info.filename
@@ -705,12 +717,12 @@ def open_file(data: bytes) -> dict:
             raise _part_too_big("vault.json", _MANIFEST_MAX)
         if keep["notes.json"].file_size > _NOTES_JSON_MAX:
             raise _part_too_big("notes.json", _NOTES_JSON_MAX)
+        raw = _zip_read("that wiki file could not be read: the zip is damaged", z.read, keep["vault.json"])
+        if len(raw) > _MANIFEST_MAX:
+            raise _part_too_big("vault.json", _MANIFEST_MAX)
         try:
-            raw = z.read(keep["vault.json"])
-            if len(raw) > _MANIFEST_MAX:
-                raise _part_too_big("vault.json", _MANIFEST_MAX)
             m = json.loads(raw)
-        except (*unreadable, RecursionError, UnicodeDecodeError, json.JSONDecodeError):
+        except (ValueError, RecursionError):
             raise ValueError("that wiki file could not be read: its vault.json is not a wiki's") from None
         if not isinstance(m, dict):
             raise ValueError("that wiki file could not be read: its vault.json is not a wiki's")
@@ -746,10 +758,7 @@ def open_file(data: bytes) -> dict:
             # the manifest written is the one read, each field of its type, so every later list
             # reads a small file that cannot raise
             parts = {k: v for k, v in keep.items() if k != "vault.json"}
-            try:
-                _unpacked(z, parts, tmp)
-            except unreadable:
-                raise ValueError("that wiki file could not be read: the zip is damaged") from None
+            _zip_read("that wiki file could not be read: the zip is damaged", _unpacked, z, parts, tmp)
             if (tmp / "notes.json").stat().st_size > _NOTES_JSON_MAX:
                 raise _part_too_big("notes.json", _NOTES_JSON_MAX)
             try:
@@ -758,7 +767,7 @@ def open_file(data: bytes) -> dict:
                 raise ValueError("that wiki file could not be read: its notes.json is not a wiki's") from None
             manifest["handle"], manifest["slug"] = handle, slug
             manifest["count"] = {"notes": len(notes)}
-            (tmp / "vault.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+            (tmp / "vault.json").write_text(json.dumps(manifest), encoding="utf-8")
             (tmp / ".hash").write_text(hashlib.sha256((tmp / "notes.json").read_bytes()).hexdigest(),
                                        encoding="utf-8")
             (tmp / ".from-file").write_bytes(b"")

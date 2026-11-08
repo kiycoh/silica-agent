@@ -496,3 +496,84 @@ def test_ten_files_wait_at_most_and_the_eleventh_is_refused(wiki_zip, homes):
     saved_page.decline_invitation("marta", "wiki-3")
     saved_page.open_file(_manifest(wiki_zip, slug="wiki-10"))
     assert len(saved_page.invitations()) == 10
+
+
+# --- fix round 2: nothing in a manifest raises, nothing in an Open answers 500 ---------
+
+_HUGE = "1" + "0" * 400  # 10**400: past float range, so math.isfinite raised OverflowError on it
+
+
+def test_a_number_past_float_range_never_takes_the_list_down(wiki_zip, homes):
+    from silica.sources import saved_page
+
+    d = _relay(homes, author="sara", slug="tesi")
+    (d / "vault.json").write_text('{"title": "Tesi", "n": [[0, %s, 0, 0, "t", "a"]], "areas": [["A", %s]]}'
+                                  % (_HUGE, _HUGE))
+    assert [i["vault"] for i in saved_page.invitations()] == ["tesi"]
+    saved_page.prepare_invitation("sara", "tesi")
+
+
+def test_a_file_with_a_number_past_float_range_opens_with_it_dropped(tc, wiki_zip, homes):
+    with zipfile.ZipFile(io.BytesIO(wiki_zip)) as z:
+        m = z.read("memory/vault.json").decode()
+    m = m.replace('"n":[[0.0,1.0,', '"n":[[0.0,%s,' % _HUGE, 1)
+    assert _HUGE in m
+    r = tc.post("/vault/invitations/file", content=_rezip(wiki_zip, change={"memory/vault.json": m.encode()}))
+    assert r.status_code == 200
+    written = json.loads((homes / "file-invitations" / "marta" / "memory" / "vault.json").read_text())
+    assert written["n"][0][1] == 0 and tc.get("/vault/invitations").status_code == 200
+
+
+def _corrupt(data: bytes, method: int) -> bytes:
+    """The wiki file with notes.json packed by `method` and its packed bytes overwritten, as a
+    crafted zip can: each decompressor raises its own error, none of them a ValueError."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(data)) as src, zipfile.ZipFile(out, "w") as z:
+        for info in src.infolist():
+            z.writestr(info.filename, src.read(info), compress_type=method if info.filename == "memory/notes.json"
+                       else zipfile.ZIP_DEFLATED)
+    blob = bytearray(out.getvalue())
+    with zipfile.ZipFile(io.BytesIO(bytes(blob))) as z:
+        info = z.getinfo("memory/notes.json")
+    start = info.header_offset + 30 + len(info.filename.encode()) + len(info.extra)
+    for k in range(start + 8, start + min(info.compress_size, 400)):
+        blob[k] = 0x5A
+    return bytes(blob)
+
+
+@pytest.mark.parametrize("method", [zipfile.ZIP_DEFLATED, zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_a_damaged_entry_answers_400_whatever_packed_it(tc, wiki_zip, homes, method):
+    r = tc.post("/vault/invitations/file", content=_corrupt(wiki_zip, method))
+    assert r.status_code == 400 and "could not be read" in r.json()["detail"]
+    assert _files(homes / "file-invitations") == []
+
+
+def test_text_that_cannot_be_utf_8_never_takes_the_list_down(tc, wiki_zip, homes):
+    """A lone surrogate is valid JSON and no UTF-8: the response that carried it could not be
+    encoded, so every GET of the list answered 500 while the folder was there."""
+    r = tc.post("/vault/invitations/file", content=_manifest(wiki_zip, title="Memoria \ud800",
+                                                             areas=[["Area \udfff", 1]]))
+    assert r.status_code == 200
+    d = homes / "invitations" / "sara" / "tesi"
+    _relay(homes, author="sara", slug="tesi")
+    (d / "vault.json").write_text('{"title": "Tesi \\ud800", "line": "\\udfff"}')
+    r = tc.get("/vault/invitations")
+    assert r.status_code == 200 and len(r.json()["invitations"]) == 2
+    for author, slug in (("marta", "memory"), ("sara", "tesi")):
+        assert tc.get("/vault/invitations/preview", params={"author": author, "vault": slug}).status_code == 200
+
+
+def test_a_relay_manifest_with_no_title_saves_under_its_slug(wiki_zip, homes):
+    from silica.sources import saved_page
+
+    d = _relay(homes, author="sara", slug="tesi")
+    (d / "vault.json").write_text(json.dumps({"unlinked": [["One", "spacing-effect"]]}))
+    assert saved_page.prepare_invitation("sara", "tesi")["folder"] == "Saved/@sara/tesi"
+    assert saved_page.save_invitation("sara", "tesi")["folder"] == "Saved/@sara/tesi"
+    assert saved_page.invitations() == []
+
+
+def test_a_folder_that_will_not_take_the_file_answers_400(tc, wiki_zip, homes):
+    (homes / "file-invitations").write_text("a file where the folder should be")
+    r = tc.post("/vault/invitations/file", content=wiki_zip)
+    assert r.status_code == 400 and "could not be unpacked here" in r.json()["detail"]
