@@ -678,8 +678,8 @@ def test_on_a_computer_the_file_lands_in_downloads(client, monkeypatch):
     tc.post("/public/vault", json={"folder": "Memory"})
     tc.post("/public/vault/memory", json={"title": "Memoria"})
     first = tc.post("/public/vault/memory/file").json()
-    assert first == {"path": str(dl / "Memoria by marta.zip"), "name": "Memoria by marta.zip", "notes": 2,
-                     "bytes": (dl / "Memoria by marta.zip").stat().st_size}
+    assert first == {"path": str(dl / "Memoria by marta.zip"), "name": "Memoria by marta.zip", "folder": "Downloads",
+                     "notes": 2, "bytes": (dl / "Memoria by marta.zip").stat().st_size}
     assert "memory/wiki-data.js" in zipfile.ZipFile(first["path"]).namelist()
     # a second save never overwrites the first
     second = tc.post("/public/vault/memory/file").json()
@@ -688,6 +688,12 @@ def test_on_a_computer_the_file_lands_in_downloads(client, monkeypatch):
     assert sorted(p.name for p in silica_tmp_dir().glob("wiki-file-*")) == ["wiki-file-fresh"]
     v = tc.get("/public").json()["vaults"][0]
     assert v["visibility"] == "off" and not v["published"]
+    # the line names the folder the file is in, as the person's desktop names it
+    other = tmp / "Scaricati"
+    other.mkdir()
+    monkeypatch.setattr(public_routes, "_downloads", lambda: other)
+    assert tc.post("/public/vault/memory/file").json()["folder"] == "Scaricati"
+    monkeypatch.setattr(public_routes, "_downloads", lambda: dl)
     assert tc.post("/public/vault/nowhere/file").status_code == 400
     assert tc.post("/public/vault/memory/file", headers={"Origin": "https://evil.test"}).status_code == 403
     # the hosted service has no Downloads of the person's: its browser downloads the GET
@@ -739,3 +745,26 @@ def test_downloads_is_the_desktop_s_answer_unless_that_is_the_home_folder(tmp_pa
     assert public_routes._downloads() == home / "Scaricati"
     monkeypatch.setenv("PATH", "/nonexistent")
     assert public_routes._downloads() == home / "Downloads"
+
+
+def test_a_file_leaves_out_what_publish_leaves_out_until_it_is_answered(client, tmp_vault, monkeypatch):
+    """The check runs for a file as for a Publish (ADR-0157 point 5): a note made from a file nobody
+    answered for stays out of both, and the answer brings it into both."""
+    import zipfile
+
+    from silica.ui.web import public_routes
+
+    tc, root = client
+    dl = root / "Downloads"
+    dl.mkdir()
+    monkeypatch.setattr(public_routes, "_downloads", lambda: dl)
+    _with_a_book(tmp_vault, tc, root)
+    check = tc.get("/public/check", params={"vault": "memory"}).json()
+    held = tc.post("/public/vault/memory/file").json()
+    assert check["ask"] is True and held["notes"] == check["count"]["notes"] == 1
+    assert "memory/forgetting-curve.html" not in zipfile.ZipFile(held["path"]).namelist()
+    assert tc.post("/public/publish", json={"vault": "memory"}).json()["result"]["notes"] == 1
+    tc.post("/public/check/answer", json={"vault": "memory", "key": "Book.pdf", "answer": "mine"})
+    out = tc.post("/public/vault/memory/file").json()
+    assert out["notes"] == 2 and "memory/forgetting-curve.html" in zipfile.ZipFile(out["path"]).namelist()
+    assert tc.post("/public/publish", json={"vault": "memory"}).json()["result"]["notes"] == 2

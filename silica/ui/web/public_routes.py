@@ -383,7 +383,9 @@ async def public_file_save(slug: str):
     finally:
         # a folder that will not go is swept by the next build, past its hour
         shutil.rmtree(path.parent, ignore_errors=True)
-    return {"path": str(dest), "name": dest.name, "notes": out["notes"], "bytes": out["bytes"]}
+    # the folder by its own name: a desktop set to another language calls Downloads "Scaricati"
+    return {"path": str(dest), "name": dest.name, "folder": dest.parent.name, "notes": out["notes"],
+            "bytes": out["bytes"]}
 
 
 @router.post("/public/reveal", dependencies=_SAME_ORIGIN)

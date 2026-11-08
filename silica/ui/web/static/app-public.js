@@ -730,7 +730,7 @@ function renderPublic(fresh) {
   const file = mkEl("button", "st-btn", "Save as a file");
   file.type = "button";
   file.disabled = !v.out;
-  file.addEventListener("click", () => saveWikiFile(v, file));
+  file.addEventListener("click", () => startPublish(v, file, true));
   row.append(go, file, mkEl("span", "pp-dim", inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
     ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
     : "Readers see the wiki as it is when you publish; a note written later in its folder goes out the next time."));
@@ -765,11 +765,15 @@ const fileMB = (b) => (b < 1e5 ? "less than 0.1 MB" : `${(b / 1e6).toLocaleStrin
 async function saveWikiFile(v, b) {
   b.disabled = true;
   b.textContent = "saving…";
-  if (pubState.hosted) await downloadWikiFile(v);
+  let done = false;
+  if (pubState.hosted) done = await downloadWikiFile(v);
   else {
     const r = await pubPost(`/public/vault/${encodeURIComponent(v.slug)}/file`);
     if (r) pubFile = { vault: v.slug, ...r };
+    done = !!r;
   }
+  // a refusal keeps the sheet open, with its answers, for another try
+  if (done) pubCheck = null;
   renderPublic();
 }
 
@@ -782,11 +786,11 @@ async function downloadWikiFile(v) {
     if (r.ok) blob = await r.blob();
   } catch {
     notify("My Wikis could not be reached");
-    return;
+    return false;
   }
   if (!r.ok) {
     notify((await r.json().catch(() => ({}))).detail || "The file could not be made");
-    return;
+    return false;
   }
   const m = /filename\*=UTF-8''([^;]+)/.exec(r.headers.get("Content-Disposition") || "");
   const a = document.createElement("a");
@@ -794,11 +798,12 @@ async function downloadWikiFile(v) {
   a.download = m ? decodeURIComponent(m[1]) : `${v.slug}.zip`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  return true;
 }
 
 function fileSavedLine(f) {
   const p = mkEl("p", "pp-dim pp-saved");
-  p.append("Saved ", mkEl("b", "", f.name), `, ${pubCount(f.notes)}, ${fileMB(f.bytes)}, in Downloads. `,
+  p.append("Saved ", mkEl("b", "", f.name), `, ${pubCount(f.notes)}, ${fileMB(f.bytes)}, in ${f.folder}. `,
     preLink("Show in folder", "reveal", () => pubPost("/public/reveal", { path: f.path })));
   return p;
 }
@@ -859,7 +864,9 @@ async function publishNow(v) {
   renderPublic();
 }
 
-async function startPublish(v, go) {
+// A file goes through the same check as a Publish (ADR-0157 point 5): an answer missing leaves a
+// note out of a file as it does out of a Publish, and the sheet is where the person learns it.
+async function startPublish(v, go, file = false) {
   go.disabled = true;
   go.textContent = "checking…";
   let c = null;
@@ -873,11 +880,12 @@ async function startPublish(v, go) {
     return;
   }
   if (c.ask) {
-    pubCheck = { slug: v.slug, data: c, open: new Set(), all: new Set(), old: false, personal: false };
+    pubCheck = { slug: v.slug, data: c, open: new Set(), all: new Set(), old: false, personal: false, file };
     $("#public-body").scrollTop = 0;
     renderPublic();
     return;
   }
+  if (file) return saveWikiFile(v, go);
   go.textContent = "publishing…";
   await publishNow(v);
 }
@@ -1159,10 +1167,16 @@ function checkSheet(v) {
   sum.append(line);
   const wikis = inWikis(v) ? LEAVES_WIKIS : c.wikis;
   if (wikis) sum.append(mkEl("p", "pp-dim", wikis));
-  const go = mkEl("button", "pp-go", `${v.visibility === "off" ? "Turn on and publish" : "Publish"} ${prePlural(c.count.notes, "note")}`);
+  const go = mkEl("button", "pp-go", pubCheck.file ? "Save as a file"
+    : `${v.visibility === "off" ? "Turn on and publish" : "Publish"} ${prePlural(c.count.notes, "note")}`);
   go.type = "button";
   go.disabled = !c.count.notes;
-  go.addEventListener("click", () => { go.disabled = true; go.textContent = "publishing…"; publishNow(v); });
+  go.addEventListener("click", () => {
+    if (pubCheck.file) return saveWikiFile(v, go);
+    go.disabled = true;
+    go.textContent = "publishing…";
+    publishNow(v);
+  });
   foot.append(sum, go);
   frag.append(foot);
   return frag;
