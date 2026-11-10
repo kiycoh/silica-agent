@@ -72,3 +72,21 @@ def test_curate_hands_the_judge_the_stale_line(monkeypatch):
     [item] = duplicates.families_to_items([{"source": "a/n.md", "target": "b/m.md", "score": 0.1}])
     assert item.target_path == "b/m.md"
     assert item.context.excerpt.startswith("[stale] structural:")
+
+
+@pytest.mark.parametrize("score", [0.95, 0.5])
+def test_a_stale_agent_note_does_not_outrank_a_persons(monkeypatch, score):
+    """The line went ahead of the frontmatter, so reliability_tier read no
+    frontmatter, ranked the agent note human and made it the merge target
+    over the person's note, in a family and in a borderline pair alike."""
+    bodies = {"docs/Agent.md": "---\nAI: true\n---\n# Agent note\n" + "agent words " * 40,
+              "docs/Human.md": "# Human note\nmy own words\n"}
+    monkeypatch.setattr(duplicates, "_read", bodies.get)
+    monkeypatch.setattr(codedocs, "peek", lambda v: {"docs/Agent.md": "structural"})
+    monkeypatch.setattr(duplicates.CONFIG, "sim_threshold_high", 0.85)
+    [item] = duplicates.families_to_items(
+        [{"source": "docs/Agent.md", "target": "docs/Human.md", "score": score}])
+    members = getattr(item.context, "members", None) or [item.context]
+    assert item.target_path == "docs/Human.md"
+    assert [m.loser_path for m in members] == ["docs/Agent.md"]
+    assert members[0].excerpt.startswith("[stale] structural:")

@@ -198,9 +198,11 @@ def families_to_items(pairs: list[dict]) -> list[WorkItem]:
 
     def body(p: str) -> str:
         # An unreadable note reads as empty here, as /curate always took it:
-        # the judge's own read of the merge target skips it.
+        # the judge's own read of the merge target skips it. Raw, never with
+        # the stale line: ahead of the frontmatter it made an agent note read
+        # as a person's and win the merge.
         if p not in _body_cache:
-            _body_cache[p] = _loser_text(p, _read(p) or "")
+            _body_cache[p] = _read(p) or ""
         return _body_cache[p]
 
     stem = lambda p: p.removesuffix(".md").rsplit("/", 1)[-1]  # noqa: E731
@@ -232,7 +234,8 @@ def families_to_items(pairs: list[dict]) -> list[WorkItem]:
             items.append(WorkItem(
                 kind="dedup",
                 target_path=canonical,
-                context=DedupJob.between_notes(loser=m, winner=canonical, loser_body=body(m), score=sc),
+                context=DedupJob.between_notes(loser=m, winner=canonical, loser_body=_loser_text(m, body(m)),
+                                               score=sc),
                 reason=f"curate dedup family → {stem(canonical)} (score={sc:.3f})",
             ))
 
@@ -248,8 +251,8 @@ def families_to_items(pairs: list[dict]) -> list[WorkItem]:
         items.append(WorkItem(
             kind="dedup",
             target_path=larger,
-            context=DedupJob.between_notes(loser=smaller, winner=larger, loser_body=smaller_body,
-                                           score=pair["score"]),
+            context=DedupJob.between_notes(loser=smaller, winner=larger,
+                                           loser_body=_loser_text(smaller, smaller_body), score=pair["score"]),
             reason=pair.get("reason") or f"curate dedup score={pair['score']:.3f}",
         ))
     # Family members share target_path=canonical by construction → one judge
