@@ -34,7 +34,7 @@ _FUZZY_MIN = 0.82  # SequenceMatcher ratio floor for a fuzzy title/key hit
 
 def _index_path() -> Path:
     from silica.kernel.base import home
-    return home.index_file("lexical")
+    return home.index_file(home.LEXICAL)
 
 
 def _tokens(text: str) -> list[str]:

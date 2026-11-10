@@ -126,8 +126,8 @@ def stores_for(vault: str | Path):
             # the LEGACY global index when their file is missing — right for
             # the active vault, wrong for this lane (it would resurrect some
             # old vault's data as "memory"). A missing index ⇒ the leg abstains.
-            ep = idx / "embeddings.json"
-            cp = idx / "cooccurrence.json"
+            ep = home.index_file(home.EMBEDDINGS, str(vault))
+            cp = home.index_file(home.COOCCURRENCE, str(vault))
             hit = (
                 EmbedStore(path=ep) if ep.is_file() else None,
                 CooccurStore(path=cp) if cp.is_file() else None,

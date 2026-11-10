@@ -509,11 +509,12 @@ def write_report(report: VaultReport, output_path: str) -> dict:
             import datetime as _dt
 
             from silica.config import CONFIG
+            from silica.kernel.base import home
             from silica.kernel.report.vault_energy import vault_energy
 
             vault = CONFIG.vault_path
             if vault:
-                energy_path = Path(vault) / ".silica" / "energy.json"
+                energy_path = home.energy_file(vault)
                 prev: float | None = None
                 prev_terms: dict | None = None
                 if energy_path.is_file():

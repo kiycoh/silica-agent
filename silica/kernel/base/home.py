@@ -40,11 +40,40 @@ def silica_tmp_dir() -> Path:
     return d
 
 
-def index_file(name: str) -> Path:
-    """Resolve one derived-index file (``<name>.json``) under the current vault's
-    index dir. The per-store ``_index_path`` shims delegate here (kept as module
-    functions so tests can still monkeypatch them per store)."""
-    return index_dir() / f"{name}.json"
+# The per-vault index files, each named once. The stores, the readers of an
+# explicit vault (vault_registry, the memory lane) and the presence checks each
+# spelled the names themselves, so a renamed file would have left some of them
+# reading nothing, and nothing would have said so (untangle re-audit, 2026-11-10).
+EMBEDDINGS = "embeddings"
+COOCCURRENCE = "cooccurrence"
+LEXICAL = "lexical"
+VAULT_BRIEF = "vault_brief"
+# The index marker: names the vault a one-way digest dir belongs to.
+VAULT_MARKER = "vault"
+
+
+def index_file(name: str, vault: str | None = None) -> Path:
+    """Resolve one derived-index file (``<name>.json``) under the index dir of
+    `vault`, or of the current vault when None. The per-store ``_index_path``
+    shims delegate here (kept as module functions so tests can still
+    monkeypatch them per store). An explicit ``""`` is the legacy unkeyed
+    namespace, as in `index_dir_for`."""
+    return (index_dir() if vault is None else index_dir_for(vault)) / f"{name}.json"
+
+
+def lexical_built(vault: str | None = None) -> bool:
+    """Whether `vault` (None: the current one) has a lexical index on disk.
+
+    The lexical leg is maintained only where it exists: the sweep, the write
+    hook and the explicit-vault reader never create one, and the first
+    whole-vault /embed is what seeds it (recall.refresh)."""
+    return index_file(LEXICAL, vault).is_file()
+
+
+def energy_file(vault: str) -> Path:
+    """`<vault>/.silica/energy.json`: the last E(vault) the report wrote, which
+    /status reads, with its trend (`energy.jsonl`) beside it."""
+    return Path(vault) / ".silica" / "energy.json"
 
 
 def attachments_dir() -> Path:

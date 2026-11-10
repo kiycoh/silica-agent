@@ -113,8 +113,8 @@ def status(c: Call) -> Result:
     # E(vault) cache line — written by /report (write_report). No cache
     # file → nothing shown; /status never triggers a VaultReport itself.
     try:
-        from pathlib import Path as _EP
-        energy_file = _EP(CONFIG.vault_path or "") / ".silica" / "energy.json"
+        from silica.kernel.base.home import energy_file as _energy_file
+        energy_file = _energy_file(CONFIG.vault_path or "")
         if energy_file.is_file():
             e = json.loads(energy_file.read_text(encoding="utf-8"))
             line = f"  E(vault): [bold]{e['value']:+.2f}[/]"

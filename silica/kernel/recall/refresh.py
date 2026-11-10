@@ -93,11 +93,11 @@ def embed(folder: str = "", force: bool = False, *, ask: Callable[..., Any]) -> 
     # cheap stage of silica_vaults (1.4 MB for 872 notes) never existed where
     # the 18 MB embed store did. Whole vault only: a folder-scoped first build
     # would leave a partial index the sweep then keeps partial.
-    from silica.kernel.base.home import index_dir
+    from silica.kernel.base import home
     # New readings re-sign the notes that embed them, so the embed pass above
     # caught them; the lexical store keys on nothing it could compare, so it is
     # rebuilt whole (seconds, 1.4 MB on 872 notes) rather than left without them.
-    lexical_exists = (index_dir() / "lexical.json").is_file()
+    lexical_exists = home.lexical_built()
     if (not folder and not lexical_exists) or (images_read and lexical_exists):
         out["lexical"] = lexical().get("indexed")
     return out

@@ -46,7 +46,7 @@ def top_hubs(nodes: list[dict], edges: list[dict], top_n: int = 24) -> list[dict
 def brief_path() -> Path:
     from silica.kernel.base import home
 
-    return home.index_dir() / "vault_brief.json"
+    return home.index_file(home.VAULT_BRIEF)
 
 
 def write_brief(notes: int, topics: list[str], hubs: list[str]) -> str:

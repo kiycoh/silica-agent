@@ -46,7 +46,7 @@ import orjson
 
 from silica.config import CONFIG
 from silica.kernel.base.durable import atomic_write_bytes, disk_stamp
-from silica.kernel.base.home import index_dir
+from silica.kernel.base import home
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ def vault_version() -> str:
 
 
 def _stamps_path() -> Path:
-    return index_dir() / "sync_stamps.json"
+    return home.index_dir() / "sync_stamps.json"
 
 
 def _load_stamps() -> dict[str, float]:
@@ -205,7 +205,7 @@ def _mark_namespace() -> None:
     vault = (CONFIG.vault_path or "").strip()
     if not vault:
         return  # legacy global namespace: no vault to name
-    marker = index_dir() / "vault.json"
+    marker = home.index_file(home.VAULT_MARKER)
     if marker.is_file():
         return
     try:
@@ -238,7 +238,7 @@ def _sweep(stats: SweepStats, uncapped: bool = False) -> SweepStats:
         cooccur_store = None
     lexical_store = None
     try:
-        if (index_dir() / "lexical.json").is_file():
+        if home.lexical_built():
             from silica.kernel.recall.lexical import get_lexical_store
             lexical_store = get_lexical_store()
     except Exception:
