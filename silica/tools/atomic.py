@@ -78,7 +78,7 @@ _SEARCH_CAP = 40
 # showed the same `search "boosting"` line answering `{"paths": []}` once and a
 # page of body snippets the next: same badge, same argument, nothing on screen
 # saying one matches titles and the other matches text.
-@tool(cls="atomic", ingress=False, parallel_safe=True, found_nothing="paths",
+@tool(cls="atomic", ingress=False, parallel_safe=True, found_nothing="paths", found="paths",
       label=("search titles", "query"))
 def silica_search(query: Annotated[str, Field(description='Text to search for in note names in the vault')]) -> dict:
     """Search for notes by NAME/title match. Returns the paths of matching notes.
@@ -453,7 +453,7 @@ def _note_states(hits: list[dict]) -> None:
 
 
 @tool(cls="atomic", ingress=False, parallel_safe=True, reads=Reads(result="hits"),
-      found_nothing="notes_matched", label=("search inside", "query"))
+      found_nothing="notes_matched", found="hits", label=("search inside", "query"))
 def silica_search_context(
     query: Annotated[str, Field(description='Words to look for inside note bodies; the vault vocabulary, not a question')],
     folder: Annotated[str, Field(description='Only notes under this vault-relative folder')] = "",

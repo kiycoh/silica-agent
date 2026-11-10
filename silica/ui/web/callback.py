@@ -38,17 +38,19 @@ def _effect(name: str) -> str:
     return getattr(TOOLS.get(name), "mutates", "") or "read"
 
 
-# The search tools whose results name notes (ADR-0121 point 7): an answer that
-# stood on search snippets and read no note showed nothing to click. The first
-# three of each call, which the chat shows only when no note was read.
-_SEARCHES = ("silica_search", "silica_search_context", "silica_recall")
+# The notes a search call found (ADR-0121 point 7): an answer that stood on
+# search snippets and read no note showed nothing to click. The first three of
+# each call, which the chat shows only when no note was read.
 _FOUND_PER_CALL = 3
 
 
 def _found(name: str, result: Any) -> list[str]:
-    """The notes a search call returned, best first, as vault paths: titles
-    (`paths`), body hits (`hits`), recall's delivered `notes` (no suffix)."""
-    if name not in _SEARCHES or not isinstance(result, str):
+    """The notes a search call returned, best first, as vault paths, read through
+    the key the tool declares (Tool.found). A string is a path or recall's store
+    key, which has no suffix; a `{path}` item is taken as written, since a body
+    search also hits files that are not notes."""
+    key = getattr(TOOLS.get(name), "found", "")
+    if not key or not isinstance(result, str):
         return []
     try:
         data = json.loads(result)
@@ -56,9 +58,12 @@ def _found(name: str, result: Any) -> list[str]:
         return []
     if not isinstance(data, dict):
         return []
-    paths = [p for p in data.get("paths") or [] if isinstance(p, str)]
-    paths += [h["path"] for h in data.get("hits") or [] if isinstance(h, dict) and isinstance(h.get("path"), str)]
-    paths += [n if n.endswith(".md") else n + ".md" for n in data.get("notes") or [] if isinstance(n, str)]
+    paths: list[str] = []
+    for item in data.get(key) or []:
+        if isinstance(item, str):
+            paths.append(item if item.endswith(".md") else item + ".md")
+        elif isinstance(item, dict) and isinstance(item.get("path"), str):
+            paths.append(item["path"])
     return list(dict.fromkeys(paths))[:_FOUND_PER_CALL]
 
 

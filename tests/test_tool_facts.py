@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from silica.agent import memory_gate
-from silica.tools import TOOLS, Reads, catalog, note_keys, tool
+from silica.tools import TOOLS, Reads, Tool, catalog, note_keys, tool
 
 SILICA_ROOT = Path(__file__).resolve().parent.parent / "silica"
 
@@ -34,6 +34,7 @@ MUTATES = {"silica_write_note": "written", "silica_patch_note": "written",
            "silica_delete": "deleted", "silica_move": "moved"}
 FOUND_NOTHING = {"silica_recall": "notes", "silica_semantic_search": "results",
                  "silica_search_context": "notes_matched", "silica_search": "paths"}
+FOUND = {"silica_recall": "notes", "silica_search_context": "hits", "silica_search": "paths"}
 READS = {"silica_read_note": Reads(args=("name",)), "silica_outline": Reads(args=("name",)),
          "silica_read": Reads(args=("path",), result="path"),
          "silica_recall": Reads(args=("notes",), result="notes"),
@@ -64,6 +65,7 @@ def test_the_derived_sets_are_the_ones_they_replaced():
     assert {n for n, t in TOOLS.items() if t.parallel_safe} == PARALLEL
     assert {n: t.mutates for n, t in TOOLS.items() if t.mutates} == MUTATES
     assert {n: t.found_nothing for n, t in TOOLS.items() if t.found_nothing} == FOUND_NOTHING
+    assert {n: t.found for n, t in TOOLS.items() if t.found} == FOUND
     assert {n: t.reads for n, t in TOOLS.items() if t.reads} == READS
     assert {n for n, t in TOOLS.items() if t.once_per_block} == {"silica_recall"}
 
@@ -95,6 +97,20 @@ def test_a_call_to_a_tool_no_longer_registered_still_names_its_note():
 
     assert "silica_gone" not in TOOLS
     assert _note_refs("silica_gone", {"path": "a/b.md"}) == ["a/b.md"]
+
+
+def test_the_chat_footer_reads_found_notes_through_the_declared_key(monkeypatch):
+    """No tool names in the UI: a search that declares `found` reaches the
+    footer, by a string path, a store key (suffixed) or a `{path}` item."""
+    import json
+
+    from silica.ui.web.callback import _found
+
+    monkeypatch.setitem(TOOLS, "silica_probe_search", Tool(
+        lambda: "", "silica_probe_search", "", TOOLS["silica_search"].params_model, "atomic", found="items"))
+    result = json.dumps({"items": ["a/One", {"path": "b/Two.md"}, "a/One.md", 3], "paths": ["x.md"]})
+    assert _found("silica_probe_search", result) == ["a/One.md", "b/Two.md"]
+    assert _found("silica_read_note", json.dumps({"paths": ["x.md"]})) == []
 
 
 def test_a_write_never_runs_beside_another_call():

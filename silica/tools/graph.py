@@ -297,7 +297,7 @@ def _without_score(out: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(cls="composed", ingress=False, parallel_safe=True, once_per_block=True,
-      reads=Reads(args=("notes",), result="notes"), found_nothing="notes",
+      reads=Reads(args=("notes",), result="notes"), found_nothing="notes", found="notes",
       history_view=dedup_recall_excerpts)
 def silica_recall(query: Annotated[str, Field(description='The question or topic to recall memory for')], k: Annotated[int, Field(description='Maximum number of notes contributing to the context')] = 15, memory: Annotated[bool, Field(description='Include the personal-memory lane and its facts (ADR-0019). Pass false for questions scoped to THIS vault — repo and code questions — so an unrelated personal vault cannot occupy context slots.')] = True, vault: Annotated[str, Field(description="Peek: path of another Silica vault to answer from<< (silica_vaults, loadable, lists them)>>. Read-only; the session's vault does not change.")] = "",
                   folder: Annotated[str, Field(description="Only notes under this vault folder (e.g. 'docs/adr', 'silica'). Empty = whole vault. Use it when a subtree of unrelated notes (research on other products, fixtures) keeps taking the slots.")] = "",

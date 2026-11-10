@@ -126,7 +126,7 @@ class Tool:
 
     __slots__ = ("fn", "name", "description", "params_model", "cls", "collapse", "sensitive",
                  "ingress", "mutates", "reads", "parallel_safe", "once_per_block", "note_args", "label",
-                 "found_nothing", "loads", "history_view", "reply_flag", "shrink")
+                 "found_nothing", "found", "loads", "history_view", "reply_flag", "shrink")
 
     def __init__(
         self,
@@ -146,6 +146,7 @@ class Tool:
         note_args: tuple[str, ...] = (),
         label: tuple[str, str | None] | None = None,
         found_nothing: str = "",
+        found: str = "",
         loads: Callable[[dict, Any], Iterable[Any]] | None = None,
         history_view: Callable[[str, set[str]], str] | None = None,
         reply_flag: str = "",
@@ -186,6 +187,10 @@ class Tool:
         self.label = label
         # The result key that is empty when a vault search matched nothing.
         self.found_nothing = found_nothing
+        # The result key listing the notes a vault search found, best first:
+        # paths or `{path}` items. Not found_nothing's key, which for a body
+        # search is a count.
+        self.found = found
         # (args, result) -> tool names this call brings in: the loop offers each
         # one it may. Only ever a successful call's.
         self.loads = loads
