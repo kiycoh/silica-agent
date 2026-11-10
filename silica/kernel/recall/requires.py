@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_memo: dict[str, tuple[str, dict[str, list[str]]]] = {}   # vault -> (epoch, map)
+_memo: dict[tuple[str, str], dict[str, list[str]]] = {}   # (epoch, vault) -> map
 
 
 def resolve(requires: dict[str, list[str]], aliases: dict[str, list[str]],
@@ -40,15 +40,16 @@ def resolve(requires: dict[str, list[str]], aliases: dict[str, list[str]],
 def written_requires(vault: str | Path) -> dict[str, list[str]]:
     """{note path: [prerequisite paths]} for `vault`, over the reader's notes.
     Only a frontmatter that names `requires` is parsed as YAML."""
-    from silica.kernel.base.layout import iter_notes, vault_epoch
+    from silica.kernel.base import layout
+
+    key = str(Path(vault))
+    return layout.on_epoch(_memo, key, lambda: _written(Path(vault)), key)
+
+
+def _written(root: Path) -> dict[str, list[str]]:
+    from silica.kernel.base.layout import iter_notes
     from silica.kernel.base import frontmatter
 
-    root = Path(vault)
-    key = str(root)
-    epoch = vault_epoch(key)
-    hit = _memo.get(key)
-    if epoch and hit is not None and hit[0] == epoch:
-        return hit[1]
     paths: list[str] = []
     aliases: dict[str, list[str]] = {}
     requires: dict[str, list[str]] = {}
@@ -65,8 +66,4 @@ def written_requires(vault: str | Path) -> dict[str, list[str]]:
             data, _raw, _body = frontmatter.split(text)
             if names := frontmatter.requires_in(data):
                 requires[rel] = names
-    out = resolve(requires, aliases, paths) if requires else {}
-    if epoch:
-        _memo.clear()
-        _memo[key] = (epoch, out)
-    return out
+    return resolve(requires, aliases, paths) if requires else {}

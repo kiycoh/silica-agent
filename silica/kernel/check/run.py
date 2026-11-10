@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from silica.config import embedder_defaults
+from silica.kernel.base.durable import atomic_write_bytes
 from silica.kernel.check import GRADES, ORDER
 from silica.kernel.check import blocks as blk
 from silica.kernel.check import pool as pl
@@ -310,9 +311,8 @@ def keep_web(vault: str, path: str, block: Any, row: dict) -> None:
     block boundary is ever pressed in a gate."""
     data = read_cache(vault, path) or {"verdicts": {}}
     data.setdefault("web", {})[_web_key(block)] = row
-    cache_file = _cache_path(vault, path)
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-    cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    # Atomic, as below: a torn cache reads as never checked.
+    atomic_write_bytes(_cache_path(vault, path), json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
 
 def read_cache(vault: str, path: str) -> dict:
@@ -547,13 +547,14 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
         # shortcut: a written reading checked card by card only ever adds
         # verdicts, one per edited block; a whole-note check prunes them.
         merge = stopped or lines is not None
-        cache_file = _cache_path(vault, path)
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
         alive = {_web_key(b) for b in every}
-        cache_file.write_text(json.dumps({"verdicts": {**cache, **fresh} if merge else fresh,
-                                          "report": old.get("report", report) if lines is not None else report,
-                                          "web": {k: v for k, v in web.items() if k in alive}},
-                                         ensure_ascii=False), encoding="utf-8")
+        # Atomic: a torn cache reads as never checked, and every verdict it held
+        # would be paid for again.
+        atomic_write_bytes(_cache_path(vault, path), json.dumps(
+            {"verdicts": {**cache, **fresh} if merge else fresh,
+             "report": old.get("report", report) if lines is not None else report,
+             "web": {k: v for k, v in web.items() if k in alive}},
+            ensure_ascii=False).encode("utf-8"))
     return report
 
 

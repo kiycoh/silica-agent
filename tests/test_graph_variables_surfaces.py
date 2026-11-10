@@ -340,16 +340,16 @@ def test_every_edge_layer_has_a_colour_of_its_own():
     """The zone-crossing highlight once reused the similar layer's azure - the
     same hex - so ticking it changed nothing anyone could see. Every edge
     colour the frame can draw at once has to differ from every other."""
-    from silica.kernel.graph import graph_export as ge
+    from silica.kernel.graph import palette
     from silica.tools import graph_view as gv
 
-    # By NAME first: graph_view re-imports three of graph_export's constants, and
+    # By bare NAME first: graph_view imports three of the palette's constants, and
     # a constant seen twice under its own name is one colour, not two.
     by_name: dict[str, str] = {
-        name: getattr(mod, name).lower()
-        for mod in (ge, gv)
+        name.lstrip("_"): getattr(mod, name).lower()
+        for mod in (palette, gv)
         for name in dir(mod)
-        if name.startswith("_EDGE_COLOR_") and not name.endswith("_PAPER")
+        if name.lstrip("_").startswith("EDGE_COLOR_") and not name.endswith("_PAPER")
     }
     seen: dict[str, str] = {}
     for name, hexv in sorted(by_name.items()):
@@ -570,8 +570,8 @@ def test_context_ships_the_scales_and_the_notes_behind_a_bridge(client, tmp_vaul
     cut = st["cut"]
     assert [(n["name"], n["path"], n["side"]) for n in cut["nodes"]] == [("A", "A.md", "note"), ("B", "B.md", "behind")]
     assert "id" not in cut["nodes"][0] and cut["edges"] == [[0, 1]]
-    from silica.kernel.graph.graph_export import area_color
-    assert cut["colors"] == {"3": [area_color(3), area_color(3, on_paper=True)]}
+    from silica.kernel.graph.palette import community_color
+    assert cut["colors"] == {"3": [community_color(3), community_color(3, on_paper=True)]}
 
 
 def test_context_omits_the_block_for_a_note_the_graph_does_not_hold(client, tmp_vault,

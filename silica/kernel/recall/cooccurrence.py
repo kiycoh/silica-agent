@@ -49,7 +49,7 @@ def _index_path() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
     from silica.kernel.base import home
 
-    return home.index_file("cooccurrence")
+    return home.index_file(home.COOCCURRENCE)
 
 
 def _index_path_for(vault: str) -> Path:
@@ -61,7 +61,8 @@ def _index_path_for(vault: str) -> Path:
     or a fresh `SilicaConfig()`). Tests monkeypatch this directly."""
     from silica.kernel.base import home
 
-    return home.index_dir_for(vault) / "cooccurrence.json"
+    # `or ""`: a missing vault is the legacy base, never the active one (above).
+    return home.index_file(home.COOCCURRENCE, vault or "")
 
 
 def frozen_lang(vault: str) -> str | None:

@@ -118,8 +118,8 @@ def node_color(community: int) -> str:
     """Community colour, shared with /graph; muted slate for -1 (no community)."""
     if community < 0:
         return _MUTED
-    from silica.kernel.graph.graph_export import _community_color
-    return _community_color(community)
+    from silica.kernel.graph.palette import community_color
+    return community_color(community)
 
 
 def _with_md(path: str) -> str:

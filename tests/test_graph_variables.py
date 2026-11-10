@@ -341,10 +341,11 @@ def test_render_shows_the_new_sections(graph_nodes_edges, cooccur_store, monkeyp
 
 def test_cowrite_transactions_are_scoped_to_the_vault_and_capped(tmp_path, monkeypatch):
     import orjson
+    from silica.kernel.base import home
     from silica.kernel.report import cowrite
 
     runs = tmp_path / "runs"
-    monkeypatch.setattr(cowrite, "runs_root", lambda: runs)
+    monkeypatch.setattr(home, "runs_dir", lambda: runs)
 
     def run(rid, vault, paths):
         d = runs / rid

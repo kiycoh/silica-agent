@@ -11,7 +11,6 @@ Silica's and says so: this reads the manifest and the store.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from silica.kernel.base import frontmatter
 
@@ -33,8 +32,8 @@ _AI_FLAG_RE = re.compile(r"^AI:\s*true\s*$", re.MULTILINE)
 def sample_vault_text(vault: str) -> str:
     """Deterministic, cheap sample of a vault's prose for language detection.
 
-    Up to `_LANG_SAMPLE_MAX_FILES` `.md` files (sorted rglob — deterministic
-    across runs/platforms), the first `_LANG_SAMPLE_PER_FILE_CHARS` characters
+    Up to `_LANG_SAMPLE_MAX_FILES` notes (`layout.iter_notes`, in path order, so
+    deterministic across runs/platforms), the first `_LANG_SAMPLE_PER_FILE_CHARS` characters
     of each, concatenated and capped at `_LANG_SAMPLE_TOTAL_CHARS`. The
     per-file cap is kept small (well under total/max_files) so the budget is
     actually SPREAD across the file cap rather than exhausted by the first
@@ -49,14 +48,17 @@ def sample_vault_text(vault: str) -> str:
     the `/vault` info block in commands/vault.py go through `detect_vault_language`
     below, which calls this — no duplicated sampling.
     """
-    from silica.kernel.base.layout import is_vault_artifact
+    from silica.kernel.base.layout import is_vault_artifact, iter_notes
     from silica.kernel.base.manifest import load_manifest, resolve_done_dir
 
-    root = Path(vault)
     try:
-        files = sorted(root.rglob("*.md"))
+        # The vault's own walk, so `.trash/`, `node_modules/` and what
+        # .silicaignore names never vote: a sorted rglob put the trash ahead of
+        # every note, and 30 deleted notes filled the file cap. scope="vault"
+        # keeps the verbatim source leaves the sample has always read.
+        files = iter_notes(vault, scope="vault")
     except Exception:
-        return ""
+        return ""  # nothing to sample: detection answers None, as for an empty vault
     # The agent's own output never votes on the vault's language: 13 generated
     # English notes flipped a human-Italian vault to `english`, and doctor then
     # proposed rebuilding the co-occurrence store in English — freezing the
@@ -71,13 +73,9 @@ def sample_vault_text(vault: str) -> str:
     parts: list[str] = []
     total = 0
     sampled = 0
-    for f in files:
+    for rel, f in files:
         if sampled >= _LANG_SAMPLE_MAX_FILES or total >= _LANG_SAMPLE_TOTAL_CHARS:
             break
-        try:
-            rel = f.relative_to(root).as_posix()
-        except ValueError:
-            rel = f.name
         if is_vault_artifact(rel) or rel.casefold().startswith(done_prefix):
             continue
         try:

@@ -83,7 +83,7 @@ def gain_fn(entries: list[dict], store=None):
     return gain
 
 
-_prereq_memo: dict[str, tuple[str, dict[str, list[str]]]] = {}  # vault -> (epoch, map)
+_prereq_memo: dict[tuple[str, str], dict[str, list[str]]] = {}  # (epoch, vault) -> map
 
 
 def prerequisites_map() -> dict[str, list[str]]:
@@ -97,41 +97,10 @@ def prerequisites_map() -> dict[str, list[str]]:
     """
     try:
         from silica.config import CONFIG
-        from silica.kernel.base.layout import vault_epoch
+        from silica.kernel.base import layout
 
         vault = str(CONFIG.vault_path or "")
-        epoch = vault_epoch(vault) if vault else ""
-        hit = _prereq_memo.get(vault)
-        if epoch and hit is not None and hit[0] == epoch:
-            return hit[1]
-
-        from silica.kernel.recall.cooccurrence import get_cooccur_store
-        from silica.kernel.graph.graph_export import build_graph_data, edge_graph
-        from silica.kernel.graph.signals import refd_prerequisites
-
-        nodes, edges = build_graph_data()
-        store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-        # The map reads two things, the wikilinks and the co-occurrence index,
-        # while the epoch moves on any edit: after a nucleation a plan page
-        # spent 16 s of its first 34 recomputing an unchanged map (2,166
-        # notes, 2026-10-23). Keyed on its inputs, on disk, it survives an
-        # unrelated edit and a restart.
-        sig = _prereq_signature(edges, store)
-        prereq_map = _prereq_disk(sig)
-        if prereq_map is None:
-            G_dir = edge_graph(nodes, edges, directed=True)
-            prereq_map = {}
-            for prereq, dependent, _refd in refd_prerequisites(G_dir, G_dir.nodes, store):
-                prereq_map.setdefault(dependent, []).append(prereq)
-            _prereq_disk(sig, prereq_map)
-        # After the disk cache, which keys on the links and the index alone:
-        # an edit to `requires:` moves the epoch and lands here, not there.
-        prereq_map = with_written(drop_structural(prereq_map, note_index.meta(Path(vault))),
-                                  _written_keys(vault))
-        if epoch:
-            _prereq_memo.clear()
-            _prereq_memo[vault] = (epoch, prereq_map)
-        return prereq_map
+        return layout.on_epoch(_prereq_memo, vault, lambda: _prereq_pass(vault), vault)
     except Exception as exc:
         logger.debug("learner: prerequisites unavailable (%s)", exc)
         # What the person wrote needs no graph and no index (ADR-0145 point 3).
@@ -141,6 +110,33 @@ def prerequisites_map() -> dict[str, list[str]]:
             return _written_keys(CONFIG.vault_path) if CONFIG.vault_path else {}
         except Exception:
             return {}  # no readable vault either: the queue orders by gain alone, as before
+
+
+def _prereq_pass(vault: str) -> dict[str, list[str]]:
+    from silica.config import CONFIG
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.graph.graph_export import build_graph_data, edge_graph
+    from silica.kernel.graph.signals import refd_prerequisites
+
+    nodes, edges = build_graph_data()
+    store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
+    # The map reads two things, the wikilinks and the co-occurrence index,
+    # while the epoch moves on any edit: after a nucleation a plan page
+    # spent 16 s of its first 34 recomputing an unchanged map (2,166
+    # notes, 2026-10-23). Keyed on its inputs, on disk, it survives an
+    # unrelated edit and a restart.
+    sig = _prereq_signature(edges, store)
+    prereq_map = _prereq_disk(sig)
+    if prereq_map is None:
+        G_dir = edge_graph(nodes, edges, directed=True)
+        prereq_map = {}
+        for prereq, dependent, _refd in refd_prerequisites(G_dir, G_dir.nodes, store):
+            prereq_map.setdefault(dependent, []).append(prereq)
+        _prereq_disk(sig, prereq_map)
+    # After the disk cache, which keys on the links and the index alone:
+    # an edit to `requires:` moves the epoch and lands here, not there.
+    return with_written(drop_structural(prereq_map, note_index.meta(Path(vault))),
+                        _written_keys(vault))
 
 
 def prerequisites_of(path: str) -> list[str]:

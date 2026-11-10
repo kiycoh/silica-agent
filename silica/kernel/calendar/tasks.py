@@ -132,24 +132,30 @@ def _filename_date(rel: str, settings: dict) -> dt.date | None:
     return _date(f"{m[1]}-{m[2]}-{m[3]}") if m else None
 
 
-_scan_memo: dict[str, tuple[str, list[Task]]] = {}
+_scan_memo: dict[tuple[str, str], list[Task]] = {}  # (epoch, vault) -> tasks
 
 
 def scan_tasks(vault: Path) -> list[Task]:
     """Every task of the vault, memoized on its file-state epoch like the timeline."""
-    from silica.kernel.base.layout import iter_notes, vault_epoch
+    from silica.kernel.base import layout
 
     vault = Path(vault)
-    epoch = vault_epoch(str(vault))
-    hit = _scan_memo.get(str(vault))
-    if epoch and hit is not None and hit[0] == epoch:
-        return hit[1]
+    tasks = layout.on_epoch(_scan_memo, str(vault), lambda: _scan_tasks(vault), str(vault))
+    return [] if tasks is None else tasks
+
+
+def _scan_tasks(vault: Path) -> list[Task] | None:
+    """The vault's tasks, or None for a format this does not read, which
+    `on_epoch` does not keep: the settings live outside the notes the epoch
+    hashes, so a format switched back is read on the next call."""
+    from silica.kernel.base.layout import iter_notes
+
     settings = tasks_settings(vault)
     if settings["taskFormat"] != "tasksPluginEmoji":
         # ponytail: the Dataview format ([due:: ...]) is not read, so the axis
         # is empty rather than wrong. 0 of the 1 vault with Tasks installed
         # uses it (2026-10-06); the upgrade is one more pattern per date field.
-        return []
+        return None
     rule = daily_rule(vault)
     by_name = settings["useFilenameAsScheduledDate"]
     out: list[Task] = []
@@ -166,7 +172,4 @@ def scan_tasks(vault: Path) -> list[Task]:
             undated = not (t.due or t.scheduled or t.start)
             out.append(Task(**{**t.__dict__, "daily": day,
                                "scheduled": named if undated and named else t.scheduled}))
-    if epoch:
-        _scan_memo.clear()
-        _scan_memo[str(vault)] = (epoch, out)
     return out

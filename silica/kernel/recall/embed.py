@@ -38,7 +38,7 @@ def _index_path() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
     from silica.kernel.base import home
 
-    return home.index_file("embeddings")
+    return home.index_file(home.EMBEDDINGS)
 
 # ---------------------------------------------------------------------------
 # Binary persistence (Fix 2A)

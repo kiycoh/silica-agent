@@ -18,6 +18,7 @@ import tempfile
 from collections.abc import Callable, Collection, Iterator
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import Any, TypeVar
 
 from silica.config import CONFIG
 from silica.kernel.base.manifest import within
@@ -102,6 +103,40 @@ def vault_epoch(vault: str | None = None) -> str:
     except Exception as e:
         logger.debug("vault_epoch unavailable (%s)", e)
         return ""
+
+
+_T = TypeVar("_T")
+
+
+def on_epoch(memo: dict[tuple[str, Any], Any], key: Any, build: Callable[[], _T],
+             vault: str | None = None) -> _T:
+    """`build()`, kept in `memo` until `vault`'s file-state epoch moves (None:
+    the current vault).
+
+    The one copy of a rule twelve vault-wide derivatives wrote by hand. An entry
+    is keyed `(epoch, key)`: it names its own epoch, so a slow build that stores
+    after the vault moved on can never be served (the report memo met that race
+    under one-thread-per-request dispatch). `key` is the caller's and not only
+    the vault, because the report keys on its flags and the distance graph on its
+    folder. A miss drops every entry of another epoch before it builds, so a
+    stale derivative is never held beside the one being built; other vaults'
+    entries go too, since the epoch hashes the vault's root. "" (no signature)
+    builds and keeps nothing, and so does a build that answers None: that is how
+    a caller says "nothing to keep, ask again".
+    """
+    epoch = vault_epoch(vault)
+    if not epoch:
+        return build()
+    hit = memo.get((epoch, key))
+    if hit is not None:
+        return hit
+    # A snapshot of the keys and pop, not del: request threads share these memos.
+    for k in [k for k in list(memo) if k[0] != epoch]:
+        memo.pop(k, None)
+    value = build()
+    if value is not None:
+        memo[(epoch, key)] = value
+    return value
 
 
 # ---------------------------------------------------------------------------

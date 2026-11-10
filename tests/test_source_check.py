@@ -301,6 +301,37 @@ def test_a_verdict_is_cached_by_block_and_passages_and_not_asked_again(firm):
     assert (firm / ".silica/checks").is_dir()
 
 
+def test_a_cache_write_that_fails_keeps_the_verdicts_already_paid_for(firm, monkeypatch):
+    """Both cache writes were a plain write_text: a full disk or a crash mid-write
+    left half a file, which reads as never checked, so every verdict in it was
+    paid for again (W BUG 4, re-audit 2026-11-10)."""
+    import os
+
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.")
+    decide, _calls = _jev("supported")
+    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "x"}]
+    j = lambda t, ps: jd.judge(t, ps, decide=decide, chat=None)
+    run.check_note(path, str(firm), write_dir="silica", search=search, judge=j)
+    paid = run.read_cache(str(firm), path)
+    assert paid["verdicts"]
+
+    def torn(self, data, *a, **k):  # truncate, half the bytes, then the disk fails
+        with open(self, "w", encoding="utf-8") as f:
+            f.write(data[: len(data) // 2])
+        raise OSError("No space left on device")
+
+    def full(*a, **k):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(Path, "write_text", torn)
+    monkeypatch.setattr(os, "replace", full)
+    with pytest.raises(OSError):
+        run.check_note(path, str(firm), write_dir="silica", search=search, judge=j)
+    with pytest.raises(OSError):
+        run.keep_web(str(firm), path, type("Block", (), {"clean": "a block"})(), {"state": "checked"})
+    assert run.read_cache(str(firm), path) == paid
+
+
 def test_not_in_these_passages_is_not_found():
     rows, _ = run._verdict_rows({"kind": "not in these passages", "by": "jev", "p": 0.8}, 7)
     assert rows[0]["kind"] == "not found"

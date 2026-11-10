@@ -22,8 +22,8 @@ from silica.kernel.base import frontmatter, layout
 from silica.kernel.base.noteshape import STAGED, is_spine, note_clock, note_kind
 from silica.kernel.base.syntax import WIKILINK_TARGET_RE
 
-_meta_memo: dict[str, tuple[str, dict[str, dict]]] = {}  # vault -> (epoch, meta)
-_fm_memo: dict[str, tuple[str, dict[str, dict]]] = {}  # vault -> (epoch, path -> frontmatter)
+_meta_memo: dict[tuple[str, str], dict[str, dict]] = {}  # (epoch, vault) -> meta
+_fm_memo: dict[tuple[str, str], dict[str, dict]] = {}  # (epoch, vault) -> path -> frontmatter
 _parsed_memo: dict[str, tuple[tuple[int, int], Any]] = {}  # file -> ((mtime_ns, size), frontmatter)
 
 
@@ -103,12 +103,10 @@ def meta(vault: Path) -> dict[str, dict]:
     since a workspace may list an inbox handout, but its kind is "staged", which
     is not study material.
     """
-    epoch = layout.vault_epoch(str(vault))
-    if epoch:
-        hit = _meta_memo.get(str(vault))
-        if hit is not None and hit[0] == epoch:
-            return hit[1]
+    return layout.on_epoch(_meta_memo, str(vault), lambda: _meta(vault), str(vault))
 
+
+def _meta(vault: Path) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for rel, f in layout.iter_notes(vault):
         try:
@@ -127,10 +125,6 @@ def meta(vault: Path) -> dict[str, dict]:
         # mtime rides along for the picker's freshness rule (learn-suite D13):
         # a note edited after its last rating is asked as new material.
         out[rel] = {"created": created, "ai": ai, "mtime": mtime, "kind": kind, **extra}
-
-    if epoch:
-        _meta_memo.clear()
-        _meta_memo[str(vault)] = (epoch, out)
     return out
 
 
@@ -142,16 +136,13 @@ def frontmatters(vault: Path) -> dict[str, dict]:
     the same pass (100 ms at p90 on a 2,000-note vault), cache it per index
     generation past that.
     """
-    epoch = layout.vault_epoch(str(vault))
-    hit = _fm_memo.get(str(vault))
-    if epoch and hit is not None and hit[0] == epoch:
-        return hit[1]
+    return layout.on_epoch(_fm_memo, str(vault), lambda: _frontmatters(vault), str(vault))
+
+
+def _frontmatters(vault: Path) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for path in meta(vault):
         note = parsed(vault, path, body=False)
         if note is not None:  # one unreadable note must not blind the walk
             out[path] = note[0] or {}
-    if epoch:
-        _fm_memo.clear()
-        _fm_memo[str(vault)] = (epoch, out)
     return out

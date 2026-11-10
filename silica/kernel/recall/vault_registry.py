@@ -149,6 +149,7 @@ def orphan_indexes() -> tuple[list[tuple[Path, Path]], list[tuple[Path, Path]]]:
     whose it was. `absent` are the folders on a drive that is not mounted:
     reported, never removed (`_on_absent_drive`)."""
     from silica.config import silica_home
+    from silica.kernel.base import home
 
     gone: list[tuple[Path, Path]] = []
     absent: list[tuple[Path, Path]] = []
@@ -158,9 +159,9 @@ def orphan_indexes() -> tuple[list[tuple[Path, Path]], list[tuple[Path, Path]]]:
         return gone, absent
     for d in dirs:
         named = []
-        for marker in ("vault.json", "root.json"):
+        for marker in (home.VAULT_MARKER, "root"):
             try:
-                named.append(Path(json.loads((d / marker).read_text(encoding="utf-8"))["path"]))
+                named.append(Path(json.loads((d / f"{marker}.json").read_text(encoding="utf-8"))["path"]))
             except (OSError, ValueError, KeyError, TypeError):
                 continue  # no marker, or a torn one: it names nothing
         if not named or any(p.exists() for p in named):
@@ -224,12 +225,12 @@ def lexical_for(vault: Path):
     """A vault's lexical store as it lies on disk, or None when absent/empty.
     Cached per index path and re-read on another process's write (DiskSynced)."""
     from silica.kernel.recall.lexical import LexicalStore
-    from silica.kernel.base.home import index_dir_for
+    from silica.kernel.base import home
     from silica.kernel.base.durable import path_keyed_singleton
 
-    p = index_dir_for(str(vault)) / "lexical.json"
-    if not p.is_file():
+    if not home.lexical_built(str(vault)):
         return None
+    p = home.index_file(home.LEXICAL, str(vault))
     store = path_keyed_singleton(_LEXICAL_CACHE, str(p), lambda: LexicalStore.load(p))
     store.sync_from_disk()
     return store if len(store) else None
@@ -241,19 +242,17 @@ def coverage(vault: Path) -> dict:
     `level`: "indexed" (embed or cooccur present: silica_recall will answer),
     "lexical-only" (silica_vaults can score it, recall cannot see it), "cold".
     """
-    from silica.kernel.base.home import index_dir_for
-
-    idx = index_dir_for(str(vault))
+    from silica.kernel.base import home
 
     def present(name: str) -> bool:
         # Size, not a load: "{}" is an empty store, and an 18MB embeddings file
         # must not be parsed just to say it exists.
         try:
-            return (idx / name).stat().st_size > 2
+            return home.index_file(name, str(vault)).stat().st_size > 2
         except OSError:
             return False
 
-    embed, cooccur = present("embeddings.json"), present("cooccurrence.json")
+    embed, cooccur = present(home.EMBEDDINGS), present(home.COOCCURRENCE)
     lex = lexical_for(vault)
     level = "indexed" if (embed or cooccur) else ("lexical-only" if lex is not None else "cold")
     return {"level": level, "embed": embed, "cooccur": cooccur, "lexical": lex is not None,
@@ -406,10 +405,10 @@ def probe(vault: Path, query: str, k: int = 3, query_vec=None, reranker=None, *,
 
 
 def _brief(vault: Path) -> str:
-    from silica.kernel.base.home import index_dir_for
+    from silica.kernel.base import home
 
     try:
-        got = json.loads((index_dir_for(str(vault)) / "vault_brief.json").read_text(encoding="utf-8"))
+        got = json.loads(home.index_file(home.VAULT_BRIEF, str(vault)).read_text(encoding="utf-8"))
         return str(got.get("text") or "")
     except (OSError, ValueError):
         return ""  # no GUI ever wrote one; name, manifest and coverage still describe the vault

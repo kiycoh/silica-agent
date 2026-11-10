@@ -14,7 +14,7 @@ import math
 
 import pytest
 
-from silica.kernel.graph import daily_layer, graph_export
+from silica.kernel.graph import daily_layer, graph_export, palette
 from silica.kernel.recall import embed
 
 DAILY = """---
@@ -187,7 +187,7 @@ def test_a_lone_day_is_drawn_neutral(vault):
         n["group"], n["color"] = i, {"background": f"#00000{i}"}
     nodes[1]["group"] = nodes[2]["group"]   # the second day sits in ML's community
     daily_layer.neutral_lone_dailies(nodes)
-    assert nodes[0]["color"] == graph_export._NODE_DEFAULT_COLOR
+    assert nodes[0]["color"] == palette.NODE_DEFAULT_COLOR
     assert nodes[1]["color"] == {"background": "#000001"}
 
 
@@ -212,8 +212,8 @@ def test_the_export_draws_a_lone_day_neutral(monkeypatch, tmp_path):
 
     monkeypatch.setattr(gv, "render_html", spy)
     gv.export_graph(output_path=str(tmp_path / "g.html"))
-    assert seen["nodes"]["daily/2026-09-18.md"]["color"] == graph_export._NODE_DEFAULT_COLOR
-    assert seen["nodes"]["a.md"]["color"] != graph_export._NODE_DEFAULT_COLOR
+    assert seen["nodes"]["daily/2026-09-18.md"]["color"] == palette.NODE_DEFAULT_COLOR
+    assert seen["nodes"]["a.md"]["color"] != palette.NODE_DEFAULT_COLOR
 
 
 def test_the_graph_export_tool_refreshes_the_blocks_first(monkeypatch, vault):

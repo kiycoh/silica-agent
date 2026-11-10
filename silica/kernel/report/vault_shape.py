@@ -113,15 +113,15 @@ def area_matrix(report) -> dict | None:
     # The colours too, though the gaps card paints none: the row is /shape's
     # row, and an area's colour is a function of its id in both producers
     # (detect_communities), so shipping it keeps the two payloads one shape.
-    from silica.kernel.graph.graph_export import _community_color
+    from silica.kernel.graph.palette import community_color
 
     return {
         "areas": [
             {"id": c.cluster_id, "label": short(c.hub) or f"#{c.cluster_id}",
              "path": c.hub or "", "size": c.size, "cohesion": c.cohesion,
              "intra": at(c.cluster_id, c.cluster_id),
-             "color": _community_color(c.cluster_id),
-             "color_paper": _community_color(c.cluster_id, on_paper=True)}
+             "color": community_color(c.cluster_id),
+             "color_paper": community_color(c.cluster_id, on_paper=True)}
             for c in areas
         ],
         "matrix": [[at(a, b) for b in ids] for a in ids],

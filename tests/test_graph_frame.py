@@ -119,13 +119,16 @@ def _edge_colors(paper: bool) -> dict[str, str]:
     floor they land on (graph_view's comment on _EDGE_COLOR_SIMILAR_PARTICLE),
     so their luminance is chosen to hide, not to separate.
     """
-    from silica.kernel.graph import graph_export as ge
+    from silica.kernel.graph import palette
     import silica.tools.graph_view as gv
 
+    # Bare name: the palette's colours are public, the overlays' and the
+    # particles' still private, and graph_view imports both.
     out = {}
-    for mod in (ge, gv):
+    for mod in (palette, gv):
         for name, val in vars(mod).items():
-            if not name.startswith("_EDGE_COLOR_") or "PARTICLE" in name:
+            name = name.lstrip("_")
+            if not name.startswith("EDGE_COLOR_") or "PARTICLE" in name:
                 continue
             if name.endswith("_PAPER") is paper:
                 out[name] = val
@@ -232,12 +235,12 @@ def _tokens(light: bool) -> dict[str, str]:
 def _edge(kind: str) -> dict:
     """An edge as the server sends it: colour pair and opacity from the
     exporters' own constants (CITES carries none and takes the fallback)."""
-    from silica.kernel.graph import graph_export as ge
+    from silica.kernel.graph import palette as pal
     import silica.tools.graph_view as gv
 
-    pair = {"EXTRACTED": (ge._EDGE_COLOR_EXTRACTED, ge._EDGE_COLOR_EXTRACTED_PAPER, 0.72),
-            "AMBIGUOUS": (ge._EDGE_COLOR_AMBIGUOUS, ge._EDGE_COLOR_AMBIGUOUS_PAPER, 0.55),
-            "SIMILAR": (ge._EDGE_COLOR_SIMILAR, ge._EDGE_COLOR_SIMILAR_PAPER, 0.35),
+    pair = {"EXTRACTED": (pal.EDGE_COLOR_EXTRACTED, pal.EDGE_COLOR_EXTRACTED_PAPER, 0.72),
+            "AMBIGUOUS": (pal.EDGE_COLOR_AMBIGUOUS, pal.EDGE_COLOR_AMBIGUOUS_PAPER, 0.55),
+            "SIMILAR": (pal.EDGE_COLOR_SIMILAR, pal.EDGE_COLOR_SIMILAR_PAPER, 0.35),
             "GAP": (gv._EDGE_COLOR_GAP, gv._EDGE_COLOR_GAP_PAPER, 0.95),
             "PROPOSED": (gv._EDGE_COLOR_PROPOSED, gv._EDGE_COLOR_PROPOSED_PAPER, 0.75),
             "COUPLED": (gv._EDGE_COLOR_COUPLED, gv._EDGE_COLOR_COUPLED_PAPER, 0.75),
@@ -251,7 +254,7 @@ def _edge(kind: str) -> dict:
 def _run_frame(body: str, *, light: bool, mode: str = "2d") -> object:
     """The frame's edge paint (LINK_ALPHA_2D through linkPaint) and its 2D
     packer, under the globals they read, then `body`, whose last line prints."""
-    from silica.kernel.graph import graph_export as ge
+    from silica.kernel.graph import palette as pal
 
     js = _frame_js()
     paint = js[js.index("const LINK_ALPHA_2D"):js.index("// --- 3D: every link in ONE LineSegments")]
@@ -260,8 +263,8 @@ def _run_frame(body: str, *, light: bool, mode: str = "2d") -> object:
     tok = _tokens(light)
     gp = {"bg": tok["--void"], "linkDim": tok["--g-link-dim"], "accent": tok["--accent"]}
     stubs = (
-        f"const DATA = {{colors: {{extracted: {json.dumps(ge._EDGE_COLOR_EXTRACTED)},"
-        f" extracted_paper: {json.dumps(ge._EDGE_COLOR_EXTRACTED_PAPER)}}}}};\n"
+        f"const DATA = {{colors: {{extracted: {json.dumps(pal.EDGE_COLOR_EXTRACTED)},"
+        f" extracted_paper: {json.dumps(pal.EDGE_COLOR_EXTRACTED_PAPER)}}}}};\n"
         f"const LIGHT = {json.dumps(light)}, GP = {json.dumps(gp)}, AB = null;\n"
         f"const is2D = () => {json.dumps(mode == '2d')};\n"
         "const FADE_STEPS = 16, PARTICLES = false, libOwnsLink = () => false;\n"

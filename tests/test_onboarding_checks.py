@@ -949,6 +949,23 @@ class TestDetectionIgnoresTheAgentsOwnOutput:
 
         assert detect_vault_language(str(tmp_path)) == "italian"
 
+    def test_the_trash_and_ignored_folders_do_not_vote(self, tmp_path):
+        """A sorted rglob put `.trash/` ahead of every note, and 30 deleted
+        English notes filled the sample's file cap before the vault's own
+        Italian ones were read (re-audit 2026-11-10). The sample walks what
+        layout.iter_notes walks."""
+        from silica.kernel.vault_language import detect_vault_language
+
+        for folder in (".trash", "node_modules/pkg"):
+            (tmp_path / folder).mkdir(parents=True)
+            for i in range(30):
+                (tmp_path / folder / f"old{i}.md").write_text(self.EN * 2, encoding="utf-8")
+        (tmp_path / "Notes").mkdir()
+        for i in range(3):
+            (tmp_path / "Notes" / f"nota{i}.md").write_text(self.IT, encoding="utf-8")
+
+        assert detect_vault_language(str(tmp_path)) == "italian"
+
 
 class TestReplyLanguage:
     IT = TestDetectionIgnoresTheAgentsOwnOutput.IT

@@ -24,9 +24,9 @@ from silica.kernel.base import notekey
 
 logger = logging.getLogger(__name__)
 
-# (epoch,) -> StructureMap. One entry: unlike the graph memo there is no folder
+# (epoch, "") -> StructureMap. One entry: unlike the graph memo there is no folder
 # scope here, so a second key could only ever be a stale epoch.
-_memo: dict[str, StructureMap] = {}
+_memo: dict[tuple[str, str], StructureMap] = {}
 
 
 @dataclass(frozen=True)
@@ -278,25 +278,15 @@ def build() -> StructureMap:
 
 def structure_map() -> StructureMap:
     """The map for the current vault, memoized on its file-state epoch."""
-    from silica.kernel.base.layout import vault_epoch
+    from silica.kernel.base import layout
 
     try:
-        epoch = vault_epoch()
-    except Exception:
-        epoch = ""
-    if epoch and (hit := _memo.get(epoch)) is not None:
-        return hit
-    try:
-        m = build()
+        return layout.on_epoch(_memo, "", build)
     except Exception as exc:
         # Every consumer treats an empty map as "not measured" and prints
         # nothing, so a broken index costs a section, never a 500.
         logger.warning("structure: map unavailable (%s)", exc)
         return StructureMap()
-    if epoch:
-        _memo.clear()
-        _memo[epoch] = m
-    return m
 
 
 def note_structure(node_id: str) -> dict:
@@ -514,10 +504,10 @@ def ladder(root: str, *, hops: int = 3, cap: int = 60) -> dict:
     }
 
 
-# (epoch,) -> bursting rows. Separate from StructureMap because it is the one
+# (epoch, k) -> bursting rows. Separate from StructureMap because it is the one
 # variable that needs the note TEXT (a creation stamp), and the map is built
 # from the graph and the indexes alone.
-_burst_memo: dict[str, list[dict]] = {}
+_burst_memo: dict[tuple[str, int], list[dict]] = {}
 
 
 def bursting(*, k: int = 12) -> list[dict]:
@@ -530,23 +520,13 @@ def bursting(*, k: int = 12) -> list[dict]:
     falling back to the file's mtime exactly as it does: the two surfaces then
     burst on the same window or neither does.
     """
-    from silica.kernel.base.layout import vault_epoch
+    from silica.kernel.base import layout
 
     try:
-        epoch = vault_epoch()
-    except Exception:
-        epoch = ""
-    if epoch and (hit := _burst_memo.get(epoch)) is not None:
-        return hit
-    try:
-        rows = _build_burst(k)
+        return layout.on_epoch(_burst_memo, k, lambda: _build_burst(k))
     except Exception as exc:
         logger.warning("structure: burst unavailable (%s)", exc)
         return []
-    if epoch:
-        _burst_memo.clear()
-        _burst_memo[epoch] = rows
-    return rows
 
 
 def _build_burst(k: int) -> list[dict]:
