@@ -115,9 +115,10 @@ dependencies = [
 
 [project.optional-dependencies]
 # Opt-in localhost web GUI (`silica --gui`); python-multipart backs the drop-zone
-# upload, mdit-py-plugins + latex2mathml render math in the transcript. All four
-# are imported only by silica.ui.web.server, which is reachable only behind the
-# lazy `from silica.ui.web import serve`:
+# upload, mdit-py-plugins + latex2mathml render math in the transcript. FastAPI,
+# uvicorn and python-multipart are imported only under silica.ui.web; the two
+# renderers lazily by silica/kernel/text/render.py, which the chat turn of
+# `silica connect` reaches too, and [connect] does not declare them:
 gui = ["fastapi", "uvicorn", "python-multipart", "mdit-py-plugins>=0.6.1", "latex2mathml>=3.81.0"]
 # scipy is dev-only: no product code imports it (PageRank runs on numpy), but the
 # eval harness under evals/ uses scipy.stats (binomtest, spearmanr) for its gates.

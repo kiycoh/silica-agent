@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 _WAIT_S = 180.0
 _POLL_S = 2.0
 
-# The status rides the narration stream as a `vectors` event (server.py),
+# The status rides the narration stream as a `vectors` event (chat_routes.py),
 # at most every half second within one state: reading the documents of a
 # vault of notes is thousands of steps a second, embedding them one a while.
 TOPIC = "vectors/status"
