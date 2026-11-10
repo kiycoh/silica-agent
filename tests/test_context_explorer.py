@@ -160,7 +160,7 @@ def test_concept_endpoint_returns_graph_keys(client, monkeypatch):
     api, vault = client
     vault.note("Deep/Note.md", "# Note\n")
     monkeypatch.setattr(
-        "silica.tools.graph.silica_concepts",
+        "silica.kernel.recall.concepts.lookup",
         lambda term="", note="", k=10: {"concept": term, "notes": [{"path": "Deep/Note", "count": 3}]},
     )
     assert api.get("/concept", params={"term": "vault"}).json()["notes"] == ["Deep/Note.md"]

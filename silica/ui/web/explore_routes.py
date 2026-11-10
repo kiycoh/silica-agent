@@ -246,10 +246,10 @@ def find(q: str = "", k: int = 5):
 
 
 def _note_concepts(target: str, k: int = 18) -> list[dict]:
-    from silica.tools.graph import silica_concepts
+    from silica.kernel.recall import concepts
 
     try:
-        return silica_concepts(note=target, k=k).get("concepts") or []
+        return concepts.lookup(note=target, k=k).get("concepts") or []
     except Exception:
         logger.debug("context: concepts failed for %s", target, exc_info=True)
         return []
@@ -404,11 +404,11 @@ def concept(term: str = "", k: int = 20):
     """The notes that carry one concept, with paths resolved back to graph keys
     so the ids match the nodes a viewer holds. The page stopped asking this when
     the drawer moved to /concepts; the route stays while a path is a contract."""
-    from silica.tools.graph import silica_concepts
+    from silica.kernel.recall import concepts
 
     resolve = note_resolver()
     try:
-        res = silica_concepts(term=term, k=k)
+        res = concepts.lookup(term=term, k=k)
     except Exception as exc:
         logger.debug("concept: lookup failed for %s", term, exc_info=True)
         return {"term": term, "notes": [], **_failure(exc)}
@@ -434,7 +434,7 @@ def concepts(terms: str = ""):
     ("feedback" and "retroazione" are one stem and two searches).
     """
     from silica.driver import get_driver
-    from silica.tools.graph import silica_concepts
+    from silica.kernel.recall import concepts
 
     words = [t.strip() for t in terms.split(",") if t.strip()][:6]
     resolve = note_resolver()
@@ -443,7 +443,7 @@ def concepts(terms: str = ""):
     for w in words:
         try:
             # k bounds the notes returned; the intersection needs all of them.
-            res = silica_concepts(term=w, k=100_000)
+            res = concepts.lookup(term=w, k=100_000)
         except Exception as exc:
             logger.debug("concepts: lookup failed for %s", w, exc_info=True)
             return {"terms": [], "notes": [], **_failure(exc)}

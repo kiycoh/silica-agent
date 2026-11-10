@@ -416,14 +416,15 @@ def embed_imported(folders: set[str]) -> None:
     ponytail: an agent-run /embed during this thread writes the same store; a
     lock on the store itself is the upgrade, due when a run shows the race."""
     def run() -> None:
-        from silica.tools import TOOLS
+        from silica.agent.vision import ask_chat_model
+        from silica.kernel.recall import refresh
         from silica.ui.web import jobs
 
         jobs.drain(_EMBED_WAIT_S)
         with note_index.EMBED_LOCK:
             for folder in sorted(folders):
                 try:
-                    TOOLS["silica_embed_refresh"].run(folder=folder)
+                    refresh.embed(folder, ask=ask_chat_model)
                 except Exception as exc:
                     # The import is done and the notes are searchable by words;
                     # vectors arrive with the next /embed instead.

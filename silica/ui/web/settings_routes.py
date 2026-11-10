@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -15,6 +15,8 @@ from silica.onboarding import settings_ops
 from silica.session import meter
 from silica.ui.web import session
 from silica.ui.web.session import SESSION
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -189,17 +191,20 @@ def _apply_vault_switch(path: str) -> dict:
 
 
 def _apply_embedding_swap(key: str, value: str) -> dict:
-    from silica.tools import TOOLS
+    from silica.agent.vision import ask_chat_model
+    from silica.kernel.recall import refresh
     from silica.ui.web import settings as st
 
     result = st.apply(key, value)
     if not result["ok"]:
         return result
-    raw = TOOLS["silica_embed_refresh"].run(folder="", force=True)
     try:
-        report = json.loads(raw)
-    except (TypeError, ValueError):
-        report = {"result": str(raw)[:200]}
+        report = refresh.embed("", True, ask=ask_chat_model)
+    except Exception as exc:
+        # The swap is applied and stays so: a rebuild that raised is said in
+        # `reindex`, as the tool this called reported it, and not as a failed swap.
+        logger.exception("embedding swap: the reindex failed")
+        report = {"error": f"{type(exc).__name__}: {exc}"}
     return {**result, "reindex": report}
 
 

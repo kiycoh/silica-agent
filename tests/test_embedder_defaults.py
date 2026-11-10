@@ -115,11 +115,9 @@ def test_the_panels_swap_reindexes_under_the_new_document_prefix(monkeypatch, tm
     import pytest
 
     pytest.importorskip("fastapi")
-    from types import SimpleNamespace
-
     from silica.config import CONFIG
+    from silica.kernel.recall import refresh
     from silica.model.providers import get_embedder
-    from silica.tools import TOOLS
     from silica.ui.web import settings_routes
 
     monkeypatch.setattr("silica.kernel.base.user_env.resolve_env_path", lambda: tmp_path / ".env")
@@ -127,12 +125,12 @@ def test_the_panels_swap_reindexes_under_the_new_document_prefix(monkeypatch, tm
     assert CONFIG.embedding_document_prefix == "title: none | text: "
     seen: dict = {}
 
-    def reindex(**_kw):
+    def reindex(*_a, **_kw):
         embedder = get_embedder(CONFIG)
         seen.update(model=embedder.model, document=embedder.document_prefix, query=embedder.query_prefix)
-        return "{}"
+        return {}
 
-    monkeypatch.setitem(TOOLS, "silica_embed_refresh", SimpleNamespace(run=reindex))
+    monkeypatch.setattr(refresh, "embed", reindex)
     result = settings_routes._apply_embedding_swap("SILICA_EMBEDDING_MODEL", "jina-embeddings-v5-text-small")
     assert result["ok"]
     assert seen == {"model": "jina-embeddings-v5-text-small", "document": "Document: ", "query": "Query: "}
