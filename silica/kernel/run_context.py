@@ -37,8 +37,8 @@ class RunContext:
     def here(cls) -> RunContext:
         """Everything ambient where this is called, narration's run and parent
         included: a helper's beats are the caller's, so they nest where its own
-        would. Opt-in once (30c0087), and four of six callers never opted, so a
-        nucleate's prefetched calls and orphan's judges left their run."""
+        would. Opt-in once (30c0087), and four of six callers never opted, so
+        orphan's judges and the rework's blocks left their span."""
         return cls(contextvars.copy_context(), _narr.current_run(), _narr.current_parent())
 
     @classmethod
