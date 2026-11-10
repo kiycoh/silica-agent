@@ -6,6 +6,7 @@ Settings › Zotero and Explore › Library."""
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -104,6 +105,18 @@ def test_settings_rows_write_the_block(fake, web):
     link = load_manifest(CONFIG.vault_path).zotero
     assert (link.backlinks, link.inbox) == (False, "00_inbox")
     assert web.post("/zotero/setting", json={"key": "library", "value": "x"}).status_code == 400
+
+
+def test_a_vault_yaml_that_does_not_parse_is_named_and_left_as_it_was(fake, web):
+    from silica.kernel.vault_manifest import MANIFEST_REL
+
+    p = Path(CONFIG.vault_path) / MANIFEST_REL
+    p.write_text("zotero:\n  inbox: [00_inbox\n", encoding="utf-8")
+
+    for r in (web.post("/zotero/link", json={"on": True}),
+              web.post("/zotero/setting", json={"key": "inbox", "value": "x"})):
+        assert r.status_code == 400 and "line" in r.json()["detail"]
+    assert p.read_text(encoding="utf-8") == "zotero:\n  inbox: [00_inbox\n"
 
 
 def test_grant_reports_whether_the_key_was_kept(fake, web, tmp_path, monkeypatch):

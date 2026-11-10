@@ -6,18 +6,24 @@
 `/public*` is the view: the vaults, their choices, Publish; ADR-0140 gates it
 by its prefix like any view. `/vault/save*` is Save to Silica and
 `/vault/invitations*` the Private vaults shared with the account, which every
-account gets, beside `/vault/fetch`.
+account gets, beside `/vault/fetch`. `/wikis/*` is the catalog the view shows,
+read from the public host (ADR-0157 point 2).
 """
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import os
+import shutil
+import subprocess
+import sys
+import time
+from itertools import islice
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-
-from silica.ui.web.settings import _tilde
 
 logger = logging.getLogger(__name__)
 
@@ -80,27 +86,35 @@ def _folders(vault: Path, taken: list[str]) -> list[str]:
 def _view() -> dict:
     """Everything the view and the globes draw, from one walk of the vault."""
     from silica.config import hosted
-    from silica.kernel import publish
+    from silica.kernel import account_link, publish
+    from silica.sources.saved_page import catalog_host
     from silica.ui.web.public_site import last_published
 
     vault = publish._vault()
     turned = publish.enforce_tier(vault)
+    # Read once: an unlinked computer reads a Public or Private row as Off (ADR-0157, Consequences),
+    # here and never in vaults(), whose rows a title edit writes back as they were read.
+    can = publish.can_publish()
     h = publish.handle(vault)
     sel = publish.selection(vault)
     notes, fms, of = sel["notes"], sel["frontmatter"], sel["vault_of"]
-    last = (last_published(h) if h else {}).get("vaults", {})
+    # A computer's own state.json is from a Publish before ADR-0157, when it built its pages: what
+    # its account published is the account's to say, in My wikis there (point 10).
+    last = (last_published(h) if h and hosted() else {}).get("vaults", {})
     page_url = publish.page_url(vault)
     out_paths = {p for p, s in notes.items() if s == "on"}
     deg = _degrees(out_paths)
     reviews = publish.host_reviews()
     vaults = []
     for v in sel["vaults"]:
+        vis = v["visibility"] if can else "off"
         mine = [p for p in out_paths if of.get(p) == v["slug"]]
         before = set(last.get(v["slug"], {}).get("notes", []))
         top = sorted(mine, key=lambda p: (-deg.get(p, 0), _title(p, fms.get(p) or {}).lower()))[:_GOES_OUT]
         vaults.append({
-            **{k: v[k] for k in ("slug", "folder", "title", "line", "license", "visibility", "listed",
-                                 "readers", "published", "downgraded")},
+            **{k: v[k] for k in ("slug", "folder", "title", "line", "license", "listed", "readers",
+                                 "published", "downgraded")},
+            "visibility": vis,
             "url": f"{page_url}/{v['slug']}/" if page_url else "",
             "out": len(mine),
             "top": [_title(p, fms.get(p) or {}) for p in top],
@@ -108,7 +122,13 @@ def _view() -> dict:
             "new": sum(1 for p in mine if before and p not in before),
             "published_at": last.get(v["slug"], {}).get("published_at", ""),
             "review": reviews.get(v["slug"], {}),
-            "blocked": last.get(v["slug"], {}).get("blocked", []) if v["visibility"] == "public" else [],
+            "blocked": last.get(v["slug"], {}).get("blocked", []) if vis == "public" else [],
+            # "kept by your computer": the link id itself is the gateway's business, not the page's
+            "computer": bool(v["from_link"]),
+            "sent_listed": v["sent_listed"],
+            # on a computer, whether the linked account holds a copy: `published` may be a local
+            # build's date from before the link, and the account never had that copy
+            "sent": v["sent"],
         })
     return {
         "available": publish.available(vault),
@@ -117,10 +137,11 @@ def _view() -> dict:
         "base": os.environ.get("SILICA_PUBLIC_BASE", "").strip().rstrip("/"),
         "url": page_url,
         "hosted": hosted(),
-        # where the files are, on a laptop: the person serves them; a hosted
-        # path names the server's disk and says nothing to the account. The home
-        # folder reads as ~, as the bug report prints it: the line is read, not typed.
-        "dir": _tilde(str(publish.site_root(h) / "live")) if h and not hosted() else "",
+        # ADR-0157 point 4: a computer publishes through the account it is linked to, or not at
+        # all; the hosted service is the account, and has no link of its own
+        "can_publish": can,
+        "link": None if hosted() else account_link.state(),
+        "wikis_host": catalog_host(),
         "private": publish.private_allowed(),
         "max": publish.max_vaults(),
         "plan": publish.paid_plan(),
@@ -274,20 +295,272 @@ def public_note(payload: dict):
 @router.post("/public/publish", dependencies=_SAME_ORIGIN)
 async def public_publish(payload: dict | None = None):
     """Write one vault and put it out; the button reads "Turn on and
-    publish" while the vault is Off, so it turns the vault Public first."""
-    from silica.kernel import publish
+    publish" while the vault is Off, so it turns the vault Public first.
+    A computer sends the notes to the account it is linked to, which builds
+    the pages: no page a computer writes is ever served (ADR-0157 point 10)."""
+    from silica.config import hosted
+    from silica.kernel import account_link, publish
     from silica.ui.web.public_site import build
 
     slug = str((payload or {}).get("vault") or "")
     if not publish.available():
         raise HTTPException(400, "this account has no public address yet")
     try:
-        if publish.find(slug)["visibility"] == "off":
-            publish.set_visibility(slug, "public")
-        out = await asyncio.to_thread(build, slug)
+        turn_on = publish.find(slug)["visibility"] == "off"
+        if hosted():
+            if turn_on:
+                publish.set_visibility(slug, "public")
+            out = await asyncio.to_thread(build, slug)
+        else:
+            # "Turn off on your account" sends the Off wiki as it is, so its copy there leaves its
+            # address; otherwise an Off wiki goes out Public, and the row turns Public only once the
+            # account took it, so a refusal on either side leaves it as it was
+            off = (payload or {}).get("off") is True
+            out = await asyncio.to_thread(account_link.send, slug, None, "public" if turn_on and not off else None)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {**_view(), "result": out}
+
+
+# --- this computer's link to a hosted account (ADR-0157 point 9) ------------------
+# The app's own routes, which its page calls; the gateway refuses a fetch from a page on
+# localhost, so this server calls it. Bare GET /link is the graph's (server.py).
+
+# The poll id of the code on the screen. Kept here and never given to the page: whoever holds it
+# collects the token once a code is confirmed, so a poll id of someone else's choosing, sent to
+# this server, would link this computer to their account and publish the person's wikis there.
+_POLL: dict[str, str] = {}
+
+
+def _computer() -> None:
+    from silica.config import hosted
+
+    if hosted():
+        # the hosted service is the account itself, and the gateway answers its /link/* paths
+        raise HTTPException(404)
+
+
+@router.get("/link/state")
+def link_state():
+    from silica.kernel import account_link
+
+    _computer()
+    return account_link.state()
+
+
+@router.post("/link/start", dependencies=_SAME_ORIGIN)
+async def link_start():
+    from silica.kernel import account_link
+
+    _computer()
+    try:
+        out = await asyncio.to_thread(account_link.start)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    _POLL["poll"] = out.pop("poll")
+    return out
+
+
+@router.post("/link/poll", dependencies=_SAME_ORIGIN)
+async def link_poll():
+    from silica.kernel import account_link
+
+    _computer()
+    poll = _POLL.get("poll")
+    if not poll:
+        return {"state": "gone"}
+    try:
+        out = await asyncio.to_thread(account_link.poll, poll)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        # the gateway handed the token out once and it could not be kept: only a new code helps
+        _POLL.pop("poll", None)
+        raise HTTPException(400, f"This computer could not keep the link ({exc.strerror or 'disk'}). Link again.")
+    if out["state"] != "pending":
+        _POLL.pop("poll", None)
+    return out
+
+
+@router.post("/link/unlink", dependencies=_SAME_ORIGIN)
+def link_unlink():
+    from silica.kernel import account_link
+
+    _computer()
+    account_link.unlink()
+    return account_link.state()
+
+
+# --- a linked computer's Publish (ADR-0157 points 10 and 11) ----------------------
+
+def _receive(data: bytes, link: str) -> tuple[str, dict]:
+    from silica.kernel import publish
+    from silica.ui.web.public_site import build
+
+    got = publish.receive(data, link)
+    if got["visibility"] == "off":
+        # The computer turned it Off: the notes are in, its address answers that nothing is there,
+        # as an Off here does, and the Page stops listing it.
+        _refresh_page()
+        return got["folder"], {"vault": got["slug"], "url": "", "notes": 0, "published_at": ""}
+    # Built by this account's renderer from the notes, with its tier, its check and its listing:
+    # no page a client wrote is ever served. A build that fails leaves the notes in and the
+    # answer says why; the computer's next Publish builds them.
+    return got["folder"], build(got["slug"])
+
+
+@router.post("/public/receive", dependencies=_SAME_ORIGIN)
+async def public_receive(request: Request):
+    """A wiki a linked computer sends, reached only through the gateway's /link/publish, which
+    checks its token (silica-hosted deploy/Caddyfile). The body is the zip; the answer is what
+    the computer shows: {"slug", "url", "notes", "published_at"}."""
+    from silica.config import hosted
+    from silica.kernel import publish
+    from silica.ui.web.server import _begin_turn, _embed_imported, _end_turn
+
+    if not hosted():
+        raise HTTPException(404)
+    # The gateway's word and never the package's: Caddy drops any X-Silica-* a client sent and
+    # copies this one from the token's check, as it does X-Silica-Email (ADR-0154 point 13). An
+    # older Caddy copies a header the check did not set as empty.
+    link = request.headers.get("x-silica-link", "")
+    if not publish.LINK_ID.fullmatch(link):
+        raise HTTPException(401, "this computer is not linked to this account")
+    data = await _wiki_body(request)
+    # The one serialisation of vault writes the server has (see /vault/import). 503 and not the
+    # 409 the other writers answer: here 409 is the folder of the person's own, which the
+    # computer offers to rename, and a busy account only asks for the same Publish again.
+    if not _begin_turn():
+        raise HTTPException(503, "this account is busy with a turn: publish again when it ends")
+    try:
+        folder, out = await asyncio.to_thread(_receive, data, link)
+    except publish.FolderTaken as exc:
+        raise HTTPException(409, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        # the account's disk, full or not writable: the package was fine, and the sentence says so
+        raise HTTPException(500, f"this account could not write the wiki ({exc.strerror or exc})")
+    finally:
+        _end_turn()
+    _embed_imported({folder})
+    return {"slug": out["vault"], "url": out["url"], "notes": out["notes"], "published_at": out["published_at"]}
+
+
+# --- Save as a file (ADR-0157 point 5) ------------------------------------------
+
+def _downloads() -> Path:
+    """Where a computer saves a wiki file: the desktop's Downloads folder, else ~/Downloads."""
+    home = Path.home()
+    if shutil.which("xdg-user-dir"):
+        try:
+            said = subprocess.run(["xdg-user-dir", "DOWNLOAD"], capture_output=True, text=True,
+                                  timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            # a desktop that cannot answer is one with no folder of its own: ~/Downloads is the
+            # folder every other platform uses
+            said = ""
+        # With no Downloads set it answers the home folder itself, which is no Downloads folder:
+        # the zip would land at the top of the person's home, among their own files
+        if said and Path(said).is_dir() and Path(said).resolve() != home.resolve():
+            return Path(said)
+    d = home / "Downloads"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _into_downloads(path: Path, name: str) -> Path:
+    """The zip copied under a name no file in Downloads has, "x (2).zip" after "x.zip" as a browser
+    names a second download. Created exclusively, so a file of the person's, or a save running
+    beside this one, is never overwritten."""
+    folder, stem, n = _downloads(), name.removesuffix(".zip"), 1
+    while True:
+        dest = folder / (name if n == 1 else f"{stem} ({n}).zip")
+        n += 1
+        try:
+            out = dest.open("xb")
+        except FileExistsError:
+            continue
+        try:
+            with out, path.open("rb") as src:
+                shutil.copyfileobj(src, out)
+        except BaseException:
+            dest.unlink(missing_ok=True)  # half a zip in Downloads would be passed on as if whole
+            raise
+        return dest
+
+
+def _open_folder(folder: Path) -> None:
+    opener = {"darwin": "open", "win32": "explorer"}.get(sys.platform, "xdg-open")
+    # not waited for: a file manager that stays open must not hold the request
+    subprocess.Popen([opener, str(folder)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+@router.get("/public/vault/{slug}/file", dependencies=_SAME_ORIGIN)
+async def public_file(slug: str):
+    """The wiki file as a download, on every install: how the hosted service hands it over."""
+    from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
+
+    from silica.ui.web.public_site import build_file
+
+    try:
+        path, out = await asyncio.to_thread(build_file, slug)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    # Set here and not through `filename=`, which Starlette writes as `filename="..."` for an ASCII
+    # name. The folder goes once the zip is sent; one a dropped download leaves, the next build sweeps.
+    said = f"attachment; filename*=UTF-8''{quote(out['name'], safe='')}"
+    return FileResponse(path, media_type="application/zip", headers={"Content-Disposition": said},
+                        background=BackgroundTask(shutil.rmtree, path.parent, ignore_errors=True))
+
+
+@router.post("/public/vault/{slug}/file", dependencies=_SAME_ORIGIN)
+async def public_file_save(slug: str):
+    """The wiki file written into this computer's Downloads, so the screen can say where it is."""
+    from silica.config import hosted
+    from silica.ui.web.public_site import build_file
+
+    if hosted():
+        # the server's disk is not the person's: there the browser downloads the GET
+        raise HTTPException(404)
+    try:
+        path, out = await asyncio.to_thread(build_file, slug)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    try:
+        dest = await asyncio.to_thread(_into_downloads, path, out["name"])
+    except OSError as exc:
+        raise HTTPException(400, f"Downloads did not take the file ({exc.strerror or exc})")
+    finally:
+        # a folder that will not go is swept by the next build, past its hour
+        shutil.rmtree(path.parent, ignore_errors=True)
+    # the folder by its own name: a desktop set to another language calls Downloads "Scaricati"
+    return {"path": str(dest), "name": dest.name, "folder": dest.parent.name, "notes": out["notes"],
+            "bytes": out["bytes"]}
+
+
+@router.post("/public/reveal", dependencies=_SAME_ORIGIN)
+def public_reveal(payload: dict):
+    """Show in folder, for a wiki file this computer saved. Only inside Downloads, so whatever
+    reaches this route cannot make it open any other folder."""
+    from silica.config import hosted
+
+    if hosted():
+        raise HTTPException(404)
+    raw = str(payload.get("path") or "")
+    # both sides resolved, so neither `..` nor a link planted in Downloads leads out of it
+    p = Path(raw).resolve() if raw and Path(raw).is_absolute() else None
+    # A file that exists, so its parent is a folder: `<Downloads>/x.desktop/y` resolves without
+    # complaint, and its parent is a file the opener would launch.
+    if p is None or not p.is_file() or _downloads().resolve() not in p.parents:
+        raise HTTPException(400, "only a file in Downloads can be shown in its folder")
+    try:
+        _open_folder(p.parent)
+    except OSError as exc:
+        raise HTTPException(400, f"the folder could not be opened ({exc.strerror or exc})")
+    return {"ok": True}
 
 
 # --- the check before Publish (ADR-0153 points 9, 20 and 26) --------------------
@@ -467,6 +740,44 @@ async def invitation_save(payload: dict):
     return {"path": out["first"], **out}
 
 
+async def _wiki_body(request: Request) -> bytes:
+    """A wiki's zip as the body, refused past the cap as it arrives, so a larger one is never
+    held whole: Open a file's and a linked computer's Publish's."""
+    from silica.sources import saved_page
+
+    too_big = HTTPException(413, str(saved_page._file_too_big()))
+    said = request.headers.get("content-length", "")
+    if said.isdigit() and int(said) > saved_page.WIKI_FILE_MAX:
+        raise too_big
+    # shortcut: held in memory, twice during the join, so 200 MB at the cap beside the 234 MiB a
+    # tenant holds on average (2026-11-06); spool it to silica_tmp_dir() and open the zip from
+    # there at the first tenant the kernel's OOM killer names during an Open or a receive
+    # (journalctl -k on the host), and look again by 2027-02-01 whatever it shows
+    chunks, held = [], 0
+    async for chunk in request.stream():
+        held += len(chunk)
+        if held > saved_page.WIKI_FILE_MAX:
+            raise too_big
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@router.post("/vault/invitations/file", dependencies=_SAME_ORIGIN)
+async def invitation_file(request: Request):
+    """Open a file (ADR-0157 point 7)."""
+    from silica.sources import saved_page
+
+    data = await _wiki_body(request)
+    try:
+        out = await asyncio.to_thread(saved_page.open_file, data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        # this account's own folder, full or not writable: said in a sentence, as a refused file is
+        raise HTTPException(400, f"the file could not be unpacked here ({exc.strerror or exc})")
+    return {"opened": out, "invitations": saved_page.invitations()}
+
+
 @router.post("/vault/invitations/decline", dependencies=_SAME_ORIGIN)
 def invitation_decline(payload: dict):
     from silica.sources import saved_page
@@ -476,3 +787,115 @@ def invitation_decline(payload: dict):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {"invitations": saved_page.invitations()}
+
+
+# Wikis, the catalog and a card's cover (ADR-0157 point 2), read from the public host by this
+# server and never by the browser, so no host widens CORS. Ten minutes is the ADR's number: the
+# host rewrites the catalog every two. Only an answer is kept, so a failed read is asked again.
+_KEEP = 600
+_WIKIS: dict[str, tuple[float, dict]] = {}
+# the cache's clock, patched by the tests: time.monotonic itself is the event loop's too
+_now = time.monotonic
+# what one card's cover may draw; a vault.json is an account's file, so its size is not trusted
+_NODES, _EDGES = 4000, 20000
+
+
+def _finite(v) -> bool:
+    # compared, never converted: NaN fails both comparisons, and float(10**400) raises OverflowError
+    return type(v) in (int, float) and -1e308 < v < 1e308
+
+
+def _catalog(raw, host: str) -> dict | None:
+    """index.json's entries as the host wrote them (pages_catalog.entry), each field of its own
+    type and length or emptied; an entry whose handle or slug is not a name is left out, and
+    its address is the one they make, so no entry links anywhere else."""
+    from silica.sources.saved_page import _NAME, _text
+    from silica.ui.web.pages_catalog import _int
+
+    if not isinstance(raw, list):
+        return None
+    wikis = []
+    for e in raw:
+        h, s = (e.get("handle"), e.get("slug")) if isinstance(e, dict) else (None, None)
+        if not (isinstance(h, str) and isinstance(s, str) and _NAME.fullmatch(h) and _NAME.fullmatch(s)):
+            continue
+        count = c if isinstance(c := e.get("count"), dict) else {}
+        areas = a if isinstance(a := e.get("areas"), list) else []
+        wikis.append({
+            "handle": h, "slug": s, "title": _text(e.get("title"), 80) or s,
+            "line": _text(e.get("line"), 160), "published": _text(e.get("published"), 10),
+            "count": {"notes": _int(count.get("notes")), "areas": _int(count.get("areas"))},
+            # 200 and 80 are the host's own caps in pages_catalog.entry
+            "areas": [[_text(r[0], 80), _int(r[1])] for r in areas[:200] if isinstance(r, list) and len(r) == 2],
+            "license": _text(e.get("license"), 80), "url": f"/@{h}/{s}/",
+        })
+        if len(wikis) == 500:
+            break
+    return {"host": host, "wikis": wikis,
+            "read_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+
+
+def _graph(raw) -> dict | None:
+    """A card's cover from a wiki's vault.json: each note's place and degree, and the links. A
+    malformed note is dropped and the links renumbered past it, so no link joins two other notes."""
+    if not (isinstance(raw, dict) and isinstance(raw.get("n"), list) and isinstance(raw.get("e"), list)):
+        return None
+    n, at = [], {}
+    for i, r in enumerate(raw["n"]):
+        if len(n) == _NODES:
+            break
+        # a row is [x, y, area, deg, title, slug]
+        if isinstance(r, list) and len(r) >= 4 and _finite(r[0]) and _finite(r[1]) \
+                and type(r[3]) is int and 0 <= r[3] < 10**7:  # the host's own ceiling, pages_catalog._int
+            at[i] = len(n)
+            n.append([min(1, max(0, r[0])), min(1, max(0, r[1])), r[3]])
+    # type first: True and 1.0 are keys of `at` too, and a list is no key at all
+    e = islice(([at[r[0]], at[r[1]]] for r in raw["e"]
+                if isinstance(r, list) and len(r) == 2 and all(type(i) is int and i in at for i in r)), _EDGES)
+    return {"n": n, "e": list(e)}
+
+
+async def _wikis_read(url: str, shape, **fetch) -> dict | None:
+    """What `shape` makes of the JSON at `url` (`fetch` goes to _fetch_json), kept _KEEP seconds;
+    None when it could not be read. The routes are async so the cache is only touched on the
+    event loop's thread."""
+    from silica.sources import saved_page
+
+    now = _now()
+    if (hit := _WIKIS.get(url)) and now - hit[0] < _KEEP:
+        return hit[1]
+    try:
+        out = await asyncio.to_thread(lambda: shape(saved_page._fetch_json(url, **fetch)))
+    except Exception as exc:
+        # httpx's own errors, a body that is not JSON, the host guard's refusal: the Wikis tab says
+        # it could not read the host and My wikis, which reads none of this, keeps working
+        logger.warning("wikis: %s not read: %s: %s", url, type(exc).__name__, exc)
+        return None
+    if out is not None:
+        for k in [k for k, (t, _) in _WIKIS.items() if now - t >= _KEEP]:
+            del _WIKIS[k]
+        _WIKIS[url] = (now, out)
+    return out
+
+
+@router.get("/wikis/catalog")
+async def wikis_catalog():
+    from silica.sources.saved_page import catalog_host
+
+    host = catalog_host()
+    out = await _wikis_read(f"https://{host}/index.json", lambda raw: _catalog(raw, host))
+    return out or {"error": "Wikis could not be read."}
+
+
+@router.get("/wikis/graph")
+async def wikis_graph(handle: str = "", slug: str = ""):
+    from silica.sources.saved_page import _NAME, catalog_host
+    from silica.ui.web.pages_catalog import _MAX_MANIFEST
+
+    if not (_NAME.fullmatch(handle) and _NAME.fullmatch(slug)):
+        raise HTTPException(400, "that is not a wiki's handle and name")
+    # Bounded before the parse, which grows it (9 MB of [] held 192 MiB, 06c69d5): the host lists no
+    # vault.json past this cap, and the route takes any name, so a bigger one is no listed wiki's.
+    out = await _wikis_read(f"https://{catalog_host()}/@{handle}/{slug}/vault.json", _graph,
+                            cap=_MAX_MANIFEST)
+    return out or {"error": "This wiki's graph could not be read."}

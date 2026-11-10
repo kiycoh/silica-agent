@@ -383,19 +383,108 @@ def _block_span(lines: list[str], name: str = "zotero") -> tuple[int, int] | Non
     return start, end
 
 
-def _write_lines(vault: str | Path, mutate) -> Path:
+def _block_indent(lines: list[str], start: int, end: int) -> int:
+    """The column of the block's own keys, from its first line that is neither blank nor a comment;
+    2 for an empty block, as a new one is written."""
+    for line in lines[start + 1:end]:
+        body = line.lstrip(" ")
+        if body.strip() and not body.startswith("#"):
+            return len(line) - len(body)
+    return 2
+
+
+def _key_span(lines: list[str], block: str, key: str) -> tuple[int, int] | None:
+    """[i, j) of `key` in the top-level `block`: its line and every line of its value, None when
+    absent. Only a key at the block's own column is the key, so one named so deeper down, a file
+    called `handle` under `sources:`, is never taken for it. The value is the deeper lines and,
+    at the key's own column, the `- ` lines PyYAML writes a list as; a blank or a comment between
+    two keys stays with the key after it."""
+    span = _block_span(lines, block)
+    if span is None:
+        return None
+    start, end = span
+    col = _block_indent(lines, start, end)
+    head = re.compile(rf" {{{col}}}{re.escape(key)}\s*:")
+    i = next((n for n in range(start + 1, end) if head.match(lines[n])), None)
+    if i is None:
+        return None
+    last = i
+    for n in range(i + 1, end):
+        body = lines[n].lstrip(" ")
+        if not body.strip() or body.startswith("#"):
+            continue
+        depth = len(lines[n]) - len(body)
+        if depth > col or (depth == col and (body.startswith("- ") or body.rstrip() == "-")):
+            last = n
+        else:
+            break
+    return i, last + 1
+
+
+class ManifestRefused(ValueError):
+    """A write vault_manifest would not make, with a sentence for the person: a ValueError, so every
+    caller that maps one keeps doing so, and its own class, so a route can pass this sentence on and
+    no other exception's text."""
+
+
+def _parsed(text: str, path: Path):
+    try:
+        return yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        where = f" (line {mark.line + 1})" if mark else ""
+        raise ManifestRefused(f"{path.name} cannot be read{where}, so Silica did not change it: "
+                         "fix that line and try again") from None
+
+
+def _write_lines(vault: str | Path, mutate, check=None) -> Path:
+    """Write what `mutate` makes of vault.yaml's lines, only over a file that parses and only when
+    `check` holds on what the result parses to. A line-level edit can leave a file PyYAML refuses,
+    and every reader of vault.yaml reads that as no settings at all, which the next write of
+    `vaults:` would then make true: so nothing is written that does not read back as meant."""
     from silica.kernel.recall.paths import atomic_write_bytes
 
     path = Path(vault) / MANIFEST_REL
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    _parsed(text, path)
     lines = text.splitlines(keepends=True)
     if lines and not lines[-1].endswith("\n"):
         lines[-1] += "\n"
-    lines = mutate(lines)
+    new = "".join(mutate(lines))
+    if check is not None:
+        try:
+            ok = check(_parsed(new, path))
+        except ManifestRefused:
+            ok = False
+        if not ok:
+            raise ManifestRefused(f"Silica could not change {path.name} without breaking its other lines, "
+                             "so it left the file as it was")
     path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_bytes(path, "".join(lines).encode("utf-8"))
+    atomic_write_bytes(path, new.encode("utf-8"))
     reset_manifest_cache()
     return path
+
+
+def _in_block(parsed, block: str) -> dict | None:
+    got = parsed.get(block) if isinstance(parsed, dict) else None
+    return got if isinstance(got, dict) else None
+
+
+# What PyYAML's reader refuses raw (\x7f-\x84, \x86-\x9f, a lone surrogate, \ufffe, \uffff) or folds
+# into a space inside quotes (\x85, \u2028, \u2029): written as escapes, which it reads back as the
+# character. json.dumps already escapes the C0 controls, the quote and the backslash.
+_YAML_RAW = re.compile("[\x7f-\x9f\u2028\u2029\ud800-\udfff\ufffe\uffff]")
+
+
+def _render(value) -> str:
+    """`value` as one line of YAML flow. JSON, which YAML reads verbatim, so a collection named
+    `2024` stays a string; not ASCII, since json.dumps writes an emoji as a surrogate pair, which
+    PyYAML reads back as two lone halves that no response or page can encode."""
+    import json
+
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return _YAML_RAW.sub(lambda m: f"\\u{ord(m.group()):04x}", json.dumps(value, ensure_ascii=False))
 
 
 def set_zotero(vault: str | Path, key: str, value: str | bool) -> Path:
@@ -407,59 +496,54 @@ def set_block_key(vault: str | Path, block: str, key: str, value) -> Path:
     """Set one key of a top-level block, creating the block when absent.
 
     Line-level like `set_write_dir`, for the same reason: vault.yaml is
-    hand-written and a yaml round-trip would drop its comments. Strings and
-    lists are written as JSON, which YAML reads back verbatim, so a
-    collection named `2024` stays a string and a folder list stays one line.
+    hand-written and a yaml round-trip would drop its comments. The value is
+    one line of JSON (`_render`), and it replaces the old value whole, over
+    as many lines as that ran. ValueError, and nothing written, when the file
+    does not parse or would not read back with `key` as `value`.
     """
     import json
 
-    rendered = ("true" if value else "false") if isinstance(value, bool) else json.dumps(value)
-    line = f"  {key}: {rendered}\n"
-    key_re = re.compile(rf"\s+{re.escape(key)}\s*:")
+    rendered = _render(value)
+    # what the file must read back: JSON's own round trip, so a tuple is the list it is written as
+    want = value if isinstance(value, bool) else json.loads(json.dumps(value))
 
     def mutate(lines: list[str]) -> list[str]:
         span = _block_span(lines, block)
         if span is None:
-            return [*lines, f"{block}:\n", line]
-        start, end = span
-        for i in range(start + 1, end):
-            if key_re.match(lines[i]):
-                lines[i] = line
-                return lines
-        return [*lines[:end], line, *lines[end:]]
+            return [*lines, f"{block}:\n", f"  {key}: {rendered}\n"]
+        line = f"{' ' * _block_indent(lines, *span)}{key}: {rendered}\n"
+        at = _key_span(lines, block, key)
+        if at is None:
+            return [*lines[:span[1]], line, *lines[span[1]:]]
+        return [*lines[:at[0]], line, *lines[at[1]:]]
 
-    return _write_lines(vault, mutate)
+    def check(parsed) -> bool:
+        got = _in_block(parsed, block)
+        return got is not None and key in got and got[key] == want
+
+    return _write_lines(vault, mutate, check)
 
 
 def unset_block_key(vault: str | Path, block: str, key: str) -> Path | None:
-    """Remove one key of a top-level block and the lines indented under it,
-    so a list written by hand over several lines goes with its key. None
-    when there was nothing to remove, and the file is not rewritten."""
+    """Remove one key of a top-level block and every line of its value, so a
+    list written over several lines, in either of YAML's shapes, goes with its
+    key. None when there was nothing to remove, and the file is not rewritten."""
     path = Path(vault) / MANIFEST_REL
     if not path.is_file():
         return None
-    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    span = _block_span(lines, block)
-    key_re = re.compile(rf"(\s+){re.escape(key)}\s*:")
-    if span is None or not any(key_re.match(lines[i]) for i in range(span[0] + 1, span[1])):
+    if _key_span(path.read_text(encoding="utf-8").splitlines(keepends=True), block, key) is None:
         return None
 
     def mutate(lines: list[str]) -> list[str]:
-        now = _block_span(lines, block)
-        if now is None:  # the block went between the read above and the write: nothing to remove
-            return lines
-        start, end = now
-        for i in range(start + 1, end):
-            m = key_re.match(lines[i])
-            if m:
-                j, depth = i + 1, len(m.group(1).expandtabs())
-                while j < end and (not lines[j].strip()
-                                   or len(lines[j]) - len(lines[j].lstrip()) > depth):
-                    j += 1
-                return [*lines[:i], *lines[j:]]
-        return lines
+        at = _key_span(lines, block, key)
+        return lines if at is None else [*lines[:at[0]], *lines[at[1]:]]
 
-    return _write_lines(vault, mutate)
+    def check(parsed) -> bool:
+        # a block left with no key reads as None, the same nothing as an empty one
+        got = parsed.get(block) if isinstance(parsed, dict) else None
+        return got is None or (isinstance(got, dict) and key not in got)
+
+    return _write_lines(vault, mutate, check)
 
 
 def unlink_zotero(vault: str | Path) -> Path:
@@ -468,7 +552,7 @@ def unlink_zotero(vault: str | Path) -> Path:
         span = _block_span(lines, "zotero")
         return lines if span is None else [*lines[:span[0]], *lines[span[1]:]]
 
-    return _write_lines(vault, mutate)
+    return _write_lines(vault, mutate, lambda parsed: not isinstance(parsed, dict) or "zotero" not in parsed)
 
 
 _WRITE_DIR_LINE = re.compile(r"write_dir\s*:")

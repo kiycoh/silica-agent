@@ -64,3 +64,9 @@ def test_a_long_line_is_cut_around_its_link(tmp_path):
     text = "x " * 200 + "[Curve](https://pages.test/@m/v/curve) " + "y " * 200
     line = _line(tmp_path, text, "curve")
     assert line.startswith("…") and line.endswith("…") and "Curve" in line and len(line) <= 232
+
+
+def test_from_data_reads_a_file_by_its_last_segment(tmp_path):
+    got = _run(tmp_path, 'console.log(JSON.stringify([fromData({"vault.json": 1}, "x/vault.json"),'
+                         ' fromData({"vault.json": 1}, "x/notes.json") === undefined, fromData(undefined, "vault.json") === undefined]));')
+    assert got == [1, True, True]

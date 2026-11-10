@@ -50,7 +50,23 @@ def _block(vault: Path) -> dict:
     except (OSError, yaml.YAMLError):
         return {}
     block = raw.get(PUBLIC_KEY) if isinstance(raw, dict) else None
-    return block if isinstance(block, dict) else {}
+    return _paired(block) if isinstance(block, dict) else {}
+
+
+_HALF = re.compile("[\ud800-\udfff]")
+
+
+def _paired(value):
+    """`value` with each surrogate pair read as its character. Before 2026-11-08 the writer put an
+    emoji as `\\ud83c\\udfa8`, which PyYAML reads as two lone halves that no response or page can
+    encode; a half with no partner has no character and reads as U+FFFD."""
+    if isinstance(value, str):
+        return value.encode("utf-16", "surrogatepass").decode("utf-16", "replace") if _HALF.search(value) else value
+    if isinstance(value, list):
+        return [_paired(v) for v in value]
+    if isinstance(value, dict):
+        return {_paired(k): _paired(v) for k, v in value.items()}
+    return value
 
 
 def slugify(text: str) -> str:
@@ -224,6 +240,9 @@ LICENSES = ("not stated", "CC BY 4.0", "CC BY-SA 4.0", "CC BY-NC 4.0", "CC0 1.0"
 # A vault's slug is a folder of the page beside these, so none may take their names.
 _RESERVED_SLUGS = {"index", "assets", "_s", "private", "paused", "vault"}
 _HANDLE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,28}[a-z0-9])?$")
+# The gateway's link id, as Caddy's matcher lets it reach a tenant (silica-hosted deploy/Caddyfile,
+# `handle /link/publish*`). Always fullmatch: `$` also passes a trailing newline.
+LINK_ID = re.compile(r"[0-9a-f]{16}")
 
 
 def _clean_vault(raw) -> dict | None:
@@ -238,6 +257,8 @@ def _clean_vault(raw) -> dict | None:
     vis = raw.get("visibility")
     lic = raw.get("license")
     readers = r if isinstance(r := raw.get("readers"), list) else []
+    link = raw.get("from_link")
+    said = a if isinstance(a := raw.get("answers"), dict) else {}
     return {
         "folder": folder,
         "slug": slugify(text("slug", 60)) or slugify(folder.rsplit("/", 1)[-1]) or "vault",
@@ -250,6 +271,15 @@ def _clean_vault(raw) -> dict | None:
                            if isinstance(r, str) and _HANDLE.match(r.strip().lstrip("@").lower())}),
         "published": text("published", 40),
         "downgraded": raw.get("downgraded") is True,
+        # the linked computer this folder came from, and what its author answered for each note
+        # (ADR-0157 points 10 and 11); "" and {} for a folder of this account's own
+        "from_link": link if isinstance(link, str) and LINK_ID.fullmatch(link) else "",
+        # on a linked computer: the listing request its last Publish carried, so the view can say
+        # that one asked since has not reached the account yet
+        "sent_listed": raw.get("sent_listed") is True,
+        # the published date is the linked account's, set by a Publish sent there: it goes on unlink
+        "sent": raw.get("sent") is True,
+        "answers": {k: v for k, v in said.items() if isinstance(k, str) and isinstance(v, dict)},
     }
 
 
@@ -284,8 +314,11 @@ def _save_vaults(items: list[dict], vault: Path) -> None:
     """Write `vaults:` and drop ADR-0143's keys, which it replaces."""
     from silica.kernel.vault_manifest import set_block_key, unset_block_key
 
-    keep = ("folder", "slug", "title", "line", "license", "visibility", "listed", "readers", "published")
-    rows = [{k: v[k] for k in keep if v.get(k) not in ("", [], None, False)}
+    # from_link above all: a row written without it would turn the computer's folder into one
+    # of the person's, and its next Publish would be refused (ADR-0157 point 10)
+    keep = ("folder", "slug", "title", "line", "license", "visibility", "listed", "readers", "published",
+            "from_link", "answers", "sent_listed", "sent")
+    rows = [{k: v[k] for k in keep if v.get(k) not in ("", [], {}, None, False)}
             | ({"downgraded": True} if v.get("downgraded") else {}) for v in items]
     set_block_key(vault, PUBLIC_KEY, "vaults", rows)
     for old in ("folders", "page"):
@@ -313,7 +346,9 @@ def private_allowed() -> str:
     from silica.config import hosted
 
     if not hosted():
-        return "hosted"
+        # A linked computer's account decides, and its receive refuses a Private that its tier
+        # does not list: the gateway never tells a computer the tier (ADR-0157 point 9)
+        return "ok" if can_publish() else "hosted"
     names = {v.strip() for v in os.environ.get("SILICA_VIEWS", "").split(",")}
     return "ok" if names & {"all", "private"} else "paid"
 
@@ -372,15 +407,19 @@ def add_vault(folder: str, vault: Path | None = None) -> dict:
     for v in items:
         if _within(folder, v["folder"]) or _within(v["folder"], folder):
             raise ValueError(f"{folder} overlaps the wiki {v['title']} ({v['folder']})")
-    base = slugify(folder.rsplit("/", 1)[-1]) or "vault"
-    slug, n, taken = base, 2, {v["slug"] for v in items} | _RESERVED_SLUGS
-    while slug in taken:
-        slug, n = f"{base}-{n}", n + 1
-    new = _clean_vault({"folder": folder, "slug": slug})
+    new = _clean_vault({"folder": folder, "slug": _free_slug(folder.rsplit("/", 1)[-1], items)})
     assert new is not None  # the folder was refused above when empty, the one way it cleans to None
     items.append(new)
     _save_vaults(items, vault)
     return next(v for v in vaults(vault) if v["folder"] == folder)
+
+
+def _free_slug(name: str, items: list[dict]) -> str:
+    base = slugify(name) or "vault"
+    slug, n, taken = base, 2, {v["slug"] for v in items} | _RESERVED_SLUGS
+    while slug in taken:
+        slug, n = f"{base}-{n}", n + 1
+    return slug
 
 
 def update_vault(slug: str, changes: dict, vault: Path | None = None) -> dict:
@@ -420,10 +459,14 @@ def remove_vault(slug: str, vault: Path | None = None) -> None:
     v = next((x for x in items if x["slug"] == slug), None)
     if v is None:
         raise ValueError(f"no wiki {slug!r} on this page")
-    if v["visibility"] != "off":
+    # an unlinked computer reads a Public row as Off and offers no way to turn it Off (ADR-0157
+    # point 4); its served folder is left where it is, as below
+    if v["visibility"] != "off" and can_publish():
         raise ValueError("turn the wiki Off before removing it")
-    root = site_root(handle(vault))
-    shutil.rmtree(root / "paused" / slug, ignore_errors=True)
+    from silica.config import hosted
+
+    if hosted():  # a computer's paused/ is the person's, as set_visibility leaves it
+        shutil.rmtree(site_root(handle(vault)) / "paused" / slug, ignore_errors=True)
     _save_vaults([x for x in items if x["slug"] != slug], vault)
 
 
@@ -562,6 +605,15 @@ def write_prop(path: str, key: str, value: bool | None) -> None:
         logger.warning("checkpoint push failed for '%s': %s; /undo has no restore point for it", path, exc)
 
 
+def can_publish() -> bool:
+    """Whether this Silica can put a wiki out (ADR-0157 point 4): the hosted service always, a
+    computer only through the hosted account it is linked to. Alone, it saves wikis as files."""
+    from silica.config import hosted
+    from silica.kernel import account_link
+
+    return hosted() or account_link.state()["linked"]
+
+
 # --- where the files go -------------------------------------------------------
 
 def site_root(h: str | None = None) -> Path:
@@ -582,6 +634,11 @@ def set_visibility(slug: str, vis: str, vault: Path | None = None) -> dict:
     vault = vault or _vault()
     if vis not in VISIBILITY:
         raise ValueError("a wiki is off, public or private")
+    # before Private's own refusal, which would send an unlinked computer to the hosted service
+    if vis != "off" and not can_publish():
+        from silica.kernel.account_link import NOT_LINKED
+
+        raise ValueError(NOT_LINKED)
     if vis == "private" and private_allowed() != "ok":
         raise ValueError("Private needs a paid account on Silica hosted"
                          if private_allowed() == "paid" else "Private works between accounts on Silica hosted")
@@ -591,8 +648,12 @@ def set_visibility(slug: str, vis: str, vault: Path | None = None) -> dict:
         raise ValueError(f"no wiki {slug!r} on this page")
     v["visibility"], v["downgraded"] = vis, False
     _save_vaults(items, vault)
+    from silica.config import hosted
+
     h = handle(vault)
-    if h:
+    # On a computer its live/ and paused/ are left to the person who may be serving them (ADR-0157,
+    # Consequences): the account's copy is turned on or off by a Publish, never by moving these.
+    if h and hosted():
         root = site_root(h)
         live, paused = root / "live" / slug, root / "paused" / slug
         if vis == "public" and not live.exists() and paused.exists():
@@ -632,3 +693,283 @@ def swap_in(build: Path, dest: Path) -> Path:
     if old.exists():
         shutil.rmtree(old)
     return dest
+
+
+# --- a wiki a linked computer sends (ADR-0157 points 10 and 11) -----------------
+
+class FolderTaken(ValueError):
+    """The folder a computer's wiki names holds notes that computer never sent."""
+
+
+_BAD_HEAD = "that wiki's wiki.json is not one a Silica sends"
+
+
+def _said(v, n: int) -> str:
+    """A string of wiki.json as a row keeps it. A lone surrogate is valid JSON and no UTF-8, and
+    vault.yaml is UTF-8, so one would fail the row's write after the checks had passed."""
+    if not isinstance(v, str):
+        raise ValueError(_BAD_HEAD)
+    try:
+        v.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(_BAD_HEAD) from None
+    return v.strip()[:n]
+
+
+# Readers a computer names for a Private wiki, as many as an invitation list is worth carrying in
+# one wiki.json (the controller's number for Task 11, 2026-11-08)
+READERS_MAX = 100
+
+
+def _head(m, notes: set[str]) -> dict:
+    """wiki.json's fields, each of its own type. Its `link` is never read: the gateway names the
+    link a wiki came by, and a package is the client's word. Off takes the wiki off its address
+    on this account, as Off here does. `readers` may be absent, read as none; `listed` is None when
+    absent, and the row keeps the request it has."""
+    from silica.kernel import rights
+    from silica.sources.saved_page import _NAME
+
+    if not isinstance(m, dict) or m.get("visibility") not in VISIBILITY \
+            or not isinstance(m.get("answers"), dict):
+        raise ValueError(_BAD_HEAD)
+    readers, listed = m.get("readers", []), m.get("listed")
+    # a handle each, within the 30 characters update_vault takes, so nothing is refused after the
+    # row is written; `listed` carried is a bool, null included in what is refused
+    if ("listed" in m and not isinstance(listed, bool)) or not isinstance(readers, list) or len(readers) > READERS_MAX \
+            or not all(isinstance(r, str) and _NAME.fullmatch(r) and _HANDLE.fullmatch(r) for r in readers):
+        raise ValueError(_BAD_HEAD)
+    head = {k: _said(m.get(k), n) for k, n in (("folder", 4096), ("slug", 60), ("title", 80),
+                                                ("line", 160), ("license", 80))}
+    if head["license"] not in LICENSES:
+        raise ValueError("that wiki's license is not one this account offers")
+    answers = {}
+    for rel, a in m["answers"].items():
+        if not isinstance(a, dict) or a.get("answer") not in rights.ANSWERS:
+            raise ValueError(_BAD_HEAD)
+        row = {"answer": a["answer"], "license": _said(a.get("license", ""), 80),
+               "credit": _said(a.get("credit", ""), rights._CREDIT_MAX)}
+        if row["license"] and row["license"] not in rights.LICENSES:
+            raise ValueError(_BAD_HEAD)
+        # Keyed as the note's entry under notes/ is: a sender keying them any other way would lose
+        # every credit in silence, and a credit is what a CC BY source asks for.
+        if rel not in notes:
+            raise ValueError(f"that wiki answers for {rel[:120]!r}, a note it did not send")
+        answers[rel] = {k: v for k, v in row.items() if v}
+    return {**head, "visibility": m["visibility"], "answers": answers, "readers": readers, "listed": listed}
+
+
+def _plain(name: str) -> bool:
+    """One segment of a path a computer named: no dot-name, which every walk of the vault skips, no
+    control character, and no longer than a file system takes."""
+    return bool(name) and not name.startswith(".") and len(name.encode("utf-8")) <= 255 \
+        and not any(ord(c) < 32 for c in name)
+
+
+def _held(root: Path) -> tuple[int, int]:
+    """(notes, bytes) under `root`, counted as saved_page.room counts a vault."""
+    notes = size = 0
+    for p in root.rglob("*"):
+        if p.is_file() and not any(s.startswith(".") for s in p.relative_to(root).parts):
+            size += p.stat().st_size
+            notes += p.suffix == ".md"
+    return notes, size
+
+
+def _receive_row(folder: str, link: str, meta: dict, vault: Path) -> str:
+    """The row of a computer's wiki, made or rewritten: what the computer says replaces what was
+    edited here, as its notes do (ADR-0157 Open 3). A slug stays once made, since readers hold it."""
+    items = vaults(vault)
+    v = next((x for x in items if x["folder"] == folder), None)
+    if v is None:
+        v = _clean_vault({"folder": folder, "slug": _free_slug(meta["slug"] or folder, items)})
+        assert v is not None  # receive refused an empty folder name, the one way it cleans to None
+        items.append(v)
+    # shortcut: the answers ride in vault.yaml, which every vaults() parses whole, about 100 bytes
+    # a note; give them a file beside the row past 1,000 answered notes in one account
+    v.update(from_link=link, title=meta["title"] or folder, line=" ".join(meta["line"].split()),
+             license=meta["license"], answers=meta["answers"])
+    _save_vaults(items, vault)
+    return v["slug"]
+
+
+def receive(data: bytes, link: str, vault: Path | None = None) -> dict:
+    """A wiki a linked computer sent through the gateway (ADR-0157 point 10), a zip of `wiki.json`,
+    `notes/<path>.md` and `assets/<image>`: its notes become the folder of this vault it names,
+    replacing that folder whole when its row came from any linked computer, and its row carries
+    `link` as the last sender, the author's answers (point 11), its readers, its listing request
+    and the visibility. Returns {"slug", "folder", "visibility"}; the caller builds, unless Off.
+
+    ValueError with a sentence for a refused package, FolderTaken for a folder of the person's
+    own, and then nothing is written; an OSError is the disk's. The folder is written beside the
+    vault and moved in, so a failure never leaves half of one, and the old one goes into the
+    journal, so /revert takes the Publish back as it does a save (saved_page.save_vault)."""
+    import hashlib
+    import io
+    import json
+    import stat
+    import tempfile
+    import time
+    import zipfile
+
+    from silica.driver import DRIVER, reset_driver
+    from silica.kernel.write.ops import InverseOp, InverseOpKind
+    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.sources import saved_page as sp
+
+    vault = vault or _vault()
+    if len(data) > sp.WIKI_FILE_MAX:
+        raise sp._file_too_big()
+    # zipfile holds every entry's header before a check can run (saved_page.open_file)
+    if data.count(b"PK\x01\x02") > sp._ENTRIES_MAX:
+        raise ValueError(f"that wiki holds more than {sp._ENTRIES_MAX:,} entries, which no wiki does")
+    z = sp._zip_read("that is not a zip Silica can read", zipfile.ZipFile, io.BytesIO(data))
+    with z:
+        head, keep = None, {}
+        for info in z.infolist():
+            name = info.filename
+            if name.startswith("/") or "\\" in name or ".." in name.split("/") or sp._DRIVE.match(name):
+                raise ValueError(f"that wiki holds {name[:120]!r}, a name that leaves its folder")
+            if stat.S_ISLNK(info.external_attr >> 16):
+                raise ValueError(f"that wiki holds {name[:120]!r}, a link, which Silica never unpacks")
+            if info.is_dir():
+                continue
+            if name.lower().endswith((".html", ".htm")):
+                raise ValueError(f"that wiki holds {name[:120]!r}, a page: a computer sends notes, "
+                                 "and this account writes the pages")
+            rel = name.removeprefix("notes/")
+            # Refused here and not met as a write's OSError, which the route words as the disk's:
+            # 255 is a name's limit on every file system, and 1,024 keeps the vault's path, a
+            # folder of 255 and this under Linux's 4,096.
+            if len(rel.encode("utf-8")) > 1024 or any(len(s.encode("utf-8")) > 255 for s in rel.split("/")):
+                raise ValueError(f"that wiki holds {name[:120]!r}, a name longer than a file system takes")
+            if name == "wiki.json":
+                head = info
+            elif (rel != name and rel.endswith(".md") and all(_plain(p) for p in rel.split("/"))) \
+                    or (name.startswith("assets/") and sp._ASSET.fullmatch(name.removeprefix("assets/"))):
+                keep[rel] = info  # a note by its path in the folder, an image as assets/<name>
+            else:
+                raise ValueError(f"that wiki holds {name[:120]!r}, which is neither a note nor an image")
+        # `A.md` beside `A.md/B.md`: one name as a file and a folder, which no unpacking can write
+        folders = {k[:i] for k in keep for i, c in enumerate(k) if c == "/"}
+        if clash := next((k for k in keep if k in folders), None):
+            raise ValueError(f"that wiki holds {clash[:120]!r} both as a file and as a folder")
+        if head is None:
+            raise ValueError("that is not a wiki a Silica sends: it holds no wiki.json")
+        if head.file_size > sp._MANIFEST_MAX:
+            raise sp._part_too_big("wiki.json", sp._MANIFEST_MAX)
+        raw = sp._zip_read(sp._DAMAGED, z.read, head)
+        if len(raw) > sp._MANIFEST_MAX:
+            raise sp._part_too_big("wiki.json", sp._MANIFEST_MAX)
+        try:
+            m = json.loads(raw)
+        except (ValueError, RecursionError):
+            raise ValueError(_BAD_HEAD) from None
+        notes = {k for k in keep if k.endswith(".md")}
+        meta = _head(m, notes)
+        del raw, m
+        folder = meta["folder"]
+        # at the top of the vault: a name and not a path, never one of Silica's own folders
+        if not _plain(folder) or "/" in folder or "\\" in folder or never(folder + "/x", never_dirs()):
+            raise ValueError(f"{folder[:80] or 'that folder'} cannot be a wiki's folder here")
+        items = vaults(vault)
+        row = next((v for v in items if v["folder"] == folder), None)
+        dest = vault / folder
+        # Any link's mark and not only this one's: a link lasts 90 days and a new one gets a new
+        # id, so the computer's own folder would refuse it. Point 10 refuses a folder with no mark.
+        ours = row is not None and bool(row["from_link"])
+        # A link in the vault's place is the person's too: replacing it would write where it leads.
+        if (dest.exists() or dest.is_symlink()) and not (ours and dest.is_dir() and not dest.is_symlink()):
+            raise FolderTaken(f"A folder named {folder} already holds notes of yours: "
+                              "rename one of them to publish this wiki.")
+        if row is None and len(items) >= (limit := max_vaults()):
+            raise ValueError(f"you can publish {limit} wikis at most")
+        if meta["visibility"] == "private" and private_allowed() != "ok":
+            raise ValueError("Private needs a paid account on Silica hosted")
+        if not available(vault):
+            raise ValueError("this account has no public address yet")
+        # Beside the vault, on its disk, so the move in is a rename and no walk of the vault ever
+        # sees half a folder. One a receive killed mid-write left is swept here after an hour,
+        # far past any unpacking of 100 MB, as saved_page.open_file sweeps its own.
+        parent = Path(os.path.abspath(vault)).parent
+        for old in parent.glob(".receive-*"):
+            if old.name.endswith("-old"):
+                continue  # an old folder a failed swap could not put back: maybe the wiki's only copy here
+            try:
+                if old.stat().st_mtime < time.time() - 3600:
+                    shutil.rmtree(old, ignore_errors=True)
+            except OSError:
+                pass  # gone between the glob and the stat: another receive swept it first
+        tmp = Path(tempfile.mkdtemp(prefix=".receive-", dir=parent))
+        aside = tmp.with_name(tmp.name + "-old")
+        try:
+            for rel in keep:
+                (tmp / rel).parent.mkdir(parents=True, exist_ok=True)
+            sp._unpacked(z, keep, tmp)
+            for rel in notes:
+                blob = (tmp / rel).read_bytes()
+                try:
+                    if b"\x00" in blob:
+                        raise UnicodeError
+                    blob.decode("utf-8")
+                except UnicodeError:
+                    raise ValueError(f"that wiki's note {rel[:120]!r} is not text") from None
+            # the folder it replaces is freed by the same move, so it counts once
+            new_n, new_b = _held(tmp)
+            old_n, old_b = _held(dest) if ours and dest.is_dir() else (0, 0)
+            short = sp.room(new_n - old_n, new_b - old_b, vault)["short"]
+            if short:
+                raise ValueError(f"this account has no room for that wiki: {short}")
+            # The row before the folder: a row whose folder failed to land is taken by the next
+            # Publish, while a folder without its row would refuse that Publish as the person's.
+            slug = _receive_row(folder, link, meta, vault)
+            # The author's readers and listing request, as a hosted author's own: the account's
+            # handle leaves the readers, and the host's review still decides the listing. The
+            # computer owns the request for its wikis; a package without it leaves the row's.
+            update_vault(slug, {"readers": meta["readers"]}
+                         | ({} if meta["listed"] is None else {"listed": meta["listed"]}), vault)
+            if dest.exists():
+                dest.rename(aside)
+            try:
+                tmp.rename(dest)
+            except BaseException:
+                if aside.exists():
+                    try:
+                        aside.rename(dest)
+                    except OSError:
+                        # left where it is, never swept: it may be the only copy of the wiki here
+                        logger.error("receive: the old %s could not be put back; it waits beside the vault as %s",
+                                     folder, aside.name)
+                raise
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+    # The driver's index learns of a folder moved in only at its next look, up to 2 s on, and a
+    # write of its own in that window absorbs the change (fs_backend._restamp_dirs): the build
+    # below resolves each link through it, and a note it has not seen is written as words.
+    reset_driver()
+    try:
+        # hashed as the driver reads them back, as save_vault does, which is what revert compares
+        post = {f"{folder}/{rel}": hashlib.sha256(DRIVER.read_note(f"{folder}/{rel}").content.encode("utf-8"))
+                .hexdigest() for rel in notes}
+        journal = get_undo_journal()
+        run = journal.start_run(source="vault:receive", vault=str(vault))
+        # LIFO on revert: each new note goes, then each old one comes back; one at a path both
+        # hold is rewritten unless edited since, which the hash says. Notes only, as save_vault:
+        # the images of the old folder do not come back.
+        for p in sorted(aside.rglob("*.md")) if aside.is_dir() else ():
+            rel = p.relative_to(aside).as_posix()
+            if p.is_file() and all(not s.startswith(".") for s in rel.split("/")):
+                journal.record(run, InverseOp(kind=InverseOpKind.recreate_deleted, path=f"{folder}/{rel}",
+                                              prior_content=p.read_text(encoding="utf-8", errors="replace")),
+                               post.pop(f"{folder}/{rel}", None))
+        for path, h in post.items():
+            journal.record(run, InverseOp(kind=InverseOpKind.delete_created, path=path), h)
+    except Exception as exc:
+        # The folder is in and its row says so: only /revert loses this Publish, as a checkpoint
+        # in write_prop. What it replaced was the computer's, which a Publish overwrites by the
+        # owner's answer (ADR-0157 Open 3), so failing the Publish now would save nothing.
+        logger.warning("receive: %s not journalled (%s); /revert cannot take it back", folder, exc)
+    finally:
+        shutil.rmtree(aside, ignore_errors=True)
+    set_visibility(slug, meta["visibility"], vault)
+    return {"slug": slug, "folder": folder, "visibility": meta["visibility"]}

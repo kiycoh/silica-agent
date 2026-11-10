@@ -1,6 +1,7 @@
 """A Page's files (ADR-0143, ADR-0151): what goes out, and above all what does not."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -10,11 +11,13 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
 @pytest.fixture
 def marta(tmp_vault, tmp_path, monkeypatch):
+    """An account on the hosted service with one wiki: only the hosted service builds pages, since a
+    computer sends its notes to its account and writes nothing under live/ (ADR-0157 point 10)."""
     from silica.kernel.vault_manifest import reset_manifest_cache
 
     monkeypatch.setenv("SILICA_PUBLIC_DIR", str(tmp_path / "public"))
     monkeypatch.setenv("SILICA_PUBLIC_HANDLE", "marta")
-    monkeypatch.delenv("SILICA_PUBLIC_BASE", raising=False)
+    _on_host(monkeypatch)
     monkeypatch.delenv("SILICA_PUBLIC_REPORT", raising=False)
     reset_manifest_cache()
     v = tmp_vault
@@ -46,6 +49,14 @@ def marta(tmp_vault, tmp_path, monkeypatch):
     reset_manifest_cache()
 
 
+def _on_host(monkeypatch) -> None:
+    """The Page (`/@handle/`, its listing and `_s/`) is written on the hosted service alone: a
+    computer's live/ is left to the person who may be serving it (ADR-0157, Consequences)."""
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
+
+
 def _all_text(live: Path) -> str:
     return "\n".join(p.read_text(encoding="utf-8") for p in live.rglob("*")
                      if p.is_file() and p.suffix in (".html", ".md", ".css", ".json"))
@@ -55,7 +66,7 @@ def _live(marta: Path) -> Path:
     return marta / "public" / "marta" / "live"
 
 
-def test_the_vault_carries_its_notes_and_nothing_private(marta):
+def test_the_vault_carries_its_notes_and_nothing_private(marta, monkeypatch):
     from silica.ui.web.public_site import build
 
     out = build("memory")
@@ -99,14 +110,13 @@ def test_a_link_to_a_private_note_is_its_words_and_a_vault_note_a_link(marta):
 
     build("memory")
     page = (_live(marta) / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
-    assert 'href="forgetting-curve.html">Forgetting curve</a>' in page
+    assert 'href="/@marta/memory/forgetting-curve">Forgetting curve</a>' in page
     assert "see Exam plan June." in page and "exam-plan-june" not in page
     assert "A draft: Working memory." in page
     # the title is the page's heading once, not twice
     assert page.count(">Spacing effect</h1>") == 1
-    assert 'href="../_s/pages.css"' in page and 'src="../_s/pages.js"' in page
     md = (_live(marta) / "memory" / "spacing-effect.md").read_text(encoding="utf-8")
-    assert "[Forgetting curve](forgetting-curve.html)" in md
+    assert "[Forgetting curve](https://pages.test/@marta/memory/forgetting-curve)" in md
     assert "see Exam plan June." in md and "[[" not in md
     assert md.startswith("---\ntitle: Spacing effect\ntags:")
 
@@ -193,7 +203,7 @@ def test_only_images_a_published_note_cites_are_copied(marta):
     assert [a for a in assets if a.endswith(".png")] == ["1-hypnogram.png"]
     assert out["images"] == 1
     page = (_live(marta) / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
-    assert 'src="assets/1-hypnogram.png"' in page
+    assert 'src="/@marta/memory/assets/1-hypnogram.png"' in page
 
 
 def test_a_republished_copy_credits_its_author_and_points_at_the_original(marta, monkeypatch):
@@ -223,7 +233,10 @@ def test_with_an_address_links_are_absolute_and_every_page_can_be_saved_and_repo
     index = (vault / "index.html").read_text(encoding="utf-8")
     assert 'name="save" value="https://pages.test/@marta/memory/"' in index
     assert "Save 3 notes to Silica" in index and 'form="save"' in index and 'action="/_report"' in index
-    assert '<a href="https://pages.test/">Pages</a> / <a href="/@marta/">@marta</a> / Memoria' in index
+    assert '<a href="https://pages.test/">Wikis</a> / <a href="/@marta/">@marta</a> / Memoria' in index
+    # the catalog is Wikis wherever a reader meets it, the bar and the crumbs (ADR-0157 point 1)
+    for html in (page, index):
+        assert '<a href="https://pages.test/">Wikis</a>' in html and not re.search(r"\bPages\b", html)
     md = (vault / "spacing-effect.md").read_text(encoding="utf-8")
     assert "[Forgetting curve](https://pages.test/@marta/memory/forgetting-curve)" in md
     assert not (_live(marta) / "_s").exists()  # the host serves the sheet
@@ -246,19 +259,10 @@ def test_a_vault_and_a_note_name_the_room_and_keep_their_page_for_a_reader_witho
     assert "data-other" not in index + note  # another address is the room's to ask, behind a link
 
 
-def test_a_page_built_without_a_host_tells_the_room_its_files_end_in_html(marta):
-    from silica.ui.web.public_site import build
-
-    build("memory")
-    index = (_live(marta) / "memory" / "index.html").read_text(encoding="utf-8")
-    assert 'data-room="vault.json" data-here="" data-vaults="../vaults.json" data-ext=".html"' in index
-
-
 def test_a_page_of_one_public_vault_sends_the_script_to_that_map(marta, monkeypatch):
     from silica.kernel.publish import add_vault, set_visibility
     from silica.ui.web.public_site import build
 
-    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
     build("memory")
     page = (_live(marta) / "index.html").read_text(encoding="utf-8")
     assert 'data-one="/@marta/memory/"' in page and "vcard" in page  # the card stays for no script
@@ -268,24 +272,41 @@ def test_a_page_of_one_public_vault_sends_the_script_to_that_map(marta, monkeypa
     assert "data-one" not in (_live(marta) / "index.html").read_text(encoding="utf-8")
 
 
-def test_without_an_address_there_is_no_save_and_the_folder_opens_from_disk(marta):
+@pytest.mark.parametrize("is_linked", [False, True], ids=["alone", "linked"])
+def test_a_computer_builds_no_page_linked_or_not(marta, monkeypatch, is_linked):
+    """A computer's wiki goes out as a file, or as notes its account builds (ADR-0157 points 4 and
+    10): no build writes its live/, which a person may be serving, even once linked."""
+    from silica.kernel import account_link
     from silica.ui.web.public_site import build
+
+    monkeypatch.delenv("SILICA_HOSTED")
+    if is_linked:
+        account_link._keep("t" * 43, "marta", "https://link.test")
+    with pytest.raises(ValueError, match="builds the pages" if is_linked else "Link a Silica account"):
+        build("memory")
+    assert not (marta / "public").exists()
+
+
+def test_the_page_sweeps_a_served_folder_whose_wiki_is_gone(marta):
+    """A wiki removed from the hosted account, or left Off by a crash between two renames, leaves
+    its address; the Page's own `_s/` stays."""
+    from silica.ui.web.public_site import build, write_page
 
     build("memory")
     live = _live(marta)
-    page = (live / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
-    assert "Save to Silica" not in page and "canonical" not in page and "_report" not in page
-    assert (live / "_s" / "pages.css").is_file() and (live / "_s" / "pages.js").is_file()
-    index = (live / "index.html").read_text(encoding="utf-8")
-    assert 'href="memory/index.html"' in index and 'data-graph="memory/vault.json"' in index
+    for name in ("removed", "_s"):
+        (live / name).mkdir()
+    write_page()
+    assert not (live / "removed").exists() and (live / "_s").is_dir() and (live / "memory").is_dir()
 
 
-def test_off_takes_the_vault_and_the_page_down_and_a_republish_replaces_the_paused_copy(marta):
+def test_off_takes_the_vault_and_the_page_down_and_a_republish_replaces_the_paused_copy(marta, monkeypatch):
     from silica.kernel.publish import set_note, set_visibility
     from silica.ui.web.public_site import build, write_page
 
     build("memory")
     live = _live(marta)
+    assert (live / "index.html").is_file()
     set_visibility("memory", "off")
     write_page()
     assert not (live / "memory").exists() and not (live / "index.html").exists()
@@ -320,7 +341,7 @@ def test_a_private_vault_is_built_beside_the_served_folder_with_its_readers(mart
     assert "![hypnogram.png](assets/1-hypnogram.png)" in notes["spacing-effect"]
 
 
-def test_two_vaults_share_the_page_and_each_lists_the_other(marta, tmp_path):
+def test_two_vaults_share_the_page_and_each_lists_the_other(marta, tmp_path, monkeypatch):
     import json
 
     from silica.kernel.publish import add_vault, set_visibility
@@ -338,7 +359,7 @@ def test_two_vaults_share_the_page_and_each_lists_the_other(marta, tmp_path):
     assert "2 wikis ·" in index and "Memoria" in index and "Courses" in index
 
 
-def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta):
+def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta, monkeypatch):
     import os
     import stat
 
@@ -386,7 +407,16 @@ def test_the_catalog_lists_only_what_the_host_approved_under_the_handle_it_gave(
     assert pages_catalog.write(host, tsv, wikis, out, "https://app.test") == 1
     index = (out / "index.html").read_text(encoding="utf-8")
     assert 'href="/@marta/memory/"' in index and "Memoria" in index and "Fake" not in index
+    # the catalog is called Wikis, and sends a person to the app's view of that name (ADR-0157 point 1)
+    assert "<title>Wikis · Silica</title>" in index and '<h1 id="cat-h">Wikis</h1>' in index
+    assert "open Wikis → My wikis" in index and not re.search(r"\bPages\b|My Wikis", index)
     assert (out / "_s" / "pages.js").is_file() and (out / "_s" / "archivo-latin.woff2").is_file()
+    # index.json is what index.html shows, as data for the app (ADR-0157 point 2): same wikis,
+    # each with its license and address, and the unlisted or unapproved ones absent from both
+    data = json.loads((out / "index.json").read_text(encoding="utf-8"))
+    assert [(e["handle"], e["slug"]) for e in data] == [("marta", "memory")]
+    assert data[0]["url"] == "/@marta/memory/" and data[0]["license"] and data[0]["title"] == "Memoria"
+    assert "Fake" not in json.dumps(data)
     # a hostile title is text, never markup
     m.write_text(m.read_text(encoding="utf-8").replace('"Memoria"', '"<script>x</script>"'), encoding="utf-8")
     pages_catalog.write(host, tsv, wikis, out, "https://app.test")
@@ -394,9 +424,10 @@ def test_the_catalog_lists_only_what_the_host_approved_under_the_handle_it_gave(
     # an approved wiki its author took back asks for nothing, so the host's row alone lists nothing
     m.write_text(m.read_text(encoding="utf-8").replace('"listed":true', '"listed":false'), encoding="utf-8")
     assert pages_catalog.write(host, tsv, wikis, out, "https://app.test") == 0
+    assert json.loads((out / "index.json").read_text(encoding="utf-8")) == []
 
 
-def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(marta, tmp_vault):
+def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(marta, tmp_vault, monkeypatch):
     from silica.ui.web.public_site import build
 
     tmp_vault.note("Memory/Forgetting curve.md",
@@ -408,4 +439,5 @@ def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(mart
     # the source, escaped, in the block pages.js hands to mermaid; no script of the note's own
     assert '<pre class="mermaid">' in page and "&lt;b&gt;learn&lt;/b&gt;" in page
     assert "<script>" not in page and page.count("<script") == 1  # pages.js alone
-    assert (live / "_s" / "mermaid.min.js").is_file()
+    # the host's one copy under /_s/, where pages.js finds mermaid.min.js beside it
+    assert '/_s/pages.js"' in page

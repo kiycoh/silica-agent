@@ -183,8 +183,11 @@ VIEWS: dict[str, dict[str, tuple[str, ...]]] = {
                  "tools": ("silica_agenda", "silica_event_create", "silica_event_update"),
                  "commands": ("/agenda",)},
     "metrics": {"routes": ("/metrics",)},
-    # ADR-0143: the choice and Publish; saving a page (/vault/save) is every account's
-    "public": {"routes": ("/public",)},
+    # ADR-0143: the choice and Publish; saving a page (/vault/save) is every account's.
+    # /wikis is the catalog the same tab shows (ADR-0157 point 1), which a demo must not fetch.
+    # A computer's link to its account is Publish's (point 9), named one by one: bare /link is
+    # the graph's link lookup, which every account keeps.
+    "public": {"routes": ("/public", "/wikis", "/link/start", "/link/poll", "/link/state", "/link/unlink")},
 }
 
 

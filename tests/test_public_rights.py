@@ -20,14 +20,17 @@ ROSS = "Ross (Z-Library).pdf"
 
 @pytest.fixture
 def stats(tmp_vault, tmp_path, monkeypatch):
-    """A wiki of a book in two segments, lecture slides, hand notes and pasted images."""
+    """A wiki of a book in two segments, lecture slides, hand notes and pasted images, on the
+    hosted service, the one install that builds pages (ADR-0157 point 10)."""
     from silica.kernel.publish import add_vault, set_visibility
     from silica.kernel.vault_manifest import reset_manifest_cache
     from silica.kernel.write.provenance import append_record
 
     monkeypatch.setenv("SILICA_PUBLIC_DIR", str(tmp_path / "public"))
     monkeypatch.setenv("SILICA_PUBLIC_HANDLE", "marta")
-    monkeypatch.delenv("SILICA_PUBLIC_BASE", raising=False)
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
     monkeypatch.delenv("SILICA_PUBLIC_REPORT", raising=False)
     reset_manifest_cache()
     root = Path(tmp_path) / "vault"
@@ -236,9 +239,9 @@ def test_an_answered_site_is_copied_into_the_wiki_with_its_credit(stats, tmp_vau
     page = (_live(stats) / "web.html").read_text(encoding="utf-8")
     md = (_live(stats) / "web.md").read_text(encoding="utf-8")
     assert len(list((_live(stats) / "assets").iterdir())) == 1
-    assert 'src="assets/' in page and "https://upload.wikimedia.org/x/Normal.png" in page
+    assert 'src="/@marta/stats/assets/' in page and "https://upload.wikimedia.org/x/Normal.png" in page
     assert "from upload.wikimedia.org" in page and "from upload.wikimedia.org" in md
-    assert "![Normal](assets/" in md
+    assert "![Normal](https://pages.test/@marta/stats/assets/" in md
 
 
 def test_a_copy_outlives_the_site_it_came_from(stats, tmp_vault):

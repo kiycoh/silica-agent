@@ -559,7 +559,7 @@ def _offer_form_fallback(input_fn: Callable[[str], str], vault: Path) -> None:
 def _offer_zotero(input_fn: Callable[[str], str], vault: Path) -> None:
     """One question when Zotero answers on 127.0.0.1:23119 (ADR-0055): no
     step of its own, because most vaults have no Zotero beside them."""
-    from silica.kernel.vault_manifest import load_manifest, set_zotero
+    from silica.kernel.vault_manifest import ManifestRefused, load_manifest, set_zotero
     from silica.sources import zotero
 
     if load_manifest(vault).zotero is not None:
@@ -577,7 +577,12 @@ def _offer_zotero(input_fn: Callable[[str], str], vault: Path) -> None:
         return
     answer = _ask(input_fn, "Use your Zotero library in this vault? [y/n]", "y")
     if answer.lower() in ("y", "yes"):
-        set_zotero(vault, "library", library)
+        try:
+            set_zotero(vault, "library", library)
+        except ManifestRefused as exc:
+            # a vault.yaml that does not parse is left as it was: the rest of the wizard still runs
+            CONSOLE.print(f"  zotero: not linked: {exc}")
+            return
         CONSOLE.print(f"  {GLYPHS['ok']} zotero: library {library}")
 
 

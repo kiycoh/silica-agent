@@ -1,7 +1,8 @@
-// My Wikis (ADR-0143, ADR-0151): the view that holds the account's vaults, each a
-// folder of its vault, Off, Public or Private; the globes on the tree and on the note; the strip
-// over a saved note; the invitations to Private vaults; and the confirm a page's "Save to Silica"
-// lands on, for one note or for the areas of a whole vault.
+// Wikis (ADR-0157 point 1): the view of two tabs, the catalog of Public wikis the host lists and
+// My wikis (ADR-0143, ADR-0151), the account's vaults, each a folder of its vault, Off, Public or
+// Private; the globes on the tree and on the note; the strip over a saved note; the invitations to
+// Private vaults; and the confirm a page's "Save to Silica" lands on, for one note or for the areas
+// of a whole vault.
 
 const PUB_PATHS = '<circle cx="12" cy="12" r="9"></circle><ellipse cx="12" cy="12" rx="4" ry="9"></ellipse><line x1="3" y1="12" x2="21" y2="12"></line>';
 const LOCK_PATHS = '<rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>';
@@ -12,6 +13,7 @@ let pubCur = "";      // the slug of the vault the view has open
 let pubInvites = [];  // GET /vault/invitations
 let pubAdding = false;
 let pubResult = null; // the last Publish, for the line under the button
+let pubFile = null;   // the last Save as a file on this computer, for the line that says where
 
 const pubName = (path) => path.split("/").pop().replace(/\.md$/, "");
 const pubLive = () => !!(pubState && pubState.available);
@@ -100,7 +102,7 @@ function syncTreePublic() {
         b.hidden = false;
         b.classList.add("vault", v.visibility === "public" ? "on" : v.visibility === "private" ? "priv" : "paused");
         b.innerHTML = pubSvg(11, false, v.visibility === "private");
-        b.title = `the wiki ${v.title} in My Wikis, ${v.visibility === "off" ? "Off" : v.visibility === "public" ? "Public" : "Private"}: open it`;
+        b.title = `the wiki ${v.title} in My wikis, ${v.visibility === "off" ? "Off" : v.visibility === "public" ? "Public" : "Private"}: open it`;
         b.setAttribute("aria-pressed", String(v.visibility !== "off"));
         continue;
       }
@@ -110,7 +112,7 @@ function syncTreePublic() {
       if (b.hidden) continue;
       b.innerHTML = pubSvg(11, false, false);
       b.setAttribute("aria-pressed", "false");
-      b.title = `make the folder ${folder} a wiki in My Wikis`;
+      b.title = `make the folder ${folder} a wiki in My wikis`;
       continue;
     }
     const v = pubVaultOfNote(b.dataset.pub);
@@ -127,12 +129,12 @@ async function pubPost(url, body) {
   try {
     r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   } catch {
-    notify("My Wikis could not be reached");
+    notify("My wikis could not be reached");
     return null;
   }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
-    notify(data.detail || "My Wikis did not change");
+    notify(data.detail || "My wikis did not change");
     return null;
   }
   if (data.vaults) {
@@ -227,9 +229,179 @@ $("#note-pub-pop").addEventListener("click", (e) => {
 // --- the view ----------------------------------------------------------------
 
 async function loadPublicView() {
+  wikisFresh = false;
+  showWikisTab(wikisTab);
   if (!pubState) $("#public-body").replaceChildren(mkEl("p", "pp-dim", "Reading the vault…"));
   await Promise.all([loadPublicState(), loadInvitations()]);
   renderPublic(true);
+}
+
+// --- Wikis, the catalog (ADR-0157 points 1 to 3) -------------------------------------------
+// The view's first tab: the Public wikis the host lists after review. The app's server reads them
+// (/wikis/catalog), never the browser, so no page can make the app fetch an address of its
+// choosing. Every field of an entry is an account's words: it is set as text, never as markup.
+// My wikis keeps rendering while the catalog shows; the view's data-wtab hides the tab not shown.
+const WIKIS_TAB = "silica-wikis-tab";
+let wikisTab = localStorage.getItem(WIKIS_TAB) === "mine" ? "mine" : "wikis";
+let wikisCat = null;     // the last /wikis/catalog answer, null when it could not be read
+let wikisFresh = false;  // read since the view opened: the server keeps it ten minutes, so once per opening
+let wikisSeen = null;    // the grid's IntersectionObserver, which asks for a cover once it is near
+const wikisDrawn = new WeakMap();  // a cover's box -> the graph it draws, for a resize or a theme
+const wikisSized = new ResizeObserver((rows) => { for (const r of rows) wikiDraw(r.target); });
+const wikiAddr = (w) => `https://${wikisCat.host}${w.url}`;
+const wikisCount = (n) => `${n.toLocaleString("en-GB")} ${n === 1 ? "wiki" : "wikis"}`;
+
+function paintWikisTab() {
+  $("#view-public").dataset.wtab = wikisTab;
+  for (const b of document.querySelectorAll("#wikis-tabs .stab")) setActive(b, b.dataset.wtab === wikisTab);
+}
+
+function showWikisTab(t) {
+  wikisTab = t;
+  localStorage.setItem(WIKIS_TAB, t);
+  paintWikisTab();
+  if (t === "wikis" && !wikisFresh) loadWikis();
+}
+
+$("#wikis-tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-wtab]");
+  if (b) showWikisTab(b.dataset.wtab);
+});
+glide($("#wikis-tabs"));
+paintWikisTab();
+
+async function loadWikis() {
+  wikisFresh = true;
+  if (!wikisCat) $("#wikis-body").replaceChildren(mkEl("p", "pp-dim", "Reading Wikis…"));
+  let d = null;
+  try {
+    const r = await fetch("/wikis/catalog");
+    d = r.ok ? await r.json() : null;
+  } catch {
+    // No answer reads as a catalog that could not be read: the tab says so, and My wikis, which
+    // reads none of this, keeps working (ADR-0157 point 2).
+    d = null;
+  }
+  wikisCat = d && Array.isArray(d.wikis) ? d : null;
+  renderWikis();
+}
+
+function wikisAgo(iso) {
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  return m >= 1 ? `${m.toLocaleString("en-GB")} min ago` : "just now";
+}
+
+function renderWikis() {
+  const body = $("#wikis-body"), from = $("#wikis-from"), cat = wikisCat;
+  wikisSeen?.disconnect();
+  wikisSized.disconnect();
+  if (!cat) {
+    from.replaceChildren();
+    body.replaceChildren(mkEl("p", "pp-status", "Wikis could not be read."));
+    return;
+  }
+  from.replaceChildren("from ", mkEl("b", "", cat.host), `, read ${wikisAgo(cat.read_at)}`);
+  if (!cat.wikis.length) {
+    body.replaceChildren(mkEl("p", "pp-status", "No wiki is in Wikis yet."));
+    return;
+  }
+  const search = Object.assign(document.createElement("input"), { type: "search", className: "pg-sel", placeholder: "Search Wikis" });
+  search.setAttribute("aria-label", "Search Wikis");
+  const count = mkEl("span", "pp-dim");
+  count.setAttribute("role", "status");
+  const top = mkEl("div", "wk-top");
+  top.append(search, count);
+  const cards = cat.wikis.map((w) => [wikiCard(w), [w.title, w.line, "@" + w.handle, ...w.areas.map((a) => a[0])].join("\n").toLowerCase()]);
+  const grid = mkEl("div", "wk-grid");
+  grid.append(...cards.map(([card]) => card));
+  const filter = () => {
+    const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    for (const [card, text] of cards) {
+      card.hidden = !words.every((x) => text.includes(x));
+      if (!card.hidden) shown++;
+    }
+    count.textContent = !words.length ? `${wikisCount(cards.length)}, newest first`
+      : shown ? `${shown.toLocaleString("en-GB")} of ${wikisCount(cards.length)}` : "No wiki matches.";
+  };
+  search.addEventListener("input", filter);
+  filter();
+  body.replaceChildren(top, grid, mkEl("p", "pp-dim", "A wiki enters Wikis once it has been reviewed. Save copies the areas you choose into Saved/@handle/ in your vault."));
+  // A card asks for its cover once, when it first comes near: a catalog of 500 wikis opened at
+  // the top reads the few in sight, and a card the search hides is never near.
+  wikisSeen = new IntersectionObserver((rows, io) => {
+    for (const r of rows) if (r.isIntersecting) { io.unobserve(r.target); wikiCover(r.target); }
+  }, { root: body, rootMargin: "200px 0px" });
+  for (const [card] of cards) wikisSeen.observe(card.querySelector(".wk-cover"));
+}
+
+function wikiCard(w) {
+  const card = mkEl("article", "wk-card");
+  const cover = mkEl("div", "pp-cover-box wk-cover");
+  cover.dataset.handle = w.handle;
+  cover.dataset.slug = w.slug;
+  const cv = document.createElement("canvas");
+  cv.setAttribute("role", "img");
+  cv.setAttribute("aria-label", `${w.title} as a graph of its notes`);
+  cover.append(cv);
+  card.append(cover, mkEl("h3", "wk-t", w.title), mkEl("p", "wk-by", "by @" + w.handle));
+  if (w.line) card.append(mkEl("p", "wk-line", w.line));
+  const meta = [pubCount(w.count.notes), `${w.count.areas.toLocaleString("en-GB")} ${w.count.areas === 1 ? "area" : "areas"}`];
+  if (w.license) meta.push(w.license);
+  card.append(mkEl("p", "pp-dim", meta.join(" · ")));
+  const named = w.areas.filter((a) => a[0]).slice(0, 3);
+  if (named.length) {
+    const chips = mkEl("ul", "pg-chips");
+    for (const [name] of named) chips.append(mkEl("li", "", name));
+    card.append(chips);
+  }
+  const open = Object.assign(document.createElement("a"), { className: "st-btn", href: wikiAddr(w), target: "_blank", rel: "noopener", textContent: "Open ↗" });
+  // the save sheet a wiki's own page hands the app through ?save=, here for the same address
+  const save = mkEl("button", "st-btn primary", "Save to Silica");
+  save.type = "button";
+  save.addEventListener("click", () => openSaveSheet({ url: wikiAddr(w), areas: null }));
+  const acts = mkEl("div", "wk-acts");
+  acts.append(open, save);
+  card.append(acts);
+  return card;
+}
+
+async function wikiCover(box) {
+  let g = null;
+  try {
+    const r = await fetch(`/wikis/graph?handle=${encodeURIComponent(box.dataset.handle)}&slug=${encodeURIComponent(box.dataset.slug)}`);
+    g = r.ok ? await r.json() : null;
+  } catch {
+    // A card without its picture still says what the wiki holds: its well stays plain, and the
+    // next opening of the view asks again.
+    g = null;
+  }
+  if (!g || !Array.isArray(g.n) || !g.n.length) return;
+  wikisDrawn.set(box, g);
+  wikisSized.observe(box); // draws it now, and again whenever the grid gives the card another width
+}
+
+// A card's cover in the print of My wikis' own (drawPubCover): every note a mark, every link a line,
+// two inks on the well. Drawn whole, with no build and no pointing: a card is read at a glance.
+function wikiDraw(box) {
+  const g = wikisDrawn.get(box), w = box.clientWidth, h = box.clientHeight;
+  if (!g || w < 40 || h < 40) return;
+  const cv = box.querySelector("canvas");
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const N = g.n, pad = 12;
+  const X = (i) => Math.round(pad + N[i][0] * (w - 2 * pad)), Y = (i) => Math.round(pad + N[i][1] * (h - 2 * pad));
+  const ctx = cv.getContext("2d"), img = ctx.createImageData(w, h), px = new Uint32Array(img.data.buffer);
+  const ground = pubU32(pubRgb(pubCss("--void"))), ink = pubU32(pubRgb(pubCss("--frost")));
+  px.fill(ground);
+  const put = (a, b, c) => { if (a >= 0 && b >= 0 && a < w && b < h) px[b * w + a] = c; };
+  const disc = (cx, cy, r, c) => { for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) if (a * a + b * b <= r * r + r) put(cx + a, cy + b, c); };
+  for (const [a, b] of g.e) {
+    const x0 = X(a), y0 = Y(a), x1 = X(b), y1 = Y(b), n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+    for (let k = 0; k <= n; k++) put(Math.round(x0 + (x1 - x0) * k / n), Math.round(y0 + (y1 - y0) * k / n), ink);
+  }
+  // a clear ring of the well first, so a note reads as a mark and not as a crossing
+  N.forEach((nd, i) => { const r = nd[2] >= 12 ? 2 : 1; disc(X(i), Y(i), r + 1, ground); disc(X(i), Y(i), r, ink); });
+  ctx.putImageData(img, 0, 0);
 }
 
 // --- the cover (ADR-0146 point 4) ----------------------------------------------
@@ -366,7 +538,10 @@ function pubCoverPoint(ev) {
   tip.classList.toggle("left", tx > w * 0.62);
 }
 
-new MutationObserver(() => drawPubCover()).observe(document.documentElement, { attributeFilter: ["data-theme"] });
+new MutationObserver(() => {
+  drawPubCover();
+  for (const box of document.querySelectorAll("#wikis-body .wk-cover")) wikiDraw(box);
+}).observe(document.documentElement, { attributeFilter: ["data-theme"] });
 
 function ppBox(title, count, { wide = false } = {}) {
   const box = mkEl("section", "pp-box" + (wide ? " wide" : ""));
@@ -435,8 +610,10 @@ function upsellText(why) {
 }
 
 // --- the handle, asked on the first visit (ADR-0143 point 7, amended 2026-11-02) ---------
-// An overlay on this view alone: the drawer stays live, so the person can leave and come back,
-// and the view behind it is inert. The format and the reserved names are checked as typed with
+// An overlay on My wikis alone: the drawer stays live, so the person can leave and come back, and
+// the wikis behind it are inert. The bar stays live, since the catalog needs no handle, and so does
+// Shared with you, drawn under the question: a wiki someone sent opens with no handle chosen, and
+// behind the overlay its Open a file… could not be reached (ADR-0157 point 7). The format and the reserved names are checked as typed with
 // the server's own list; whether a name is taken only the host knows, within a minute.
 const PUB_HANDLE = /^[a-z0-9]([a-z0-9-]{0,28}[a-z0-9])?$/;
 // How long a claim may wait before the field opens again: the host's pass runs every minute.
@@ -453,8 +630,9 @@ function pubHandleWhy(h, reserved) {
 function pubAsk(st) {
   const view = $("#view-public");
   let over = $("#pg-ask");
-  const ask = st && st.ask_handle && st.ask_handle.ask ? st.ask_handle : null;
-  for (const el of [$("#public-bar"), $("#public-body")]) el.inert = !!ask;
+  // a code waiting on the account: linking brings the account's handle, so the question waits
+  const ask = st && st.ask_handle && st.ask_handle.ask && !pubLinking ? st.ask_handle : null;
+  $("#public-body").inert = !!ask;
   if (!ask) {
     if (over) over.remove();
     clearTimeout(pubAskTimer);
@@ -503,6 +681,8 @@ function pubAsk(st) {
     if (!ask.pending) setTimeout(() => input.focus(), 0);
   }
   pubAskPaint(st);
+  over.querySelector(":scope > .pp-box")?.remove();
+  over.append(invitesBox());
 }
 
 function pubAskPaint(st) {
@@ -521,7 +701,7 @@ function pubAskPaint(st) {
   let ok = false;
   if (pending && !stale) {
     msg.className += " ok";
-    msg.textContent = `Taking @${pending}. My Wikis opens in about a minute.`;
+    msg.textContent = `Taking @${pending}. My wikis opens in about a minute.`;
   } else if (stale) {
     msg.textContent = "The server has not answered yet. You can try again.";
     ok = !pubHandleWhy(v, ask.reserved || []) && !!v;
@@ -555,6 +735,7 @@ function renderPublic(fresh) {
   const count = $("#public-count");
   const st = pubState;
   pubAsk(st);
+  paintLinkLine(st);
   if (st && st.ask_handle && st.ask_handle.ask && !st.available) {
     link.hidden = true;
     count.textContent = "";
@@ -564,9 +745,10 @@ function renderPublic(fresh) {
   if (!st || !st.available) {
     link.hidden = true;
     count.textContent = "";
+    // the invitations are read on their own route, so a view that cannot publish still receives
     body.replaceChildren(mkEl("p", "pp-dim", !st
-      ? "My Wikis could not be read."
-      : "This account has no public address yet: the person who runs Silica gives each account its own handle."));
+      ? "My wikis could not be read."
+      : "This account has no public address yet: the person who runs Silica gives each account its own handle."), invitesBox());
     return;
   }
   link.hidden = !st.url;
@@ -577,6 +759,10 @@ function renderPublic(fresh) {
   count.textContent = `${st.vaults.length} of ${st.max} wikis`;
   const v = pubCurVault();
   if (v) pubCur = v.slug;
+  // while the handle is asked, Shared with you is drawn over the question and not twice
+  const asked = !!(st.ask_handle && st.ask_handle.ask);
+  // a computer with no account linked: it saves files and publishes nothing (ADR-0157 point 4)
+  const alone = !!st.link && !st.can_publish;
   if (pubCheck && (!v || pubCheck.slug !== v.slug)) pubCheck = null;
   if (pubCheck) {
     paintCheck();
@@ -638,8 +824,8 @@ function renderPublic(fresh) {
     frag.append(panel);
   }
   if (!v) {
-    frag.append(mkEl("p", "pp-status", `You can publish up to ${st.max} wikis, each a folder of your vault. Readers find them at your address, and in Pages if you list them.`));
-    frag.append(invitesBox(true));
+    frag.append(mkEl("p", "pp-status", `You can publish up to ${st.max} wikis, each a folder of your vault. Readers find them at your address, and in Wikis if you list them.`));
+    if (!asked) frag.append(invitesBox());
     body.replaceChildren(frag);
     return;
   }
@@ -650,9 +836,13 @@ function renderPublic(fresh) {
   if (v.visibility === "off") {
     status.textContent = v.downgraded
       ? "Off since this account became Free: a Private wiki goes Off. Its readers keep the copies they saved."
-      : st.hosted || st.url
-        ? "Off: this wiki's address says there is nothing there, and your public page does not show it. Its notes keep their globes for when you turn it on."
-        : `Off. Publish writes it${st.dir ? ` into ${st.dir}` : ""}, as files any static host can serve; a wiki on this computer is not listed in Pages.`;
+      : alone
+        ? "Off. Link an account to publish, or save it as a file."
+        : st.hosted || st.url
+          ? "Off: this wiki's address says there is nothing there, and your public page does not show it. Its notes keep their globes for when you turn it on."
+          : v.sent
+            ? "Off on this computer. Turn off on your account takes its copy there off its address too."
+            : "Off. Publish sends its notes to your account, which publishes them.";
   }
 
   // the head of the vault in hand: its title and line, edited in place
@@ -672,7 +862,7 @@ function renderPublic(fresh) {
   const ctl = mkEl("div", "pg-ctl");
   const lock = st.private === "ok" ? null : mkEl("span", "pg-lock");
   if (lock) lock.innerHTML = pubSvg(12, false, true);
-  ctl.append(pgSeg("Who can read this wiki", [["off", "Off"], ["public", "Public"], ["private", "Private", lock]], v.visibility, (x) => {
+  if (!alone) ctl.append(pgSeg("Who can read this wiki", [["off", "Off"], ["public", "Public"], ["private", "Private", lock]], v.visibility, (x) => {
     if (x === v.visibility) return;
     if (x === "private" && upgradeOn()) { upgradeOpen("Private wikis come with a paid account", "A Private wiki is read only by the accounts you name."); return; }
     if (x === "private" && st.private !== "ok") { status.hidden = false; status.replaceChildren(...upsellText(st.private)); return; }
@@ -686,7 +876,9 @@ function renderPublic(fresh) {
   line.addEventListener("change", () => save("line", line));
   line.addEventListener("keydown", (e) => { if (e.key === "Enter") line.blur(); });
   const meta = mkEl("p", "pg-meta");
-  meta.append(mkEl("span", "", "@" + st.handle), mkEl("span", "pg-path", v.folder + "/"), mkEl("span", "", pubCount(v.out)));
+  meta.append(mkEl("span", "", "@" + pubHandle()), mkEl("span", "pg-path", v.folder + "/"), mkEl("span", "", pubCount(v.out)));
+  // ADR-0157 point 10: the computer's next Publish replaces this folder, an edit made here with it
+  if (v.computer) meta.append(Object.assign(mkEl("span", "", "kept by your computer"), { title: "Publish on your computer replaces this folder, edits made here included." }));
   const areaN = pubCover && pubCoverOf === v.slug && pubCover.areas ? pubCover.areas.length : null;
   meta.append(mkEl("span", "pg-areas", areaN === null ? "" : `${areaN} ${areaN === 1 ? "area" : "areas"}`));
   const lic = mkEl("label", "pg-lic", "License: ");
@@ -694,7 +886,8 @@ function renderPublic(fresh) {
   for (const l of st.licenses) ls.append(Object.assign(document.createElement("option"), { value: l, textContent: l, selected: l === v.license }));
   ls.addEventListener("change", () => pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { license: ls.value }));
   lic.append(ls);
-  meta.append(lic, mkEl("span", "", "Published: " + pubDay(v.published)));
+  // on a computer, the account's date alone: `published` may be a build of its own from before the link
+  meta.append(lic, mkEl("span", "", "Published: " + pubDay(st.link && !v.sent ? "" : v.published)));
   head.append(tl, line, meta);
   frag.append(head);
 
@@ -704,7 +897,7 @@ function renderPublic(fresh) {
   frag.append(cover, status);
 
   const grid = mkEl("div", "pp-grid");
-  const goes = ppBox(v.visibility === "off" ? "Would go out" : "Goes out", `${pubCount(v.out)} · ${v.folder}/`, { wide: true });
+  const goes = ppBox(alone ? "In the file" : v.visibility === "off" ? "Would go out" : "Goes out", `${pubCount(v.out)} · ${v.folder}/`, { wide: true });
   const chips = mkEl("ul", "pg-chips");
   for (const t of v.top) chips.append(mkEl("li", "", t));
   if (!v.out) chips.append(mkEl("li", "more", "Nothing yet: this folder has no note that can go out."));
@@ -716,30 +909,60 @@ function renderPublic(fresh) {
   if (st.outside) notes.push(`${pubCount(st.outside)} with publish: true outside every wiki ${st.outside === 1 ? "stays" : "stay"} in your vault`);
   if (notes.length) goes.append(mkEl("p", "pp-dim", notes.join(" · ")));
   grid.append(goes);
-  if (v.visibility === "public" && st.url) grid.append(listingBox(v));
+  // a linked computer owns its wikis' listing request, which its Publish carries (ADR-0157 point 10)
+  if (v.visibility === "public" && (st.url || st.link)) grid.append(listingBox(v));
   if (v.visibility === "private") grid.append(readersBox(v));
-  grid.append(invitesBox(false));
+  if (alone) grid.append(linkBox());
+  // alone, the draft puts Shared with you under the one action this computer has
+  if (!asked && !alone) grid.append(invitesBox());
   frag.append(grid);
 
   const row = mkEl("div", "pp-actions");
-  const go = mkEl("button", "pp-go", v.visibility === "off" ? `Turn on and publish ${pubCount(v.out)}` : `Publish ${pubCount(v.out)}`);
-  go.type = "button";
-  go.disabled = !v.out;
-  go.addEventListener("click", () => startPublish(v, go));
-  row.append(go, mkEl("span", "pp-dim", inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
-    ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
-    : "Readers see the wiki as it is when you publish; a note written later in its folder goes out the next time."));
+  const file = mkEl("button", alone ? "pp-go" : "st-btn", "Save as a file");
+  file.type = "button";
+  file.disabled = !v.out;
+  file.addEventListener("click", () => startPublish(v, file, true));
+  if (alone) row.append(file, mkEl("span", "pp-dim", FILE_LINE));
+  else {
+    // a linked computer's Off wiki that went out before: its copy on the account is what is left to turn off
+    const off = !!st.link && v.visibility === "off" && !!v.sent;
+    const go = mkEl("button", "pp-go", off ? "Turn off on your account"
+      : v.visibility === "off" ? `Turn on and publish ${pubCount(v.out)}` : `Publish ${pubCount(v.out)}`);
+    go.type = "button";
+    go.disabled = !v.out;
+    go.addEventListener("click", () => startPublish(v, go, false, off));
+    row.append(go, file, mkEl("span", "pp-dim", off ? "Your account keeps the notes and takes the wiki off its address, as Off does there."
+      : inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
+      ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
+      : st.link
+        ? `Publish sends the notes to your account, which builds the pages and publishes them at ${st.wikis_host}/@${pubHandle()}/${v.slug}/. Nothing else leaves this computer.`
+        : "Readers see the wiki as it is when you publish; a note written later in its folder goes out the next time."));
+  }
   if (v.visibility === "off") {
-    const rm = mkEl("button", "st-btn", "Remove from My Wikis");
+    const rm = mkEl("button", "st-btn", "Remove from My wikis");
     rm.type = "button";
     rm.title = "the folder and its notes stay as they are";
     rm.addEventListener("click", async () => { const r = await pubPost(`/public/vault/${encodeURIComponent(v.slug)}/remove`); if (r) { pubCur = ""; renderPublic(true); } });
     row.append(rm);
   }
   frag.append(row);
+  if (!alone) frag.append(mkEl("p", "pp-dim", FILE_LINE));
+  if (pubFile && pubFile.vault === v.slug) frag.append(fileSavedLine(pubFile));
   if (pubResult && pubResult.vault === v.slug) {
     const r = pubResult;
-    frag.append(mkEl("p", "pp-dim", `Last publish: ${pubCount(r.notes)}, ${r.links} ${r.links === 1 ? "link" : "links"}, ${r.images} ${r.images === 1 ? "image" : "images"}.`));
+    if (r.off) frag.append(mkEl("p", "pp-dim", "Turned off on your account: its address says there is nothing there."));
+    else if (r.sent) {
+      // a computer's Publish: its account built the pages, and only the account knows the address
+      const p = mkEl("p", "pp-dim pp-res", `Last publish: ${pubCount(r.notes)}, sent to your account`);
+      if (r.url) p.append(", at ", Object.assign(document.createElement("a"), { href: r.url, target: "_blank", rel: "noopener", textContent: r.url.replace(/^https:\/\//, "") }));
+      p.append(".");
+      frag.append(p);
+    } else frag.append(mkEl("p", "pp-dim", `Last publish: ${pubCount(r.notes)}, ${r.links} ${r.links === 1 ? "link" : "links"}, ${r.images} ${r.images === 1 ? "image" : "images"}.`));
+  }
+  if (alone && !asked) {
+    const below = mkEl("div", "pp-grid");
+    below.append(invitesBox());
+    frag.append(below);
   }
   body.replaceChildren(frag);
   if (keep && keep.slug === v.slug) {
@@ -748,6 +971,160 @@ function renderPublic(fresh) {
   }
   if (fresh || pubCoverOf !== v.slug || (pubCover && pubCover.n.length + (pubCover.unlinked || 0) !== v.out)) loadPubCover(v.slug, !!fresh);
   else drawPubCover();
+}
+
+// --- this computer's link to an account (ADR-0157 point 9) ------------------------------
+// Unlinked, a computer saves wikis as files; linked, Publish sends the notes to the account. The
+// app's server talks to the gateway and keeps the poll and the token: the page sees the code.
+let pubLinking = null;  // { code, url, until }: a code waiting for the person on the host
+let pubLinkTimer = 0;
+const LINK_POLL_MS = 2000;
+const linkHost = (h) => (h || "").replace(/^https?:\/\//, "");
+// the account's handle once linked: the wiki is published under it, whatever this vault calls itself
+const pubHandle = () => (pubState.link && pubState.link.handle) || pubState.handle;
+
+function paintLinkLine(st) {
+  const el = $("#link-line");
+  const lk = st && st.link;
+  el.hidden = !lk;
+  if (!lk) return;
+  if (lk.linked) {
+    const since = new Date(lk.since).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    el.replaceChildren("Linked to your account on ", mkEl("b", "", linkHost(lk.host)), ` since ${since} · `, preLink("Unlink", "unlink", linkUnlink));
+  } else el.replaceChildren("This computer is not linked to an account · ", preLink("Link an account", "link", linkStart));
+}
+
+function linkBox() {
+  if (pubLinking) {
+    const box = ppBox("Link an account", "waiting for you", { wide: true });
+    const row = mkEl("div", "lst-row");
+    const open = Object.assign(document.createElement("a"), { className: "st-btn", href: pubLinking.url, target: "_blank", rel: "noopener", textContent: "Open the page ↗" });
+    const no = mkEl("button", "st-btn", "Cancel");
+    no.type = "button";
+    no.addEventListener("click", () => linkStop());
+    row.append(mkEl("span", "lk-code", pubLinking.code),
+      mkEl("p", "", `The page that opened in your browser, ${linkHost(pubState.link.host)}/link/confirm, shows this code. Sign in there if it asks, check that the code is the same, and press Link. The code lasts ten minutes.`),
+      open, no);
+    box.append(row);
+    return box;
+  }
+  const box = ppBox("Publish to Wikis", "needs a Silica account", { wide: true });
+  const go = mkEl("button", "st-btn", "Link an account");
+  go.type = "button";
+  go.addEventListener("click", linkStart);
+  const row = mkEl("div", "lst-row");
+  row.append(mkEl("p", "", `Publishing goes through your account on Silica hosted: this Silica sends the wiki's notes, your account builds the pages and publishes them at ${pubState.wikis_host}/@handle/. Until then, save the wiki as a file.`), go);
+  box.append(row);
+  return box;
+}
+
+async function linkStart() {
+  if (pubLinking) return;
+  let r, d;
+  try {
+    r = await fetch("/link/start", { method: "POST" });
+    d = await r.json().catch(() => ({}));
+  } catch {
+    notify("My wikis could not be reached");
+    return;
+  }
+  if (!r.ok) {
+    notify(d.detail || "The link could not start");
+    return;
+  }
+  pubLinking = { code: d.code, url: d.url, until: Date.now() + d.expires_in * 1000 };
+  // still inside the click's few seconds, so the browser lets the tab open; the box offers it too
+  window.open(d.url, "_blank", "noopener");
+  if (activeTab === "public") renderPublic();
+  linkWait();
+}
+
+function linkStop(said) {
+  clearTimeout(pubLinkTimer);
+  pubLinking = null;
+  if (said) notify(said);
+  if (activeTab === "public") renderPublic();
+}
+
+// Every 2 s until the person confirms, the code is gone, or its ten minutes end. A poll that fails
+// is asked again: the gateway keeps the code, and the token waits for the poll that collects it.
+function linkWait() {
+  clearTimeout(pubLinkTimer);
+  if (!pubLinking) return;
+  if (Date.now() > pubLinking.until) return linkStop("The code ran out. Link an account again for a new one.");
+  pubLinkTimer = setTimeout(async () => {
+    let d = null;
+    try {
+      const r = await fetch("/link/poll", { method: "POST" });
+      d = r.ok ? await r.json() : null;
+    } catch {
+      d = null;
+    }
+    if (!pubLinking) return;  // cancelled while it was asked
+    if (d && d.state === "linked") {
+      clearTimeout(pubLinkTimer);
+      pubLinking = null;
+      notify(`Linked to your account on ${linkHost(d.host)}`, "info");
+      await loadPublicState();
+    } else if (d && d.state === "gone") linkStop("The code is gone. Link an account again for a new one.");
+    else linkWait();
+  }, LINK_POLL_MS);
+}
+
+async function linkUnlink() {
+  if (await pubPost("/link/unlink")) await loadPublicState();
+}
+
+// --- Save as a file (ADR-0157 point 5) ---------------------------------------------
+// Any wiki in any state. On a computer the server writes it into Downloads and the line says
+// where; on the hosted service the server's disk is not the person's, so the browser downloads it.
+const FILE_LINE = "Anyone you give the file to reads it in a browser, offline, or keeps it in their Silica. A file cannot be taken back.";
+const fileMB = (b) => (b < 1e5 ? "less than 0.1 MB" : `${(b / 1e6).toLocaleString("en-GB", { maximumFractionDigits: 1 })} MB`);
+
+async function saveWikiFile(v, b) {
+  b.disabled = true;
+  b.textContent = "saving…";
+  let done = false;
+  if (pubState.hosted) done = await downloadWikiFile(v);
+  else {
+    const r = await pubPost(`/public/vault/${encodeURIComponent(v.slug)}/file`);
+    if (r) pubFile = { vault: v.slug, ...r };
+    done = !!r;
+  }
+  // a refusal keeps the sheet open, with its answers, for another try
+  if (done) pubCheck = null;
+  renderPublic();
+}
+
+// A fetch and not a link, so a refusal (past 100 MB) is said on the screen instead of landing in
+// Downloads as the file; a wiki file is capped, so holding it in memory is affordable.
+async function downloadWikiFile(v) {
+  let r, blob;
+  try {
+    r = await fetch(`/public/vault/${encodeURIComponent(v.slug)}/file`);
+    if (r.ok) blob = await r.blob();
+  } catch {
+    notify("My wikis could not be reached");
+    return false;
+  }
+  if (!r.ok) {
+    notify((await r.json().catch(() => ({}))).detail || "The file could not be made");
+    return false;
+  }
+  const m = /filename\*=UTF-8''([^;]+)/.exec(r.headers.get("Content-Disposition") || "");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = m ? decodeURIComponent(m[1]) : `${v.slug}.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  return true;
+}
+
+function fileSavedLine(f) {
+  const p = mkEl("p", "pp-dim pp-saved");
+  p.append("Saved ", mkEl("b", "", f.name), `, ${pubCount(f.notes)}, ${fileMB(f.bytes)}, in ${f.folder}. `,
+    preLink("Show in folder", "reveal", () => pubPost("/public/reveal", { path: f.path })));
+  return p;
 }
 
 // --- the listing (ADR-0153 points 7, 8 and 13) -------------------------------------
@@ -780,11 +1157,21 @@ function listingBox(v) {
   const since = r.since ? ` since ${pubDay(r.since)}` : "";
   const box = (status, body) => { const b = ppBox("In Wikis", status, { wide: true }); b.append(body); return b; };
   if (v.blocked.length) return box("Not listed", listingRow(v.blocked.join(" ")));
-  if (!v.listed) return box("Not listed", listingRow("Your wiki is reviewed before it enters Wikis. Until then it is reachable at its address and search engines leave it alone.", "Ask to list", true, v));
-  if (r.state === "in") return box("Listed", listingRow(`In Wikis${since}. A Publish takes it out until it is reviewed again.`, "Leave Wikis", false, v));
-  if (r.state === "out") return box("Changed", listingRow("Out of Wikis: it was published again after its review. It is waiting for review again, and it stays public at its address."));
+  // A computer's request travels with its Publish: until one has carried it, the account holds the
+  // one before, asked or withdrawn.
+  if (pubState.link && v.listed !== v.sent_listed) return v.listed
+    ? box("Asked", listingRow("Asked. It reaches your account with your next Publish.", "Withdraw", false, v))
+    : box("Withdrawn", listingRow("Withdrawn. It reaches your account with your next Publish.", "Ask to list", true, v));
+  // A computer never hears the review, which is the account's: what became of the request shows there.
+  if (pubState.link && v.listed) return box("Asked", listingRow(
+    `Asked. Your account's review decides; the result shows in Wikis → My wikis on ${linkHost(pubState.link.host)}.`, "Withdraw", false, v));
+  // A wiki a computer keeps: its next Publish carries the computer's request and replaces one made here.
+  const row = (text, label, listed) => v.computer ? listingRow(`${text} Change it from your computer.`) : listingRow(text, label, listed, v);
+  if (!v.listed) return box("Not listed", row("Your wiki is reviewed before it enters Wikis. Until then it is reachable at its address and search engines leave it alone.", "Ask to list", true));
+  if (r.state === "in") return box("Listed", row(`In Wikis${since}. A Publish takes it out until it is reviewed again.`, "Leave Wikis", false));
+  if (r.state === "out") return box("Changed", row("Out of Wikis: it was published again after its review. It is waiting for review again, and it stays public at its address."));
   if (r.state === "no") return box("Refused", listingNotice(r));
-  return box("Waiting", listingRow(`Waiting for review${since}. Your wiki stays public at its address meanwhile.`, "Withdraw", false, v));
+  return box("Waiting", row(`Waiting for review${since}. Your wiki stays public at its address meanwhile.`, "Withdraw", false));
 }
 
 // --- the check before Publish (ADR-0153 points 9, 20 and 26) -----------------------
@@ -796,17 +1183,24 @@ const PRE_SHEET = 10;
 const prePlural = (n, w) => `${n.toLocaleString("en-GB")} ${w}${n === 1 ? "" : "s"}`;
 const preOpen = (o) => !o.answer || (o.answer === "open" && !o.free && o.license !== "CC BY-ND");
 
-async function publishNow(v) {
-  const r = await pubPost("/public/publish", { vault: v.slug });
+async function publishNow(v, off = false) {
+  const r = await pubPost("/public/publish", { vault: v.slug, off });
   if (r) pubCheck = null;
-  if (r && r.result) {
+  // an account that no longer knows this computer unlinks it: the view says so at once
+  else if (pubState && pubState.link) await loadPublicState();
+  if (r && r.result && r.result.off) {
+    pubResult = r.result;
+    notify("Turned off on your account", "info");
+  } else if (r && r.result) {
     pubResult = r.result;
     notify(`Published ${pubCount(r.result.notes)}${r.result.private ? ` for ${v.readers.length} ${v.readers.length === 1 ? "reader" : "readers"}` : ""}`, "info");
   }
   renderPublic();
 }
 
-async function startPublish(v, go) {
+// A file goes through the same check as a Publish (ADR-0157 point 5): an answer missing leaves a
+// note out of a file as it does out of a Publish, and the sheet is where the person learns it.
+async function startPublish(v, go, file = false, off = false) {
   go.disabled = true;
   go.textContent = "checking…";
   let c = null;
@@ -815,18 +1209,19 @@ async function startPublish(v, go) {
     c = await r.json().catch(() => null);
     if (!r.ok) { notify(c?.detail || "The check could not run"); renderPublic(); return; }
   } catch {
-    notify("My Wikis could not be reached");
+    notify("My wikis could not be reached");
     renderPublic();
     return;
   }
   if (c.ask) {
-    pubCheck = { slug: v.slug, data: c, open: new Set(), all: new Set(), old: false, personal: false };
+    pubCheck = { slug: v.slug, data: c, open: new Set(), all: new Set(), old: false, personal: false, file, off };
     $("#public-body").scrollTop = 0;
     renderPublic();
     return;
   }
+  if (file) return saveWikiFile(v, go);
   go.textContent = "publishing…";
-  await publishNow(v);
+  await publishNow(v, off);
 }
 
 async function preSend(url, body) {
@@ -1104,12 +1499,19 @@ function checkSheet(v) {
   const links = c.count.links ? ` ${prePlural(c.count.links, "image")} ${c.count.links === 1 ? "stays a link" : "stay links"}.` : "";
   line.append(mkEl("span", "q", `Not published: ${prePlural(c.count.stay, "note")}, ${prePlural(c.count.kept, "image")}.${links}`));
   sum.append(line);
+  // a file never enters Wikis or leaves it: the line speaks of a Publish alone
   const wikis = inWikis(v) ? LEAVES_WIKIS : c.wikis;
-  if (wikis) sum.append(mkEl("p", "pp-dim", wikis));
-  const go = mkEl("button", "pp-go", `${v.visibility === "off" ? "Turn on and publish" : "Publish"} ${prePlural(c.count.notes, "note")}`);
+  if (wikis && !pubCheck.file) sum.append(mkEl("p", "pp-dim", wikis));
+  const go = mkEl("button", "pp-go", pubCheck.file ? "Save as a file" : pubCheck.off ? "Turn off on your account"
+    : `${v.visibility === "off" ? "Turn on and publish" : "Publish"} ${prePlural(c.count.notes, "note")}`);
   go.type = "button";
   go.disabled = !c.count.notes;
-  go.addEventListener("click", () => { go.disabled = true; go.textContent = "publishing…"; publishNow(v); });
+  go.addEventListener("click", () => {
+    if (pubCheck.file) return saveWikiFile(v, go);
+    go.disabled = true;
+    go.textContent = "publishing…";
+    publishNow(v, pubCheck.off);
+  });
   foot.append(sum, go);
   frag.append(foot);
   return frag;
@@ -1147,14 +1549,27 @@ function readersBox(v) {
   return box;
 }
 
-function invitesBox(alone) {
+function invitesBox() {
   const n = pubInvites.length;
   const box = ppBox("Shared with you", `${n} ${n === 1 ? "invitation" : "invitations"}`, { wide: true });
+  // Open a file (ADR-0157 point 7): a wiki someone sent as a zip becomes an invitation here
+  const pick = Object.assign(document.createElement("input"), { type: "file", hidden: true });
+  pick.accept = ".zip,application/zip";
+  pick.addEventListener("change", () => {
+    const f = pick.files[0];
+    pick.value = ""; // a refusal repaints nothing, and the same file picked again must fire change
+    if (f) openWikiFile(f);
+  });
+  const open = mkEl("button", "st-btn", "Open a file…");
+  open.type = "button";
+  open.addEventListener("click", () => pick.click());
+  box.firstChild.append(open, pick);
   const ul = mkEl("ul", "pg-rows");
   for (const inv of pubInvites) {
     const li = mkEl("li", "");
     const what = mkEl("span", "pg-grow");
     what.append(mkEl("span", "pg-who", "@" + inv.author), document.createTextNode(` shared ${inv.title}`));
+    if (inv.file) what.append(mkEl("span", "pp-dim", " · from a file"));
     li.append(what, mkEl("span", "pp-dim", `${pubCount(inv.notes)}${inv.published ? " · " + pubDay(inv.published) : ""}`));
     const no = mkEl("button", "st-btn", "Decline");
     no.type = "button";
@@ -1168,11 +1583,39 @@ function invitesBox(alone) {
     li.append(no, yes);
     ul.append(li);
   }
-  if (!n) ul.append(mkEl("li", "pp-dim", "No invitations. When an account names you as a reader of a Private wiki, it appears here."));
-  box.append(ul, mkEl("p", "pp-dim", "Free and paid accounts both receive. A saved copy lands in Saved/@handle/ and is a write like any other: it can be taken back."));
-  box.hidden = alone ? false : !n;
+  if (!n) ul.append(mkEl("li", "pp-dim", "No invitations. A wiki someone sent you as a file opens here, or drop the zip on this view."));
+  box.append(ul, mkEl("p", "pp-dim", "Free and paid accounts both receive. A saved copy lands in Saved/@handle/ and is a write like any other: it can be taken back. Silica reads a file's notes and images, never its pages."));
   return box;
 }
+
+// The zip goes as the request's body; the server reads its data and never its pages.
+async function openWikiFile(file) {
+  // the server's own cap (saved_page.WIKI_FILE_MAX), said here before 100 MB travel to be refused
+  if (file.size > 100e6) { notify("that file is past the 100 MB a wiki file may hold"); return; }
+  let r, d;
+  try {
+    r = await fetch("/vault/invitations/file", { method: "POST", headers: { "Content-Type": "application/zip" }, body: file });
+    d = await r.json().catch(() => ({}));
+  } catch {
+    notify("the file could not be opened");
+    return;
+  }
+  if (!r.ok) { notify(d.detail || "the file could not be opened"); return; }
+  pubInvites = d.invitations;
+  notify(`${d.opened.title} by @${d.opened.author} is in Shared with you`, "info");
+  if (activeTab === "public") renderPublic();
+}
+
+// A zip dropped on My wikis opens like the button; dropped elsewhere it is the chat's or nothing.
+// On the catalog tab it is nothing: Open a file… lives in My wikis, and a file opened where its row
+// cannot be seen would be a change the person did not watch happen.
+// Prevented here, so the window's own drop handler (app-notes.js) leaves it alone.
+$("#view-public").addEventListener("drop", (e) => {
+  const zip = [...(e.dataTransfer?.files || [])].find((f) => /\.zip$/i.test(f.name));
+  if (!zip || wikisTab !== "mine") return;
+  e.preventDefault();
+  openWikiFile(zip);
+});
 
 document.addEventListener("silica:vault-info", () => loadPublicState()); // a fresh tree has bare globes
 
@@ -1242,7 +1685,8 @@ async function openSaveSheet(what) {
     return;
   }
   const head = mkEl("div", "sv-card");
-  head.append(mkEl("b", "", p.title), mkEl("span", "", `by ${p.author}`), mkEl("code", "", what.invite ? "a Private wiki shared with you" : (p.source || p.url || "").replace(/^https:\/\//, "")));
+  head.append(mkEl("b", "", p.title), mkEl("span", "", `by ${p.author}`), mkEl("code", "", !what.invite ? (p.source || p.url || "").replace(/^https:\/\//, "")
+    : what.invite.file ? `from a file: the file says it is by ${p.author}, and Silica cannot check that` : "a Private wiki shared with you"));
   const parts = [head];
   if (p.kind === "note") {
     parts.push(mkEl("p", "st-sheet-text", `Into ${p.folder}.`));
