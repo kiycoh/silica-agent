@@ -218,7 +218,6 @@ def _run_collecting(events, **run_kw):
     # loop filters it out of `allowed` and dispatch takes the forbidden-tool
     # branch — no ToolStartEvent, and the ordering this file asserts is vacuous.
     tool.sensitive = False
-    tool.internal = False
     with patch.dict(TOOLS, {"silica_read_note": tool}):
         return run_agent([{"role": "user", "content": "x"}], model="m",
                          tool_progress_callback=events.append, **run_kw)

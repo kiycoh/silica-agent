@@ -54,7 +54,7 @@ def test_a_configured_server_is_one_loadable_tool_with_one_catalog_line():
     _listed()
     mcp_tools.reload()
     tool = TOOLS["mcp__mail"]
-    assert not tool.sensitive and not tool.internal
+    assert not tool.sensitive
     assert "mcp__mail" in loadable() and "mcp__mail" not in CHAT_CORE
     catalog = TOOLS["silica_load_tools"].json_schema()["function"]["description"]
     line = next(ln for ln in catalog.splitlines() if ln.startswith("- mcp__mail: "))

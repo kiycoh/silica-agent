@@ -32,21 +32,6 @@ def silica_deferred_retry(content_hash: Annotated[str, Field(description='Conten
     return anneal.retry_bundle(content_hash)
 
 
-# collapse stays "lazy" (the default) on purpose: the verdict IS the feedback,
-# and an eager stub would erase the rejection reasons from the very history the
-# steer loop iterates on.
-@tool(cls="composed", internal=True, ingress=False)
-def submit_repaired_ops(content_hash: Annotated[str, Field(description='Hash of the deferred bundle being repaired (given in the repair task)')], ops: Annotated[list[dict], Field(description='Corrected ops in the standard op schema. Bodies are plain strings: real line breaks, single backslashes.')]) -> dict[str, Any]:
-    """Validate and write repaired ops for a deferred bundle. Ops that pass the
-    validator are written to the vault immediately and leave the bundle; ops
-    that fail come back under "rejected" with the exact validator reason.
-    Correct the rejected ops and resubmit them; never resubmit an op listed
-    under "written" or "renamed" (renamed = written, but under a heading no
-    parked op carries, so the original stays deferred).
-    """
-    return anneal.repair_bundle(content_hash, ops)
-
-
 @tool(cls="composed", collapse="eager", ingress=False, label=("anneal", None))
 def silica_anneal(steer: Annotated[bool, Field(description="After the mechanical pass, hand each bundle's still-failing ops to the escalation model (a bounded repair loop per bundle)")] = False, limit: Annotated[int, Field(description='Max bundles to process (0 = all)')] = 0) -> dict[str, Any]:
     """Boundary annealing: sweep EVERY deferred bundle through the mechanical

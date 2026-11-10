@@ -142,7 +142,7 @@ def test_revert_marks_absent_note_as_stale_not_reverted(tmp_vault, tmp_path):
 
 
 def test_revert_routes_genuine_restore_failure_to_errors(tmp_vault, tmp_path):
-    """Fix #1 guard: a real per-op failure (silica_restore swallows the raise into
+    """Fix #1 guard: a real per-op failure (gate.apply_inverses swallows the raise into
     its return) on a present/eligible op still lands in errors, not reverted."""
     # recreate_deleted with no prior_content is a genuine failure, and is exempt
     # from the stale short-circuit (absent note is its expected precondition).
@@ -211,7 +211,7 @@ def test_concurrent_writes_from_many_threads(tmp_path):
 
 
 def test_revert_run_applies_move_back(tmp_vault, tmp_path):
-    """Root fix: silica_restore now applies move_back, so /revert of a move
+    """Root fix: gate.apply_inverses now applies move_back, so /revert of a move
     actually sends the note back to origin (it was a silent no-op before)."""
     from silica.driver import DRIVER
 

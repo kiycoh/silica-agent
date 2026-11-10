@@ -184,7 +184,7 @@ def _eligible() -> dict:
     from silica.config import demo, withheld
 
     gone = withheld("tools") | (DEMO_WITHHELD if demo() else frozenset())
-    return {n: t for n, t in TOOLS.items() if not t.sensitive and not t.internal and n not in gone}
+    return {n: t for n, t in TOOLS.items() if not t.sensitive and n not in gone}
 
 
 def loadable() -> tuple[str, ...]:

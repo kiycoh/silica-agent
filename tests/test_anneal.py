@@ -511,15 +511,50 @@ def test_a_standalone_retry_still_opens_its_own_revertible_unit(tmp_vault, monke
 
 # --- steer-loop seam guarantees (docs/specs/anneal-steer-loop.md) ------------
 
-def test_submit_repaired_ops_is_internal_and_keeps_its_verdict(tmp_vault):
-    # internal: reachable only when AgentConstraints names it, never from chat.
+def test_submit_repaired_ops_is_anneals_own_and_keeps_its_verdict(tmp_vault):
+    # anneal's own: handed to its loop as the registry, never in TOOLS, so no
+    # chat turn reaches it and a process that never ran catalog.load() has it.
     # lazy collapse: the verdict IS the feedback — an eager stub would erase
     # the rejection reasons from the very history the model iterates on.
-    from silica.tools import TOOLS
+    from silica.router.anneal import REPAIR_TOOL
+    from silica.tools import TOOLS, catalog
 
-    t = TOOLS["submit_repaired_ops"]
-    assert t.internal is True
-    assert t.collapse == "lazy"
+    catalog.load()
+    assert "submit_repaired_ops" not in TOOLS
+    assert REPAIR_TOOL.name == "submit_repaired_ops"
+    assert REPAIR_TOOL.collapse == "lazy"
+
+
+def test_the_steer_loop_offers_its_tool_with_nothing_registered(tmp_vault, tmp_path, monkeypatch):
+    """The FSM's own boundary anneal runs where no catalog.load() may have run:
+    registered above the router, the tool was then missing and the loop wrote
+    nothing, reported as no_fix. The block it sends is the tool's schema."""
+    from silica.router import anneal
+
+    tmp_vault.note("Reti/Reti.md", "# Reti\n")
+    store = _park(monkeypatch, tmp_path)
+    store.put(
+        "ppqq", "inbox/c.md", "Reti", None,
+        [{"op": "write", "heading": "Broker", "source_basename": "c.md",
+          "path": "Reti/Broker.md", "title": "Broker", "snippet": ""}],
+        rejection_reasons={"Reti/Broker.md": "snippet too short"},
+        phase="VALIDATE",
+    )
+    sent = []
+
+    def fix_it(model, messages, **kw):
+        sent.append(kw.get("tools"))
+        if len(sent) > 1:
+            return _final_resp()
+        return _submit_resp("ppqq", [{"op": "write", "heading": "Broker", "source_basename": "c.md",
+                                      "path": "Reti/Broker.md", "title": "Broker", "snippet": LONG}])
+
+    monkeypatch.setattr("silica.agent.loop.call_llm", fix_it)
+    monkeypatch.setattr("silica.agent.loop.TOOLS", {})  # no catalog.load() in this process
+    row = anneal._steer_bundle("ppqq")
+
+    assert sent[0] == [anneal.REPAIR_TOOL.json_schema({"submit_repaired_ops"})]
+    assert row["status"] == "committed" and row["written"] == 1
 
 
 def test_anneal_steer_commits_are_journaled_and_provenanced(tmp_vault, tmp_path, monkeypatch):
@@ -641,7 +676,7 @@ def test_submit_repaired_ops_names_a_renamed_write_instead_of_looping(tmp_vault,
     # same op until the cap.
     import json
 
-    from silica.tools import TOOLS
+    from silica.router.anneal import REPAIR_TOOL
 
     tmp_vault.note("Reti/Reti.md", "# Reti\n")
     store = _park(monkeypatch, tmp_path)
@@ -653,7 +688,7 @@ def test_submit_repaired_ops_names_a_renamed_write_instead_of_looping(tmp_vault,
         phase="VALIDATE",
     )
 
-    res = json.loads(TOOLS["submit_repaired_ops"].run(
+    res = json.loads(REPAIR_TOOL.run(
         content_hash="pppf",
         ops=[{"op": "write", "heading": "Mediatore", "source_basename": "c.md",
               "path": "Reti/Mediatore.md", "title": "Mediatore", "snippet": LONG}]))

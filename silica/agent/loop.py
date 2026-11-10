@@ -306,10 +306,9 @@ def run_agent(
         }
     else:
         # Non-ambient authority: the main agent's default toolset excludes
-        # sensitive tools (ADR-0009 / ADR-0015) and pipeline internals the FSM
-        # drives programmatically. Both are reachable only when a caller names
-        # them in AgentConstraints.tools.
-        allowed = {n: t for n, t in TOOLS.items() if not t.sensitive and not t.internal}
+        # sensitive tools (ADR-0009 / ADR-0015), reachable only when a caller
+        # names them in AgentConstraints.tools.
+        allowed = {n: t for n, t in TOOLS.items() if not t.sensitive}
 
     # Permitted, not offered (ADR-0050): a tool joins `allowed` and `schemas`
     # when silica_load_tools names it or the model calls it directly. Only

@@ -191,7 +191,7 @@ def test_write_gate_tools_are_classified_eager():
 
     eager = {n for n, t in TOOLS.items() if t.collapse == "eager"}
     assert eager == {
-        "silica_move", "silica_delete", "silica_snapshot", "silica_restore",
+        "silica_move", "silica_delete",
         "silica_patch_note", "silica_write_note",
         "silica_flag_note", "silica_require", "silica_event_create", "silica_event_update",
         "silica_autolink", "silica_backlink", "silica_embed_refresh",

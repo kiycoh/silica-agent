@@ -181,18 +181,18 @@ def test_inbox_indexing_and_external_reads(tmp_path):
         CONFIG.vault_path = orig_vault
 
 
-def test_silica_restore_idempotent():
-    """Verify that silica_restore ignores file-not-found errors during delete_created rollback operations."""
+def test_apply_inverses_idempotent():
+    """Verify that the rollback ignores file-not-found errors during delete_created rollback operations."""
     from silica.driver import NoteNotFound
-    from silica.tools.wrapped import silica_restore
+    from silica.kernel.write import gate
     from unittest.mock import patch
 
     inverses = [
         {"kind": "delete_created", "path": "Deep Learning/Backpropagation.md"}
     ]
 
-    with patch("silica.tools.wrapped.DRIVER.delete", side_effect=NoteNotFound("Error: File \"Deep Learning/Backpropagation.md\" not found.")):
-        res = silica_restore(txn_id="txn_123", inverses=inverses)
+    with patch("silica.driver.DRIVER.delete", side_effect=NoteNotFound("Error: File \"Deep Learning/Backpropagation.md\" not found.")):
+        res = gate.apply_inverses("txn_123", inverses)
 
     assert res["success"] is True
     assert "deleted_created:Deep Learning/Backpropagation.md (already_absent)" in res["applied"]

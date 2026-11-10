@@ -35,7 +35,7 @@ def test_chat_tools_excludes_only_the_named_batch_tools():
     the batch exclusion did not already hide (ADR-0050)."""
     import silica.cli  # noqa: F401  silica_web_answer registers outside silica.tools
     tools = _all_tools()
-    default = {n for n, t in tools.items() if not t.sensitive and not t.internal}
+    default = {n for n, t in tools.items() if not t.sensitive}
     assert set(chat_tools()) | set(loadable()) == default - _CHAT_EXCLUDED
     assert set(chat_tools()) == {n for n in CHAT_CORE if n in tools}
     # Every excluded name must actually exist, or the exclusion is a silent no-op
@@ -160,7 +160,7 @@ def test_chat_tools_actually_cuts_the_block():
     tools = _all_tools()
     def cost(names):
         return sum(len(json.dumps(tools[n].json_schema())) for n in names)
-    default = [n for n, t in tools.items() if not t.sensitive and not t.internal]
+    default = [n for n, t in tools.items() if not t.sensitive]
     # Re-measured 2026-08-15 at 0.807 (was pinned 0.80 with a stale "~34%
     # saving" note): every legitimate chat tool joins BOTH sets, so the ratio
     # drifts toward 1 by construction — the calendar tools took the last

@@ -30,7 +30,7 @@ PARALLEL = {"silica_search_context", "silica_read", "silica_read_note", "silica_
             "silica_links", "silica_backlinks", "silica_props", "silica_file_links",
             "silica_unresolved", "silica_orphans", "silica_graph_path", "silica_vaults"}
 MUTATES = {"silica_write_note": "written", "silica_patch_note": "written",
-           "silica_flag_note": "written", "silica_require": "written", "silica_restore": "written",
+           "silica_flag_note": "written", "silica_require": "written",
            "silica_delete": "deleted", "silica_move": "moved"}
 FOUND_NOTHING = {"silica_recall": "notes", "silica_semantic_search": "results",
                  "silica_search_context": "notes_matched", "silica_search": "paths"}
@@ -103,10 +103,8 @@ def test_a_write_never_runs_beside_another_call():
 
 
 def test_a_tool_that_mutates_a_note_names_it():
-    """`silica_restore` names none: it is internal, its inverses carry the paths,
-    and no chat history holds a call to it."""
     silent = sorted(n for n, t in TOOLS.items() if t.mutates and not t.note_args)
-    assert silent == ["silica_restore"]
+    assert silent == []
 
 
 @pytest.mark.parametrize("name", sorted(INGRESS))

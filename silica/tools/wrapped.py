@@ -10,8 +10,6 @@ From SILICA.md §4.4:
     user's, with /delete (ADR-0092).
 
 The restore points and the rollback they stand on are kernel.write.gate's.
-silica_snapshot and silica_restore stay registered for CLI discoverability
-only: the FSM holds the Txn itself.
 """
 from __future__ import annotations
 
@@ -26,7 +24,6 @@ from pydantic import Field
 from silica.driver import DRIVER
 from silica.kernel.write import gate
 from silica.kernel.write.ops import InverseOp, InverseOpKind
-from silica.kernel.write.ops_io import load_ops
 from silica.tools import tool
 
 logger = logging.getLogger(__name__)
@@ -114,44 +111,3 @@ def silica_delete(ref: Annotated[str, Field(description='Name or path of the not
     res = gate.delete_with_restore_point(path, nc.content, CHAT_DELETE_SOURCE)
     res.pop("dangling", None)  # nothing linked the note, so no link dangles
     return res
-
-
-@tool(cls="wrapped", collapse="eager", internal=True, ingress=False, label=("snapshot", "ops_json_path"))
-def silica_snapshot(ops_json_path: Annotated[str, Field(description='Path to validated operations JSON to snapshot before writing')]) -> dict[str, Any]:
-    """Snapshot the current state of notes before they are modified.
-
-    Builds InverseOp entries (C3):
-      - write ops   → delete_created(path)     — rollback by deleting the new note
-      - patch / overwrite ops → restore_version(path, N) — rollback via history:restore
-
-    The orchestrator holds the returned Txn object directly.
-    The tool result is JSON-serialisable (no _txn_obj leak per addendum note).
-    """
-    try:
-        ops = load_ops(ops_json_path)
-    except Exception as e:
-        return {"error": f"Failed to load operations for snapshot: {e}"}
-
-    try:
-        txn = gate.build_txn(ops)
-    except Exception as e:
-        return {"error": f"Snapshot failed: {e}"}
-
-    return {
-        "success": True,
-        "txn_id": txn.id,
-        "refs": [r.name for r in txn.refs],
-        "created_paths": txn.created_paths,
-        "inverses": txn.inverses_serialized,
-    }
-
-
-@tool(cls="wrapped", collapse="eager", internal=True, ingress=False, mutates="written",
-      label=("restore", "txn_id"))
-def silica_restore(txn_id: Annotated[str, Field(description='Transaction ID to restore (for audit log only)')], inverses: Annotated[list[dict], Field(description='InverseOp list from silica_snapshot result')]) -> dict[str, Any]:
-    """Apply InverseOp list to rollback a transaction.
-
-    Accepts the 'inverses' list produced by silica_snapshot — fully
-    JSON-serialisable, no hidden Python objects.
-    """
-    return gate.apply_inverses(txn_id, inverses)
