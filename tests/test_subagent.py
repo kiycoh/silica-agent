@@ -533,7 +533,7 @@ def test_orphan_no_candidates():
 def test_orphan_hub_is_none_when_context_has_no_hub():
     """When context has no hub key, hub must be None (not basename of target_path)."""
     import silica.capabilities.orphan as orphan_module
-    from silica.kernel.write.gate import orphan_bounds as real_orphan_bounds
+    from silica.capabilities._base import orphan_bounds as real_orphan_bounds
 
     item = WorkItem(
         kind="orphan",

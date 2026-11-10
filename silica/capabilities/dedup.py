@@ -18,10 +18,11 @@ from pydantic.json_schema import SkipJsonSchema
 
 from silica.config import live_env
 from silica.kernel.base.notekey import store_key
-from silica.kernel.write.gate import commit_ops, dedup_bounds, dedup_spoke_bounds
+from silica.kernel.write.gate import commit_ops
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import DedupFamily, DedupJob, WorkItem
-from silica.capabilities._base import clean_twin_bundle, emit_feedback, load_prompt, read_or_skip
+from silica.capabilities._base import (clean_twin_bundle, dedup_bounds, dedup_spoke_bounds, emit_feedback, load_prompt,
+                                       read_or_skip)
 from silica.model.reply import parse_reply
 
 logger = logging.getLogger(__name__)
@@ -280,7 +281,7 @@ def _file_dominated_claim(
     import datetime
 
     from silica.kernel.base.noteshape import SUPERSEDED_MARKER
-    from silica.kernel.write.gate import dedup_supersede_bounds
+    from silica.capabilities._base import dedup_supersede_bounds
     from silica.kernel.write.contested import (
         superseded_claim,
         suppress_contest,
@@ -337,7 +338,7 @@ def _mark_merge_loser(job: DedupJob, winner_path: str) -> None:
     if not loser_path or _note_key(loser_path) == _note_key(winner_path):
         return
     try:
-        from silica.kernel.write.gate import dedup_supersede_bounds
+        from silica.capabilities._base import dedup_supersede_bounds
         from silica.kernel.write.contested import mark_superseded_by
 
         prior = read_or_skip(loser_path)[0] or ""
@@ -398,7 +399,7 @@ def _record_absorbed_alias(job: DedupJob, winner_path: str, hub: str | None) -> 
     if not concept or concept.lower() == winner_title.lower():
         return
     try:
-        from silica.kernel.write.gate import dedup_alias_bounds
+        from silica.capabilities._base import dedup_alias_bounds
         from silica.kernel.base.frontmatter import add_alias
 
         prior = read_or_skip(winner_path)[0] or ""
@@ -602,7 +603,7 @@ def _settle_landed_distinct(item: WorkItem, job: DedupJob, decision: DedupDecisi
     trace a spoke gets, so the verdict survives in the note and nothing is
     written a second time under a slugified sibling path.
     """
-    from silica.kernel.write.gate import dedup_settle_bounds
+    from silica.capabilities._base import dedup_settle_bounds
     from silica.kernel.base import frontmatter
     from silica.kernel.write.templates import has_related_trace, related_trace, related_unjudged
 

@@ -18,11 +18,11 @@ import os
 from typing import Any
 
 from silica.kernel.write.gate import commit_ops
-from silica.kernel.write.gate import expand_bounds
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.validate import min_write_snippet_chars
 from silica.kernel.workqueue import ExpandJob, WorkItem
-from silica.capabilities._base import NoteContent, clean_twin_bundle, emit_feedback, load_prompt, parse_content, read_or_skip
+from silica.capabilities._base import (NoteContent, clean_twin_bundle, emit_feedback, expand_bounds, load_prompt,
+                                       parse_content, read_or_skip)
 
 logger = logging.getLogger(__name__)
 

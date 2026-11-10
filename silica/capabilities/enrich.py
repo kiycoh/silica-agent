@@ -18,9 +18,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from silica.capabilities._base import emit_feedback, parse_content, read_or_skip
+from silica.capabilities._base import emit_feedback, enrich_bounds, parse_content, read_or_skip
 from silica.kernel.prompts import load_prompt
-from silica.kernel.write.gate import commit_ops, enrich_bounds
+from silica.kernel.write.gate import commit_ops
 from silica.kernel.workqueue import WorkItem
 from silica.kernel.write.ops import Op, OpType
 

@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from silica.kernel.write.gate import commit_ops
-from silica.kernel.write.gate import dedup_bounds
+from silica.capabilities._base import dedup_bounds
 from silica.kernel.write.ops import BulkResult, Op, OpType, Txn
 import silica.kernel.write.checkpoints as checkpoints
 
