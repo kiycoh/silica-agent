@@ -186,6 +186,7 @@ def test_repl_sessions_resume_handlers(narrator, monkeypatch, capsys):
     """The REPL surface: /sessions lists, /resume rebuilds messages from the
     narration, and the meta dispatcher owns both."""
     from silica.cli import _handle_slash_command
+    from silica.session.conversation import Conversation
 
     narrator.turn({"role": "user", "content": "prima domanda"})
     narrator.turn({"role": "assistant", "content": "prima risposta"})
@@ -195,15 +196,15 @@ def test_repl_sessions_resume_handlers(narrator, monkeypatch, capsys):
     monkeypatch.setattr("silica.session.seed.fresh_messages", lambda: [{"role": "system", "content": "seed"}])
     monkeypatch.setattr("silica.session.meter.update_context_tokens", lambda m: None)
 
-    assert _handle_slash_command("/sessions", []) is True
-    messages: list[dict] = []
-    assert _handle_slash_command("/resume 1", messages) is True
-    assert [m["content"] for m in messages] == ["seed", "prima domanda", "prima risposta"]
+    assert _handle_slash_command("/sessions", Conversation()) is True
+    conv = Conversation()
+    assert _handle_slash_command("/resume 1", conv) is True
+    assert [m["content"] for m in conv.messages] == ["seed", "prima domanda", "prima risposta"]
     from silica.obs.narration import NARRATOR
-    assert NARRATOR.sid == sid              # appending continues the same account
+    assert NARRATOR.sid == sid == conv.sid  # appending continues the same account
 
-    assert _handle_slash_command("/resume 99", []) is True   # graceful, no raise
-    assert _handle_slash_command("/sessions prune", []) is True  # usage line, no delete
+    assert _handle_slash_command("/resume 99", Conversation()) is True   # graceful, no raise
+    assert _handle_slash_command("/sessions prune", Conversation()) is True  # usage line, no delete
 
 
 # --- observability levers (2026-09-06 audit) ---------------------------------

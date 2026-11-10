@@ -508,6 +508,14 @@ INCOGNITO_BEAT: dict[str, Any] = {"kind": "incognito", "status": "done", "id": N
                   "summary": "off the record", "payload": {}}
 
 
+def listed(sid: str, vault: str) -> bool:
+    """Whether `sid` is a narration session `list_sessions(vault)` shows. A
+    reopen continues only such a one in place: another vault's, an incognito
+    one or one with no turn yet goes on as a new session seeded with its turns."""
+    path = narration_dir() / f"{sid}.jsonl"
+    return path.exists() and _narration_row(path, vault) is not None
+
+
 def _narration_row(path: Path, vault: str) -> dict | None:
     title, sid, named = "untitled", path.stem, False
     for rec in read_beats(path):

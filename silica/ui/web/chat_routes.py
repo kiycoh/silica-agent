@@ -18,12 +18,12 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from silica.agent import turn_notes
 from silica.kernel.text.mentions import IMAGE_MARK, IMAGE_MARK_RE
 from silica.tools import tool_failed
-from silica.agent.recall_watch import numbers_of_session, read_refs, READS_KEY
+from silica.agent.recall_watch import read_refs, READS_KEY
 from silica.config import CONFIG, demo
 from silica.kernel.base.formats import IMAGE_SUFFIX, ext_alternation
 from silica.kernel.recall.resolve import note_resolver
-from silica.session import meter
 from silica.session import turn as session_turn
+from silica.session.conversation import reopen
 from silica.sources import drop_turn
 from silica.ui.web import drop, flags, render, session, sse, turn
 from silica.ui.web.callback import tool_calls_to_json
@@ -473,42 +473,21 @@ def load_session(payload: dict):
     sid = str(payload.get("id", ""))
     if not sid.isalnum():  # ids are hex — blocks path traversal
         raise HTTPException(status_code=404, detail="no such session")
-    replayed = _narr.load_session_messages(sid, CONFIG.vault_path or "")
+
+    def scope(last: dict) -> None:
+        SESSION.chat.collapsed = set()
+        # The scope its last turn ran in (ADR-0112 point 4): the seed holds no
+        # workspace line, so it is written again here, as the seed is.
+        ws = session.resolve_workspace(str(last.get("silica_workspace") or ""))
+        if ws is not None:
+            session.apply_workspace(ws)
+
+    try:
+        replayed = reopen(SESSION.chat, sid, driver="gui", seed=lambda: session.seeded()[0], scope=scope)
+    except _narr.SessionBusy as e:
+        raise Refused(409, e) from None
     if replayed is None:
         raise HTTPException(status_code=404, detail="no such session")
-    if (_narr.narration_dir() / f"{sid}.jsonl").exists():
-        try:
-            _narr.NARRATOR.resume(sid)   # continue appending to the same account
-        except _narr.SessionBusy as e:
-            raise Refused(409, e) from None
-        SESSION.chat.sid = sid
-    else:
-        # Legacy snapshot: continue as a NEW narration session seeded with its
-        # turns — emit new, recognise legacy (ticket 05).
-        _narr.NARRATOR.close()
-        SESSION.chat.sid = _narr.NARRATOR.ensure_session(driver="gui")
-        for m in replayed:
-            _narr.NARRATOR.turn(m)
-    # The narration records turns, never the seed, so a reopened chat used to
-    # run with no system prompt, vault scope or memory at all. The TUI's
-    # /resume already put a fresh seed in front; this is the same.
-    SESSION.chat.messages[:] = session.seeded()[0] + replayed
-    SESSION.chat.collapsed = set()
-    # The scope its last turn ran in (ADR-0112 point 4): the seed holds no
-    # workspace line, so it is written again here, as the seed is.
-    last: dict = next((m for m in reversed(replayed) if m.get("role") == "user"), {})
-    ws = session.resolve_workspace(str(last.get("silica_workspace") or ""))
-    if ws is not None:
-        session.apply_workspace(ws)
-    # Its persona too (ADR-0127 point 3), read from the file as it is now; one
-    # removed since leaves the chat without it rather than failing to open.
-    from silica.kernel import personas
-
-    if (worn := personas.available(CONFIG.vault_path or None).get(str(last.get(personas.TURN_KEY) or ""))):
-        personas.apply(SESSION.chat.messages, worn)
-    SESSION.chat.seen_numbers.clear()
-    SESSION.chat.seen_numbers.update(numbers_of_session(SESSION.chat.sid))
-    meter.update_context_tokens(SESSION.chat.messages)
     return {"ok": True}
 
 
