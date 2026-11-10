@@ -557,6 +557,8 @@ def blocks(wiki: dict, ans: dict, plan: dict) -> list[str]:
     """Why this wiki cannot ask to enter Wikis (ADR-0153 points 9 and 16), in the screen's words."""
     if wiki["visibility"] == "private":
         return []
+    # No line for a note copied word for word (point 9, owner 2026-11-06): one made from a source
+    # answered Mine or Open is exempt, and `decide` keeps one from any other source out of the wiki.
     out = []
     if wiki["license"] == "not stated":
         out.append('It cannot ask to enter Wikis while its license is "not stated".')
