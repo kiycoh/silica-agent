@@ -22,6 +22,7 @@ from pathlib import Path
 from silica.kernel.base.formats import DOC_EXTS, IMG_EXTS, file_act
 from silica.kernel.recall import engine as recall_engine
 from silica.kernel.recall.listing import vault_files_under
+from silica.sources import pdf_extract
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +88,6 @@ _chapters_memo: dict[str, tuple[tuple, dict]] = {}
 def _outline(full: Path) -> tuple[int, list[tuple[str, int]]]:
     """(pages, [(title, 1-based page)]) of the outline's top entries."""
     import pypdfium2 as pdfium
-
-    from silica.sources import pdf_extract
 
     with pdf_extract._PDFIUM:  # one thread in PDFium at a time (test_pdf_hostile)
         pdf = pdfium.PdfDocument(os.fspath(full))

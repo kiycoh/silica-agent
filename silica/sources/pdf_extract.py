@@ -901,6 +901,15 @@ def _child(fd: int, vision: int, kind: str = "pdf", pages: list[int] | None = No
     return 0
 
 
+if __name__ == "silica.sources.pdf_extract":
+    # The engine (kernel/recall/engine.py) opens every PDF through this module and
+    # sits below it, so the reader hands itself over on import: whoever can read a
+    # PDF has armed the engine, and nobody has to know to. Not in the child, which
+    # runs this file as __main__ to read one file, nor in a copy loaded by path.
+    from silica.kernel.recall import engine as _engine
+
+    _engine.pdf_reader = sys.modules[__name__]
+
 if __name__ == "__main__":
     if sys.argv[2:3] == ["docx"]:
         sys.exit(_child(int(sys.argv[1]), 0, "docx"))

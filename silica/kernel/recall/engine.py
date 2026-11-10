@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-# silica.sources.pdf_extract, handed over by tools/atomic.py when it is imported:
+# silica.sources.pdf_extract, which hands itself over when it is imported:
 # sources sits above this lane. Unset, the engine refuses to run, exactly as it
 # does for a silica-core that renamed its reader: the one thing it must never do
 # is go back to opening PDFs in this process.

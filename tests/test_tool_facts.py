@@ -174,6 +174,21 @@ def test_the_engine_refuses_to_run_without_a_pdf_reader(monkeypatch):
         engine.engine()
 
 
+def test_importing_the_reader_arms_the_engine():
+    """In a process that never loads the tools: the reader hands itself over on
+    import, so a library page or a probe that reads PDFs never finds the engine
+    refusing, or every file listed as not indexed."""
+    import subprocess
+    import sys
+
+    code = ("from silica.sources import pdf_extract\n"
+            "from silica.kernel.recall import engine\n"
+            "import sys\n"
+            "print(engine.pdf_reader is pdf_extract, 'silica.tools.atomic' in sys.modules)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, check=True)
+    assert out.stdout.split() == ["True", "False"]
+
+
 def test_write_note_refuses_in_the_tools_order(tmp_path, monkeypatch):
     """bind and gate are the tool's, and each runs where its refusal always
     landed: a bad path and a reserved key before the binding, the whole note

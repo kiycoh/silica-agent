@@ -29,8 +29,6 @@ from silica.kernel.recall.listing import natural_key, notes_under, unconverted_u
 from silica.sources import pdf_extract
 from silica.tools import Reads, tool
 
-engine.pdf_reader = pdf_extract
-
 
 # One cap for every listing that grows with the vault. ponytail: flat cap
 # defends the context window (a 1000-note vault ≈ 20k tokens uncapped); no
@@ -911,8 +909,6 @@ def _question_pages(path: Path, question: str, n: int) -> list[int]:
     import re
     from collections import Counter
 
-    from silica.sources import pdf_extract
-
     def words(text: str) -> set[str]:
         return set(re.findall(r"[^\W\d_]{4,}", text.casefold()))
 
@@ -957,8 +953,6 @@ def silica_look(
     # formula pages never fill the 32k window, where sending them all at
     # 1024 px passed it on 10 of 40 questions.
     from silica.agent.read_scope import REQUESTS
-    from silica.sources import pdf_extract
-
     turn = REQUESTS.get()
     if _pdf_looks.get(turn, 0) >= _PDF_LOOKS_A_TURN:
         return (f"{_PDF_LOOKS_A_TURN} looks at PDF pages already in this turn: answer from what "
