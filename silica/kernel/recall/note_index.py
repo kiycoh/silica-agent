@@ -26,8 +26,6 @@ def index_note(key: str) -> None:
     from silica.kernel.recall.embed import refresh_note
 
     embedder = get_embedder_or_none(CONFIG, "note index", level="debug")
-    if embedder is None:
-        return
     name = key.rsplit("/", 1)[-1]
     try:
         body = DRIVER.read_note(f"{key}.md").content or ""
@@ -36,10 +34,13 @@ def index_note(key: str) -> None:
         logger.debug("note index: %s not read: %s", key, type(exc).__name__)
         return
     with EMBED_LOCK:
-        try:
-            refresh_note(embedder, key, name, body)
-        except Exception as exc:
-            logger.warning("note index: embedding failed: %s", type(exc).__name__)
+        # No embedder skips this leg alone: co-occurrence needs none, and
+        # returning here left a hand edit out of it on such an install.
+        if embedder is not None:
+            try:
+                refresh_note(embedder, key, name, body)
+            except Exception as exc:
+                logger.warning("note index: embedding failed: %s", type(exc).__name__)
         try:
             # force without refreeze: this note's old share out, and the store's
             # frozen language left alone (states.write._refresh_cooccurrence_for_ops).

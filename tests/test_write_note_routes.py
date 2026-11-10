@@ -144,17 +144,21 @@ def test_a_failing_embedder_is_left_to_embed_and_the_save_stands(client, monkeyp
     assert "embedding failed: ConnectionError" in caplog.text
 
 
-def test_no_embedder_does_nothing(client, monkeypatch):
+def test_no_embedder_skips_the_vectors_and_still_refreshes_co_occurrence(client, monkeypatch):
+    """Co-occurrence needs no embedder: index_note returned before it when none
+    was configured, so on such an install a hand edit never reached it, while
+    the agent's writes did (re-audit 2026-11-10)."""
     def none(config):
         raise RuntimeError("no embedder configured")
 
-    built = []
+    built, embedded = [], []
     monkeypatch.setattr("silica.model.providers.get_embedder", none)
     monkeypatch.setattr("silica.kernel.recall.cooccurrence.build_index", lambda *a, **kw: built.append(a))
+    monkeypatch.setattr("silica.kernel.recall.embed.refresh_note", lambda *a, **kw: embedded.append(a))
     tc, *_ = client
     path = new(tc, folder="", name="Bozza", text="zebra\n").json()["path"]
     assert tc.post("/note/let-go", json={"path": path}).json() == {"ok": True}
-    assert not built
+    assert built == [([("Bozza", "Bozza", "zebra\n")],)] and not embedded
 
 
 def test_a_note_deleted_before_its_refresh_is_left_alone(client, embedder):
