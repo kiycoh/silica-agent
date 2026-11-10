@@ -1,8 +1,8 @@
 """What Pages, the app and silica-hosted must say alike and cannot import from one another.
 
 The app and a published page share two files outright (pages/body.css, pages/cover.js); what
-is below is what stays a copy: a string in two languages, an address that carries a hash by
-hand, a file name another repository reads. A compare is the honest thing, as in
+is below is what stays a copy: a string in two languages, a file name another repository
+reads. A compare is the honest thing, as in
 test_design_copies, and each one says why there is no one place to put it.
 """
 from __future__ import annotations
@@ -56,18 +56,20 @@ def test_the_files_the_host_passes_keep_the_names_its_repository_reads():
         "handle.json", "wikis.json", "handle-request.json")
 
 
-def _version(text: str, name: str) -> str:
-    return re.search(re.escape(name) + r"\?v=([0-9a-f]{8})", text).group(1)
+def test_a_shared_files_address_changes_with_the_file(tmp_vault):
+    """N2: index() versions what index.html names and sees neither an import nor a script
+    added from a script, so the page names both files, and no address carries a hash by hand."""
+    from fastapi.testclient import TestClient
 
+    from silica.ui.web import server
 
-def test_a_shared_files_address_changes_with_the_file():
-    """index() versions what index.html names and sees neither an import nor a script added
-    from a script, so these two carry their hash by hand and a browser cannot keep a stale one."""
     def digest(name: str) -> str:
         return hashlib.sha256((STATIC / "pages" / name).read_bytes()).hexdigest()[:8]
 
-    assert _version((STATIC / "app-chat.css").read_text(encoding="utf-8"), "/static/pages/body.css") == digest("body.css")
-    assert _version(APP_JS, "/static/pages/cover.js") == digest("cover.js")
+    page = TestClient(server.app).get("/").text
+    assert f'<link rel="stylesheet" href="/static/pages/body.css?v={digest("body.css")}" />' in page
+    assert f'data-press="/static/pages/cover.js?v={digest("cover.js")}"' in page
+    assert not re.search(r"\?v=[0-9a-f]{8}", (STATIC / "app-chat.css").read_text(encoding="utf-8") + APP_JS)
 
 
 def test_the_shared_sheet_names_one_list_of_surfaces_and_reads_only_tokens_both_define():
@@ -85,4 +87,7 @@ def test_both_surfaces_load_the_shared_sheet_and_the_host_gets_it():
 
     assert {"body.css", "cover.js"} <= set(public_site.static_files())
     assert '@import url("body.css");' in (STATIC / "pages" / "pages.css").read_text(encoding="utf-8")
-    assert '@import url("/static/pages/body.css' in (STATIC / "app-chat.css").read_text(encoding="utf-8")
+    # Where app-chat.css's import put it in the cascade: after the shell, before the chat.
+    index = (STATIC / "index.html").read_text(encoding="utf-8")
+    links = re.findall(r'<link rel="stylesheet" href="/static/([\w/.-]+)"', index)
+    assert links[links.index("pages/body.css") - 1:][:3] == ["app-shell.css", "pages/body.css", "app-chat.css"]

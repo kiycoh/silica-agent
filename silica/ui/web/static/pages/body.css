@@ -1,6 +1,6 @@
 /* What a note's render needs on every surface that draws one: callouts, formulas and code colours.
    One sheet, because a rule kept per surface is how Pages lost these three (the render wrote the
-   classes and pages.css styled none). app-chat.css imports it for the app, pages.css for a page,
+   classes and pages.css styled none). index.html links it for the app, pages.css imports it for a page,
    and public_site ships it to /_s/. The list names the surfaces; `.body` is a page on the public
    host, and in the app only ever sits inside a `.msg`. Tokens: what both sheets define. */
 

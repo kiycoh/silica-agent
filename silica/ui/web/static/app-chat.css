@@ -1,8 +1,3 @@
-/* The rules a note's render needs on every surface, from the sheet Pages shares. The address
-   carries the file's hash by hand: index() versions what index.html names and cannot see an
-   import, and tests/test_public_copies.py fails a change that forgets it. */
-@import url("/static/pages/body.css?v=4d5d85b7");
-
 /* --- chat log: dense terminal transcript, not floating bubbles -------------- */
 #log {
   flex: 1;

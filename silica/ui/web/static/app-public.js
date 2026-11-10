@@ -247,13 +247,12 @@ function pubCoverFigure() {
   return pubCoverEl;
 }
 
-// Its address carries its hash by hand, as app-chat.css's import does: index() versions what
-// index.html names, and tests/test_public_copies.py fails a change that forgets it.
-const PUB_PRESS = "/static/pages/cover.js?v=73b99244";
+// Its address, versioned, is the view's data-press: index() versions what index.html names.
 let pubPressLoad = null;
 const pubPress = () => pubPressLoad ||= new Promise((ok) => {
   // a press that does not load leaves the boxes of the view, which say the same in words
-  document.head.append(Object.assign(document.createElement("script"), { src: PUB_PRESS, onload: ok, onerror: ok }));
+  const src = $("#view-public").dataset.press;
+  document.head.append(Object.assign(document.createElement("script"), { src, onload: ok, onerror: ok }));
 });
 
 async function loadPubCover(slug, build) {
