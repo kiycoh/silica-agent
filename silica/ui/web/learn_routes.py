@@ -26,7 +26,7 @@ from silica.kernel.learn import items, pace, reasons, reference, session, store
 from silica.kernel.learn.reference import RESTRICT_SEP
 from silica.kernel.learn.schedule import DUE_R
 from silica.kernel.text.render import mathml
-from silica.ui.web import render
+from silica.ui.web import failures, render
 from silica.ui.web.failures import Refused
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,28 @@ def _engine() -> Iterator[None]:
     try:
         yield
     except session.Refused as exc:
-        raise Refused(_STATUS[exc.why], exc, exc.code)
+        if exc.__cause__ is None:
+            raise Refused(_STATUS[exc.why], exc, exc.code)
+        # The engine's words over a failure it did not write (B3): a provider's
+        # text, which can carry a fragment of the platform's key, so the reader
+        # gets explain()'s sentence, the engine's words where the table has none,
+        # and the text goes to the log, the operator's.
+        logger.warning("learn: %s: %s", exc, exc.__cause__)
+        raise Refused(_STATUS[exc.why], failures.worded(str(exc), exc.__cause__), exc.code) from None
+
+
+@contextmanager
+def _plan_said() -> Iterator[None]:
+    """A plan the form cannot make, at 400 (N3). plans.py says its own "no" as a
+    ValueError, and write_note's as a RuntimeError, in words for the person; any
+    other failure's text nobody wrote, so explain() says it and the log keeps it."""
+    try:
+        yield
+    except (ValueError, RuntimeError) as exc:
+        raise Refused(400, exc)
+    except Exception as exc:
+        logger.warning("learn: a plan failed: %s", exc)
+        raise Refused(400, failures.explain(exc)["error"]) from None
 
 
 # ---------------------------------------------------------------- readings
@@ -582,10 +603,8 @@ def write_plan(payload: dict):
     chosen = obj.normalize(payload.get("objectives"))
     lines = payload.get("reference")
     if isinstance(lines, str) and lines.strip():
-        try:
+        with _plan_said():
             scope, target, restrict = _with_reference(scope, target, restrict, lines)
-        except Exception as exc:
-            raise Refused(400, exc)
     if scope not in plans.SCOPES:
         raise HTTPException(400, f"scope must be one of {plans.SCOPES}")
     # ADR-0131: a key left out keeps what the plan says, or what Silica reads
@@ -601,10 +620,8 @@ def write_plan(payload: dict):
         matched=plans.parse_matched(payload.get("matched")) if "matched" in payload else None,
         reach=str(payload.get("reach") or "relational"))
     if payload.get("preview") or payload.get("cards_only"):
-        try:
+        with _plan_said():
             res = plans.resolve(spec)
-        except Exception as exc:
-            raise Refused(400, exc)
         if payload.get("cards_only"):
             proposed = obj.propose(res["tree"], chosen)
             for c in proposed:
@@ -619,26 +636,20 @@ def write_plan(payload: dict):
     cards = payload.get("cards")
     cards = cards if isinstance(cards, list) else None
     if cards is None and payload.get("templates"):
-        try:
+        with _plan_said():
             # read without `matched`, as this path always has, so Save words the cards it worded
             cards = obj.propose(plans.resolve(replace(spec, matched=None))["tree"], chosen, model=False)
-        except Exception as exc:
-            raise Refused(400, exc)
     spec = replace(spec, cards=cards)
     if payload.get("path"):
         plan = plans.find_plan(str(payload["path"]))
         if plan is None:
             raise HTTPException(404, "no such plan")
-        try:
+        with _plan_said():
             return plans.edit_plan(plan["path"], replace(spec, name=name or plan["name"]))
-        except Exception as exc:
-            raise Refused(400, exc)
     if not name:
         raise HTTPException(400, "a plan needs a name")
-    try:
+    with _plan_said():
         return plans.write_plan(replace(spec, objectives=chosen if "objectives" in payload else None))
-    except Exception as exc:
-        raise Refused(400, exc)
 
 
 def _declared(payload: dict) -> dict[str, str] | None:
@@ -804,7 +815,6 @@ def _reading_shown(plan: str, step: int) -> dict:
     The raw text goes: a provider's can hold a fragment of the key (ADR-0085 point 5),
     and the job's reached the reader as a toast of litellm's words."""
     from silica.kernel.learn import reading
-    from silica.ui.web import failures
 
     st = reading.state(plan, step)
     for c in st["cards"]:

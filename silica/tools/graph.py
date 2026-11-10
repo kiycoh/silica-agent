@@ -19,7 +19,7 @@ from pydantic import Field
 
 from silica.agent.compaction import dedup_recall_excerpts
 from silica.driver import DRIVER
-from silica.kernel.recall import refresh
+from silica.kernel.recall import concepts, refresh
 from silica.kernel.recall import search as recall_search
 from silica.kernel.report import related as report_related
 from silica.tools import Reads, tool
@@ -585,66 +585,7 @@ def silica_concepts(term: Annotated[str, Field(description="A single word/concep
     reading the body. For related NOTES use silica_related or
     silica_semantic_search.
     """
-    from silica.config import CONFIG
-    from silica.kernel.recall.cooccurrence import get_cooccur_store
-    from silica.kernel.text.text import stem_word
-
-    try:
-        store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-    except Exception as e:
-        return {"error": f"co-occurrence store unavailable ({e}) — run silica_cooccurrence_refresh"}
-    if len(store) == 0:
-        return {"error": "co-occurrence index empty. Run silica_cooccurrence_refresh first."}
-
-    if note:
-        # The note's own concept vector is already stored per note by the index —
-        # no extraction, no LLM. note_nodes() applies store_key to the path itself.
-        from silica.driver import DRIVER
-
-        try:
-            path = DRIVER.read_note(note).ref.path or note
-        except Exception:
-            path = note  # unresolved: the index may still know the reader's spelling
-        nodes = store.note_nodes(path)
-        top = sorted(nodes.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
-        out: dict[str, Any] = {
-            "note": note,
-            "concepts": [{"concept": store.node_label(s), "weight": c} for s, c in top],
-        }
-        if not top:
-            out["hint"] = (
-                f"'{note}' has no entry in the co-occurrence index — check the name/path, "
-                "or run silica_cooccurrence_refresh if the note is new."
-            )
-        return out
-
-    if not term.strip():
-        return {"error": "pass either term= (concept neighbourhood) or note= (a note's concepts)."}
-
-    stem = stem_word(term.strip().lower(), lang=store.lang)
-    neighbors = store.neighbors(term, k=k)
-
-    # Concept -> notes inverted lookup, ranked by contribution count. Read the
-    # cached stem postings directly (O(df log df)) instead of an O(N) vault scan.
-    from silica.kernel.workspaces import in_scope
-
-    posting = {p: c for p, c in store.stem_postings().get(stem, {}).items() if in_scope(p)}
-    notes = sorted(posting.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
-
-    out = {
-        "term": term,
-        "concept": store.node_label(stem),
-        "centrality": round(sum(store.adjacency().get(stem, {}).values()), 1),
-        "neighbors": neighbors,
-        "notes": [{"path": p, "count": c} for p, c in notes],
-    }
-    if not neighbors and not notes:
-        out["hint"] = (
-            f"'{term}' is not a concept node in the co-occurrence graph — "
-            "concepts are single content words; try another word, or run "
-            "silica_cooccurrence_refresh if the index is stale."
-        )
-    return out
+    return concepts.lookup(term, note, k)
 
 
 @tool(cls="composed", collapse="eager", ingress=False)

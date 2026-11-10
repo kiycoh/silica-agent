@@ -963,7 +963,7 @@ function mdLite(src) {
   // `![[figure.png|500]]` -> the <img> the server's _embed_img emits: a figure
   // copied from a note beside the sentence it supports is what ADR-0082 asks the
   // model for, and a tool-split turn keeps this render until reload.
-  const IMG = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
+  const IMG = extRe(VOCAB.formats.shown_images);
   const unesc = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
   const wiki = (t, hold) =>
     t.replace(/(!?)\[\[([^\]|\n]+?)(?:\|([^\]\n]+?))?\]\]/g, (_m, bang, target, alias) => {
@@ -1138,12 +1138,16 @@ const CTX_PARTS = [
 ];
 let ctxMeter = { used: 0, max: 0, parts: null, compactAt: 0.6 };
 
-function setCtxTokens(used, max, parts, compactAt) {
+// `m` is session.ctx_meter()'s dict: a done frame carries its keys at the top
+// level and /messages sends it whole in X-Silica-Context, so a field added
+// there is read here and nowhere else. Null (no header) reads as an empty window.
+function setCtxTokens(m) {
+  m = m || {};
   ctxMeter = {
-    used: Number(used) || 0,
-    max: Number(max) || 0,
-    parts: parts || null,
-    compactAt: Number(compactAt) || ctxMeter.compactAt,
+    used: Number(m.context_tokens) || 0,
+    max: Number(m.max_context_tokens) || 0,
+    parts: m.context_parts || null,
+    compactAt: Number(m.compact_at) || ctxMeter.compactAt,
   };
   const ring = $("#ctx-ring");
   if (!ring) return;
@@ -1737,7 +1741,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
           o.appendChild(c);
         }
         flow.appendChild(o);
-        setCtxTokens(ev.context_tokens, ev.max_context_tokens, ev.context_parts, ev.compact_at);
+        setCtxTokens(ev);
         freezePeek();
         announce("stopped");
         followBottom();
@@ -1748,7 +1752,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         // Undo rather than as a sentence saying the same thing.
         close("");
         flow.appendChild(memoryLine(ev.memory));
-        setCtxTokens(ev.context_tokens, ev.max_context_tokens, ev.context_parts, ev.compact_at);
+        setCtxTokens(ev);
         announce("saved to memory");
         followBottom();
         return;
@@ -1774,7 +1778,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       const notes = turnNotes(ev.notes);
       if (notes) ledger.appendChild(notes);
       if (ev.offer) ledger.appendChild(skillOffer(ev.offer));
-      setCtxTokens(ev.context_tokens, ev.max_context_tokens, ev.context_parts, ev.compact_at);
+      setCtxTokens(ev);
       peekDone(ev); // card gets the canonical OFM render
       announce("response ready");
     } else if (ev.type === "error") {

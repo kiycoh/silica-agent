@@ -188,9 +188,10 @@ def index(request: Request):
     # cuts whose load order lives in index.html and nowhere else, and a second
     # copy of that list is a copy that drifts. The pattern is deliberately not
     # every /static/ href -- the vendored bundles keep their long-lived cache,
-    # and hashing 3.5 MB of mermaid on each page load is the reason why.
+    # and hashing 3.5 MB of mermaid on each page load is the reason why. The two
+    # files the app shares with Pages are named by the page too, so they are here.
     for asset in dict.fromkeys(
-        re.findall(r"/static/(app[\w-]*\.(?:js|css)|work\.js)", html)
+        re.findall(r"/static/(app[\w-]*\.(?:js|css)|work\.js|pages/(?:body\.css|cover\.js))", html)
     ):
         ver = hashlib.sha256((STATIC_DIR / asset).read_bytes()).hexdigest()[:8]
         html = html.replace(f"/static/{asset}", f"/static/{asset}?v={ver}")

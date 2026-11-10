@@ -234,10 +234,10 @@ def ctx_meter() -> dict:
 
     The parts are counted, not apportioned: `context_breakdown` charges the
     chat envelope once so they sum to the total beside them, and a meter that
-    invites you to add up its own segments has to survive that. Three sites emit
-    this (the two `done` yields and the transcript headers) and they must not
-    drift, since the ring is the one place the user is told how much room is
-    left before the history starts being collapsed.
+    invites you to add up its own segments has to survive that. The `done`
+    frames spread it and `/messages` sends it whole in one header, and the page
+    reads both with one `setCtxTokens`, since the ring is the one place the user
+    is told how much room is left before the history starts being collapsed.
     """
     from silica.agent.compaction import COMPACT_FRACTION
 

@@ -15,11 +15,10 @@ from fastapi.responses import HTMLResponse, Response
 
 from silica.config import CONFIG
 from silica.kernel.base.frontmatter import split_shown
-from silica.kernel.graph import file_tree
 from silica.kernel.recall.resolve import note_resolver
 from silica.kernel.report import brief, note_context
 from silica.kernel.text import note_parts
-from silica.ui.web import render
+from silica.ui.web import rail, render
 from silica.ui.web.failures import explain as _failure
 
 logger = logging.getLogger(__name__)
@@ -247,10 +246,10 @@ def find(q: str = "", k: int = 5):
 
 
 def _note_concepts(target: str, k: int = 18) -> list[dict]:
-    from silica.tools.graph import silica_concepts
+    from silica.kernel.recall import concepts
 
     try:
-        return silica_concepts(note=target, k=k).get("concepts") or []
+        return concepts.lookup(note=target, k=k).get("concepts") or []
     except Exception:
         logger.debug("context: concepts failed for %s", target, exc_info=True)
         return []
@@ -306,7 +305,7 @@ def context(path: str = "", name: str = "", ghost: bool = False):
     """
     from silica.driver import get_driver
     from silica.driver.base import NoteRef
-    from silica.tools.graph import silica_related
+    from silica.kernel.report import related as report_related
 
     if ghost or (not path and name):
         return _ghost_context(name or path)
@@ -354,7 +353,9 @@ def context(path: str = "", name: str = "", ghost: bool = False):
         frontmatter.append({"name": display, "path": resolve(target) or ""})
 
     try:
-        rel_out = silica_related(note=canon, k=12)
+        # related() and not the tool, whose payload drops the fused score for the
+        # model: each `suggested` row states it, in `why` and as `score`.
+        rel_out = report_related.related(canon, 12)
     except Exception:
         logger.debug("context: related failed for %s", canon, exc_info=True)
         rel_out = {}
@@ -405,11 +406,11 @@ def concept(term: str = "", k: int = 20):
     """The notes that carry one concept, with paths resolved back to graph keys
     so the ids match the nodes a viewer holds. The page stopped asking this when
     the drawer moved to /concepts; the route stays while a path is a contract."""
-    from silica.tools.graph import silica_concepts
+    from silica.kernel.recall import concepts
 
     resolve = note_resolver()
     try:
-        res = silica_concepts(term=term, k=k)
+        res = concepts.lookup(term=term, k=k)
     except Exception as exc:
         logger.debug("concept: lookup failed for %s", term, exc_info=True)
         return {"term": term, "notes": [], **_failure(exc)}
@@ -435,7 +436,7 @@ def concepts(terms: str = ""):
     ("feedback" and "retroazione" are one stem and two searches).
     """
     from silica.driver import get_driver
-    from silica.tools.graph import silica_concepts
+    from silica.kernel.recall import concepts
 
     words = [t.strip() for t in terms.split(",") if t.strip()][:6]
     resolve = note_resolver()
@@ -444,7 +445,7 @@ def concepts(terms: str = ""):
     for w in words:
         try:
             # k bounds the notes returned; the intersection needs all of them.
-            res = silica_concepts(term=w, k=100_000)
+            res = concepts.lookup(term=w, k=100_000)
         except Exception as exc:
             logger.debug("concepts: lookup failed for %s", w, exc_info=True)
             return {"terms": [], "notes": [], **_failure(exc)}
@@ -621,10 +622,10 @@ def vault_info():
         # never did.
         "path": CONFIG.vault_path or "",
         "unresolved": sum(1 for n in nodes if n.get("type") == "ghost"),
-        # actions=True: the rail's tree carries a pin per note. The graph
-        # frame renders the same tree without one, because a pin there would
-        # point at a rail that document does not have.
-        "tree": file_tree.rail_tree(nodes, raws := _tree_raws(), _tree_files(raws)),
+        # The rail's tree, a pin and a menu per note. The graph frame draws the
+        # same shape without them (file_tree.frame_tree), because a pin there
+        # would point at a rail that document does not have.
+        "tree": rail.rail_tree(nodes, raws := _tree_raws(), _tree_files(raws)),
         # Silica's own folders: no folder in view and no "Write a note" (ADR-0155
         # points 4, 5). The page asks here because it has the tree from here.
         "never": list(never_dirs()),

@@ -1328,16 +1328,17 @@ async function openFile(path, state, act) {
 window.openFile = openFile;
 
 const fileUrl = (path, extra = "") => "/file?path=" + encodeURIComponent(path) + extra;
-const FILE_PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+// What /file opens inline as a picture, so the drawer draws one where the file is one.
+const FILE_PICTURE = extRe(VOCAB.formats.file_pictures);
 
-// What Silica holds of the file, in the strip's words; an unread file says
-// why, by its kind, since that is what OCR or a conversion would change.
+// What Silica holds of the file, in the strip's words (rail.FILE_SAYS, beside
+// the rail's marks for the same states); an unread file says why, by its kind.
 function fileSays(f, name) {
-  if (f.state === "read") return "Silica reads its text.";
-  if (f.state === "unindexed") return "Silica has not indexed it yet: the next search reads it.";
-  if (/\.pdf$/i.test(name)) return "No text layer: Silica has not read it.";
-  if (FILE_PICTURE.test(name)) return "A picture: Silica has not read it.";
-  return "Silica has not read it.";
+  const says = VOCAB.files.says;
+  if (f.state === "read" || f.state === "unindexed") return says[f.state];
+  if (/\.pdf$/i.test(name)) return says.pdf;
+  if (FILE_PICTURE.test(name)) return says.picture;
+  return says.unread;
 }
 
 // A PDF in the browser's viewer and a picture as itself, both from /file

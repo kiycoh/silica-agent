@@ -124,3 +124,23 @@ def test_a_limit_reads_as_the_server_wrote_it_with_the_readers_clock(tmp_path):
     assert out.returncode == 0, out.stderr
     for frame, (said, local) in zip(frames, json.loads(out.stdout), strict=True):
         assert said == frame["error"].replace(frame["when"], local) and local and "UTC" not in said
+
+
+def test_a_plans_own_no_keeps_its_words_and_any_other_failure_is_explained(tc, monkeypatch):
+    """N3: the plan form's five handlers caught every exception as words written for the
+    person, so a KeyError's or an OSError's text reached the form as a refusal."""
+    from silica.kernel.learn import plans
+
+    def broken(_spec):
+        raise KeyError("tree")
+
+    monkeypatch.setattr(plans, "resolve", broken)
+    r = tc.post("/learn/plan", json={"scope": "folder", "target": "ML/", "preview": True})
+    assert r.status_code == 400 and r.json() == {"error": failures.FALLBACK, "detail": failures.FALLBACK}
+
+    def refused(_spec):
+        raise ValueError("nothing in ML/ to study")
+
+    monkeypatch.setattr(plans, "resolve", refused)
+    r = tc.post("/learn/plan", json={"scope": "folder", "target": "ML/", "preview": True})
+    assert r.status_code == 400 and r.json() == {"error": "nothing in ML/ to study", "detail": "nothing in ML/ to study"}

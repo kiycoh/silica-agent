@@ -340,16 +340,12 @@ def get_messages():
         if id(m) in turn_of:
             data[-1]["turn"] = turn_of[id(m)]
     # Vault label + context usage ride headers so the body stays a plain list.
-    # The breakdown goes as JSON in one header rather than three: it is one
-    # reading of one number, and splitting it invites a client to read two of
-    # the three and draw a ring that does not close.
-    meter = session.ctx_meter()
+    # The meter is ctx_meter() whole, as JSON in one header, the dict the done
+    # frames spread: a field added there reaches the ring with no header of its
+    # own here, where five headers had re-spelt four keys.
     return JSONResponse(data, headers={
         "X-Silica-Vault": CONFIG.vault_path or "",
-        "X-Silica-Context-Tokens": str(meter["context_tokens"]),
-        "X-Silica-Max-Context-Tokens": str(meter["max_context_tokens"]),
-        "X-Silica-Context-Parts": json.dumps(meter["context_parts"]),
-        "X-Silica-Compact-At": str(meter["compact_at"]),
+        "X-Silica-Context": json.dumps(session.ctx_meter()),
     })
 
 

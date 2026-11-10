@@ -1691,8 +1691,11 @@ def test_messages_endpoint_reports_context_token_headers(client, monkeypatch):
     monkeypatch.setattr(CONFIG, "context_tokens", 42)
     monkeypatch.setattr(CONFIG, "max_context_tokens", 1000)
     r = tc.get("/messages")
-    assert r.headers["X-Silica-Context-Tokens"] == "42"
-    assert r.headers["X-Silica-Max-Context-Tokens"] == "1000"
+    from silica.ui.web import session
+
+    meter = json.loads(r.headers["X-Silica-Context"])
+    assert meter["context_tokens"] == 42 and meter["max_context_tokens"] == 1000
+    assert meter == session.ctx_meter(), "the header is the dict the done frames spread"
 
 
 def test_chat_done_html_linkifies_a_cited_note(client, tmp_vault, monkeypatch):

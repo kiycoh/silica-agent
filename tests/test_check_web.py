@@ -594,3 +594,16 @@ def test_keep_needs_a_note_a_free_turn_and_a_same_origin(desk):
     SESSION.release()
     assert tc.post("/note/check/keep", json={}, headers={"Origin": "http://evil.example"}).status_code == 403
     assert not (vault / "Inbox").exists()
+
+
+def test_a_check_that_fails_says_a_sentence_and_never_the_failures_text(desk):
+    """B3: the error frame's `say` is a toast, and its text was the exception's, which
+    hosted can be a provider's carrying a fragment of the platform's key."""
+    tc, _, _, _, mp = desk
+
+    def leaky(*_a, **_k):
+        raise RuntimeError("OpenrouterException - bad request for sk-or-v1-0123456789abcdef")
+
+    mp.setattr("silica.session.check.run", leaky)
+    out = [json.loads(x) for x in tc.post("/note/check", json={"path": "Drafts/memo"}).text.splitlines()]
+    assert out == [{"event": "error", "say": "the check failed"}]

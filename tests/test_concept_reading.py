@@ -39,7 +39,7 @@ def test_concepts_endpoint_intersects_the_terms_and_quotes_their_lines(client, m
     vault.note("Both.md", "# Both\n\nFeedback keeps the loop honest.\n\nStability follows from bounded feedback.\n")
     vault.note("OnlyFeedback.md", "# F\n\nFeedback alone.\n")
     vault.note("OnlyStability.md", "# S\n\nStability alone.\n")
-    monkeypatch.setattr("silica.tools.graph.silica_concepts", _concepts_stub)
+    monkeypatch.setattr("silica.kernel.recall.concepts.lookup", _concepts_stub)
 
     d = api.get("/concepts", params={"terms": "feedback,stability"}).json()
     assert [(t["term"], t["concept"], t["notes"]) for t in d["terms"]] == [
@@ -56,7 +56,7 @@ def test_one_term_is_the_old_concept_lookup_and_an_empty_intersection_says_so(cl
     api, vault = client
     vault.note("Both.md", "Feedback and stability.\n")
     vault.note("OnlyFeedback.md", "Feedback.\n")
-    monkeypatch.setattr("silica.tools.graph.silica_concepts", _concepts_stub)
+    monkeypatch.setattr("silica.kernel.recall.concepts.lookup", _concepts_stub)
     d = api.get("/concepts", params={"terms": "feedback"}).json()
     assert sorted(n["path"] for n in d["notes"]) == ["Both.md", "OnlyFeedback.md"]
     d = api.get("/concepts", params={"terms": "feedback,vapour"}).json()

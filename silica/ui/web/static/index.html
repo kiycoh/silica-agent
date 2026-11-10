@@ -34,6 +34,10 @@
        reorder to group a section more neatly. -->
   <link rel="stylesheet" href="/static/app-base.css" />
   <link rel="stylesheet" href="/static/app-shell.css" />
+  <!-- The rules a note's render needs on every surface, the sheet Pages shares. Linked
+       here and not imported by app-chat.css, which put it at this place in the cascade,
+       so index() versions it with the cuts: an import it cannot see. -->
+  <link rel="stylesheet" href="/static/pages/body.css" />
   <link rel="stylesheet" href="/static/app-chat.css" />
   <link rel="stylesheet" href="/static/app-jobs.css" />
   <link rel="stylesheet" href="/static/app-panels.css" />
@@ -517,7 +521,9 @@
     </section>
     <!-- Page (ADR-0143, ADR-0151): the account's vaults, what each sends out and to whom;
          the body is app-public.js's, this is the frame. -->
-    <section id="view-public" class="view">
+    <!-- data-press: the wikis' cover script, which app-public.js loads on first use,
+         named here so index() versions its address with the page's own. -->
+    <section id="view-public" class="view" data-press="/static/pages/cover.js">
       <div id="public-bar">
         <div class="mbar-title">My Wikis</div>
         <a id="public-url" href="#" target="_blank" rel="noopener" hidden></a>

@@ -13,7 +13,8 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from silica.kernel.graph.file_tree import frame_tree, rail_tree  # noqa: E402
+from silica.kernel.graph.file_tree import frame_tree  # noqa: E402
+from silica.ui.web.rail import rail_tree  # noqa: E402
 
 STATIC = Path(__file__).resolve().parents[1] / "silica" / "ui" / "web" / "static"
 

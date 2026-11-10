@@ -22,7 +22,7 @@ from silica.kernel.base.syntax import WIKILINK_WHOLE_RE
 from silica.kernel.recall.resolve import note_resolver
 from silica.kernel.text import note_parts
 from silica.kernel.write import session_changes
-from silica.ui.web import drop, note_ops, render, session, sse
+from silica.ui.web import drop, failures, note_ops, render, session, sse
 from silica.ui.web.failures import Refused, refusal
 
 logger = logging.getLogger(__name__)
@@ -497,7 +497,8 @@ async def note_check(payload: dict, request: Request):
             pass
         except Exception as e:
             logger.warning("/note/check failed on %s: %s", path, e)
-            put({"event": "error", "say": f"the check failed: {e}"})
+            # Its text is no sentence, and hosted it can hold a provider's key (B3).
+            put({"event": "error", "say": failures.worded("the check failed", e)})
         finally:
             put(None)
 
