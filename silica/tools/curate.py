@@ -28,11 +28,12 @@ from typing import Any
 from pydantic import Field
 
 from silica.agent.subagent import run_subagent_batch
+from silica.kernel.recall import duplicates
 from silica.kernel.report import related
 from silica.kernel.report.curator import CurationPlan, compose_curation_plan
 from silica.kernel.report.graph_report import compute_report
 from silica.kernel.write.run_log import append_log_line, format_curate_event
-from silica.kernel.workqueue import DedupJob, OrphanJob, WorkItem
+from silica.kernel.workqueue import OrphanJob, WorkItem
 from silica.tools import tool
 
 logger = logging.getLogger(__name__)
@@ -41,31 +42,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # I/O helpers (patched wholesale in tests so no driver/index/LLM is touched)
 # ---------------------------------------------------------------------------
-
-def _read_body(path: str) -> str:
-    """Note body, or "" on any error (a missing note simply yields no excerpt).
-
-    Stale guard (spec-stale-triggers §4): curation reads bypass the read-gate
-    banner, so a stale doc note gets one prefix line here, served from the
-    read-only peek. Annotate only — the model decides, nothing blocks."""
-    try:
-        from silica.driver import DRIVER
-
-        content = DRIVER.read_note(path).content or ""
-    except Exception:
-        return ""  # no banner: the annotation is advice, the tool's own read reports the failure
-    try:
-        from silica.config import CONFIG
-        from silica.kernel.code import codedocs
-
-        lvl = codedocs.peek_level(codedocs.peek(CONFIG.vault_path), path)
-        if lvl and content:
-            return (f"[stale] {lvl}: verify against the source before "
-                    f"reusing claims\n\n{content}")
-    except Exception:
-        pass  # the guard is an aid; the read succeeds without it
-    return content
-
 
 def _run_autolink(sources: list[str]) -> dict[str, Any]:
     """Mechanical, LLM-free autolink of the given source notes (direct commit)."""
@@ -88,88 +64,11 @@ def _orphan_workitems(plan: CurationPlan) -> list[WorkItem]:
 
 
 def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
-    """Turn dedup pairs into merge WorkItems, collapsing duplicate *families*.
-
-    Pairwise dedup leaves one survivor per local top-1 hub: a family {A,B,C,D,E}
-    whose top-1 edges are A→B, C→B, D→E, F→E collapses to TWO notes, not one.
-    So confirmed pairs (score ≥ τ_high) are union-found into connected components
-    and each component funnels into its single largest note.
-
-    Transitive closure is applied ONLY to confirmed pairs — chaining borderline
-    (< τ_high) links would merge distant notes — so borderline pairs stay per-pair.
-    Safety: every item still passes the ternary judge, and curate items carry no
-    `target_dir`, so a "distinct" verdict is a no-op. Union-find proposes the
-    merge target; the judge disposes. A false union costs a judge call, never a bad
-    merge.
-    """
-    from silica.config import CONFIG
-
-    tau_high = CONFIG.sim_threshold_high
-    pairs = list(plan.by_kind("dedup"))
-
-    _body_cache: dict[str, str] = {}
-    def body(p: str) -> str:
-        if p not in _body_cache:
-            _body_cache[p] = _read_body(p)
-        return _body_cache[p]
-    stem = lambda p: p.removesuffix(".md").rsplit("/", 1)[-1]
-
-    # Connected components over confirmed pairs only (nx over a hand-rolled
-    # union-find — same result, one well-known call).
-    import networkx as nx
-
-    graph = nx.Graph()
-    node_score: dict[str, float] = {}
-    for it in pairs:
-        if it.score >= tau_high:
-            graph.add_edge(it.target, it.partner)
-            for n in (it.target, it.partner):
-                node_score[n] = max(node_score.get(n, 0.0), it.score)
-
-    components = [set(c) for c in nx.connected_components(graph)]
-    # node -> component-id, so the borderline pass below can ask "same component?"
-    comp_of: dict[str, int] = {n: i for i, c in enumerate(components) for n in c}
-
-    items: list[WorkItem] = []
-    # 1. Each confirmed component → collapse every member into its largest note.
-    from silica.kernel.write.contested import merge_rank
-    for members in components:
-        canonical = max(members, key=lambda p: merge_rank(body(p)))
-        for m in members:
-            if m == canonical:
-                continue
-            sc = node_score.get(m, tau_high)
-            items.append(WorkItem(
-                kind="dedup",
-                target_path=canonical,
-                context=DedupJob.between_notes(loser=m, winner=canonical, loser_body=body(m), score=sc),
-                reason=f"curate dedup family → {stem(canonical)} (score={sc:.3f})",
-            ))
-
-    # 2. Borderline pairs — per-pair behaviour (more reliable note is target),
-    #    skipping any pair already absorbed by a shared confirmed component.
-    for it in pairs:
-        if it.score >= tau_high:
-            continue
-        source, target = it.target, it.partner
-        if comp_of.get(source, -1) == comp_of.get(target, -2):
-            continue
-        body_s, body_t = body(source), body(target)
-        if merge_rank(body_t) >= merge_rank(body_s):
-            larger, smaller, smaller_body = target, source, body_s
-        else:
-            larger, smaller, smaller_body = source, target, body_t
-        items.append(WorkItem(
-            kind="dedup",
-            target_path=larger,
-            context=DedupJob.between_notes(loser=smaller, winner=larger, loser_body=smaller_body,
-                                           score=it.score),
-            reason=it.reason or f"curate dedup score={it.score:.3f}",
-        ))
-    # Family members share target_path=canonical by construction → one judge
-    # call per family instead of one per member.
-    from silica.kernel.workqueue import batch_dedup_items
-    return batch_dedup_items(items)
+    """The plan's dedup pairs as merge WorkItems, a family to one judge call
+    (duplicates.families_to_items)."""
+    return duplicates.families_to_items([
+        {"source": it.target, "target": it.partner, "score": it.score, "reason": it.reason}
+        for it in plan.by_kind("dedup")])
 
 
 def _execution_outcome_counts(
