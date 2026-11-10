@@ -36,14 +36,14 @@ def stub_read(monkeypatch):
 
 def test_stale_note_body_is_prefixed(monkeypatch):
     monkeypatch.setattr(codedocs, "peek", lambda v: {"a/n.md": "structural"})
-    out = duplicates._loser_text("a/n.md", "the body")
+    out = duplicates._loser_text("a/n.md", "the body", duplicates._stale_levels())
     assert out == ("[stale] structural: verify against the source before "
                    "reusing claims\n\nthe body")
 
 
 def test_fresh_note_is_byte_identical(monkeypatch):
     monkeypatch.setattr(codedocs, "peek", lambda v: {})
-    assert duplicates._loser_text("a/n.md", "the body") == "the body"
+    assert duplicates._loser_text("a/n.md", "the body", duplicates._stale_levels()) == "the body"
 
 
 def test_peek_failure_never_fails_the_read(monkeypatch):
@@ -51,7 +51,7 @@ def test_peek_failure_never_fails_the_read(monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(codedocs, "peek", boom)
-    assert duplicates._loser_text("a/n.md", "the body") == "the body"
+    assert duplicates._stale_levels() == {}
 
 
 def test_missing_note_reads_as_none(stub_read):
@@ -62,7 +62,7 @@ def test_missing_note_reads_as_none(stub_read):
 def test_empty_stale_note_gets_no_dangling_prefix(monkeypatch):
     """A prefix with nothing under it is noise, not a warning."""
     monkeypatch.setattr(codedocs, "peek", lambda v: {"a/n.md": "cosmetic"})
-    assert duplicates._loser_text("a/n.md", "") == ""
+    assert duplicates._loser_text("a/n.md", "", duplicates._stale_levels()) == ""
 
 
 def test_curate_hands_the_judge_the_stale_line(monkeypatch):
@@ -101,3 +101,14 @@ def test_dedup_hands_the_judge_the_same_line(monkeypatch):
     [item] = duplicates.pairs_to_items([{"source": "a/n.md", "target": "b/m.md", "score": 0.8}])
     assert item.target_path == "b/m.md"
     assert item.context.excerpt.startswith("[stale] structural:")
+
+
+def test_a_batch_reads_the_stale_map_once(monkeypatch):
+    """Each peek is a `git rev-parse` and a JSON load: once per batch, not per pair."""
+    reads = []
+    monkeypatch.setattr(duplicates, "_read", {"a.md": "x", "b.md": "yy", "c.md": "z", "d.md": "ww"}.get)
+    monkeypatch.setattr(codedocs, "peek", lambda v: reads.append(v) or {})
+    pairs = [{"source": "a.md", "target": "b.md", "score": 0.8}, {"source": "c.md", "target": "d.md", "score": 0.8}]
+    duplicates.pairs_to_items(pairs)
+    duplicates.families_to_items(pairs)
+    assert len(reads) == 2
