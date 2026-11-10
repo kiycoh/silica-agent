@@ -107,7 +107,7 @@ def test_a_read_chip_resolves_as_the_server_but_keeps_a_shared_name_as_written(t
     name two notes share the server's resolver takes the first by path, an answer's says "" and
     the chip keeps the argument: it says what the tool was asked, which is the one honest thing
     a chip can say about a note it cannot tell apart (ADR-0114)."""
-    from silica.kernel.graph.mindmap import note_resolver
+    from silica.kernel.recall.resolve import note_resolver
 
     paths = ["Corso A/Lezione 16.md", "Corso B/Lezione 16.md", "Fisica/Moto.md"]
     for p in paths:

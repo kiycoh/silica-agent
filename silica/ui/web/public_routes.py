@@ -193,7 +193,7 @@ def public_cover(vault: str = ""):
 
 
 def _canon(path: str) -> str:
-    from silica.kernel.graph.mindmap import note_resolver
+    from silica.kernel.recall.resolve import note_resolver
 
     canon = note_resolver()(path or "")
     if not canon:

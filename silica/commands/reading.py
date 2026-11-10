@@ -94,7 +94,8 @@ def _epistemic_filter(results: list[dict], min_trust: str, life: str) -> tuple[l
 def path(c: Call) -> Result:
     """/path <noteA> <noteB> — the shortest link path between two notes."""
     raw_input, out = c.raw, c.out
-    from silica.kernel.graph.mindmap import note_resolver, reading_path
+    from silica.kernel.recall.resolve import note_resolver
+    from silica.kernel.graph.mindmap import reading_path
     try:
         toks = shlex.split(raw_input.strip())[1:]  # honours quoted titles with spaces
     except ValueError:

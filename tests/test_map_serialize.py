@@ -5,7 +5,8 @@ import json
 
 import networkx as nx
 
-from silica.kernel.graph.mindmap import MapMaterials, _resolve_in, build_mapview, mapview_to_canvas
+from silica.kernel.graph.mindmap import MapMaterials, build_mapview, mapview_to_canvas
+from silica.kernel.recall.resolve import _resolve_in
 
 _MUTED = "#5a6372"
 

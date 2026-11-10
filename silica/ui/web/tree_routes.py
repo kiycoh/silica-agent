@@ -9,7 +9,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from silica.kernel.base.frontmatter import split_shown
-from silica.kernel.graph.mindmap import note_resolver
+from silica.kernel.recall.resolve import note_resolver
 from silica.kernel.text import note_parts
 from silica.kernel.write import session_changes
 from silica.kernel.write.gate import erase_from_trash, restore_from_trash, trash_items

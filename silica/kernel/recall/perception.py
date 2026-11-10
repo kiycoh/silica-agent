@@ -468,7 +468,7 @@ def _resolver():
     context, never a crash on the answer path."""
     try:
         from silica.driver import DRIVER
-        from silica.kernel.graph.mindmap import note_resolver
+        from silica.kernel.recall.resolve import note_resolver
 
         base = note_resolver()
         aliases = {a.strip().lower() for _p, al in DRIVER.alias_index() for a in al}

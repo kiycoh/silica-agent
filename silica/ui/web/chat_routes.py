@@ -21,7 +21,7 @@ from silica.tools import tool_failed
 from silica.agent.recall_watch import numbers_of_session, read_refs, READS_KEY
 from silica.config import CONFIG, demo
 from silica.kernel.base.formats import IMAGE_SUFFIX, ext_alternation
-from silica.kernel.graph.mindmap import note_resolver
+from silica.kernel.recall.resolve import note_resolver
 from silica.session import meter
 from silica.session import turn as session_turn
 from silica.sources import drop_turn
@@ -296,9 +296,9 @@ def get_messages():
             done = flags.flagged(sid)
             turn_of = {id(m): {"session": sid, "seq": s, "flagged": s in done}
                        for m, s in zip(users, seqs)}
-    from silica.kernel.graph.mindmap import _driver_graph
+    from silica.kernel.recall.resolve import driver_graph
 
-    graph = _driver_graph()   # once for every answer below, as `resolve` is for the rest
+    graph = driver_graph()   # once for every answer below, as `resolve` is for the rest
     data = []
     for at, m in enumerate(messages):
         if m.get("role") not in ("user", "assistant"):

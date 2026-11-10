@@ -176,7 +176,7 @@ def test_a_pass_reads_the_library_searches_once_per_paper_and_keeps_its_versions
     f.clone(item, "PPPP0002", collections=[temporal["key"]], title="Two")
     f.items["8H4AC8GW"]["data"]["collections"] = []
     monkeypatch.setattr(z, "client", lambda: z.Zotero(transport=f.transport()))
-    monkeypatch.setattr("silica.kernel.graph.mindmap.note_resolver", lambda: (lambda p: p))
+    monkeypatch.setattr("silica.kernel.recall.resolve.note_resolver", lambda: (lambda p: p))
     monkeypatch.setattr("silica.kernel.recall.sync.vault_version", lambda: "v1")
     searched = []
 

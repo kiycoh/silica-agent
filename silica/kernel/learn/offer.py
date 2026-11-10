@@ -624,7 +624,7 @@ def decide(text: str, refs: list[str], chat: str, plan_draft: dict | None = None
     the mode, two offers a chat, none on a note whose offer went unused in the
     last week, and in shadow mode only the record."""
     from silica.config import withheld
-    from silica.kernel.graph import mindmap
+    from silica.kernel.recall import resolve
 
     if (plan_draft or asks_plan(text)) and "/learn" not in withheld("routes"):
         # A plan asked of the chat: the one it computed, or the one Learn tracks.
@@ -633,8 +633,8 @@ def decide(text: str, refs: list[str], chat: str, plan_draft: dict | None = None
         return plan_offer(text, list_plans(), plan_draft)
     # The turn names its reads as the calls did, a title or a path; the
     # ledger keys notes by path, so the titles are resolved first.
-    graph = mindmap._driver_graph()
-    _resolve, read = mindmap.answer_resolver(refs, graph=graph)
+    graph = resolve.driver_graph()
+    _resolve, read = resolve.answer_resolver(refs, graph=graph)
     if says_lost(text):
         # The note the reader named is the one the offer is about: a turn
         # that read nothing (the local 9B answered "punti di supporto" from
@@ -657,14 +657,14 @@ def decide_escalation(text: str, history: list[str], chat: str) -> str:
     twice. Records an offer acted on first. In shadow mode the record only:
     what would have fired, nothing shown; a shadowed reason the same in any
     mode (ADR-0135 point 9)."""
-    from silica.kernel.graph import mindmap
+    from silica.kernel.recall import resolve
     from silica.kernel.learn.items import read_note
     from silica.kernel.learn.quiz import entries
 
     if mode() == "off":
         return ""
     log_acted(chat, text)
-    named = named_notes(text, mindmap._driver_graph()[1])
+    named = named_notes(text, resolve.driver_graph()[1])
     if not named:
         return ""
     name, path = named[0]

@@ -108,7 +108,7 @@ class Ctx:
 
     def __init__(self) -> None:
         from silica.driver import DRIVER
-        from silica.kernel.graph.mindmap import note_resolver
+        from silica.kernel.recall.resolve import note_resolver
         from silica.kernel.base import frontmatter
         self.resolve = note_resolver()
         self._driver = DRIVER

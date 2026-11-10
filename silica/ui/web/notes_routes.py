@@ -19,7 +19,7 @@ from silica.config import CONFIG
 from silica.kernel.base.frontmatter import split_shown
 from silica.kernel import vault_files
 from silica.kernel.base.syntax import WIKILINK_WHOLE_RE
-from silica.kernel.graph.mindmap import note_resolver
+from silica.kernel.recall.resolve import note_resolver
 from silica.kernel.text import note_parts
 from silica.kernel.write import session_changes
 from silica.ui.web import drop, note_ops, render, session, sse

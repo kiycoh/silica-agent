@@ -353,7 +353,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     relay when Private (ADR-0151 points 3, 9). Returns what went out, for
     the view's line after Publish."""
     from silica.driver import DRIVER
-    from silica.kernel.graph.mindmap import answer_resolver, note_resolver
+    from silica.kernel.recall.resolve import answer_resolver, note_resolver
     from silica.kernel.base import frontmatter as fm
 
     vault = vault or publish.vault_root()

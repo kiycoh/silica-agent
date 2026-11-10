@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, Response
 from silica.config import CONFIG
 from silica.kernel.base.frontmatter import split_shown
 from silica.kernel.graph import file_tree
-from silica.kernel.graph.mindmap import note_resolver
+from silica.kernel.recall.resolve import note_resolver
 from silica.kernel.report import brief, note_context
 from silica.kernel.text import note_parts
 from silica.ui.web import render
@@ -113,7 +113,7 @@ def link_written(request: Request):
     the read, as /note does. Asked per click and not shipped on the export:
     1,263 lines on Cultura would ride every graph for one look.
     """
-    from silica.kernel.graph.mindmap import note_resolver
+    from silica.kernel.recall.resolve import note_resolver
 
     resolve = note_resolver()
     a, b = (resolve(request.query_params.get(k, "")) for k in ("from", "to"))
@@ -139,7 +139,7 @@ def prereq_path(note: str = ""):
     that root the biggest ladders, which is the one list that cannot be got
     from the file tree.
     """
-    from silica.kernel.graph.mindmap import note_resolver
+    from silica.kernel.recall.resolve import note_resolver
     from silica.kernel.report.structure import ladder, structure_map
 
     try:

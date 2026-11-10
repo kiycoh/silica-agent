@@ -24,7 +24,7 @@ from silica.command_table import Result
 from silica.commands import dispatch
 from silica.config import CONFIG, demo
 from silica.kernel import job_records, system_lines, vault_files
-from silica.kernel.graph.mindmap import note_resolver
+from silica.kernel.recall.resolve import note_resolver
 from silica.kernel.text.mentions import image_mark
 from silica.obs.events import ToolCompleteEvent
 from silica.session import meter, seed

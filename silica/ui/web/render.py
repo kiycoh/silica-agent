@@ -11,7 +11,7 @@ from urllib.parse import quote as _quote
 
 from silica.config import CONFIG
 from silica.kernel import vault_files
-from silica.kernel.graph.mindmap import answer_resolver
+from silica.kernel.recall.resolve import answer_resolver
 from silica.kernel.text import render as ofm
 
 # Vault attachments the drawer may inline; served only through /asset.

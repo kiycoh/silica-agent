@@ -219,7 +219,7 @@ def _nearest(query: str, resolve) -> list[str]:
 
 def _pass(vault: str) -> None:
     from silica.config import CONFIG
-    from silica.kernel.graph.mindmap import note_resolver
+    from silica.kernel.recall.resolve import note_resolver
     from silica.kernel.recall.sync import vault_version
     from silica.sources.zotero import client
 

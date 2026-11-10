@@ -93,12 +93,8 @@ def silica_mindmap(note_path: Annotated[str, Field(description='Vault-relative p
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.graph.mindmap import (
-        build_mapview,
-        gather_materials,
-        mapview_to_canvas,
-        note_resolver,
-    )
+    from silica.kernel.graph.mindmap import build_mapview, gather_materials, mapview_to_canvas
+    from silica.kernel.recall.resolve import note_resolver
 
     # Accept a path OR a title (the GUI input and casual CLI use give titles).
     root = note_resolver()(note_path)

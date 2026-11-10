@@ -416,7 +416,7 @@ def rate(payload: dict):
 
 
 def _aid_html(text: str, note: str) -> str:
-    from silica.kernel.graph.mindmap import answer_resolver
+    from silica.kernel.recall.resolve import answer_resolver
 
     # the chat's resolver: a name two notes share links to this item's note
     resolve, _read = answer_resolver([note])

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from silica.agent.recall_watch import READS_KEY, read_refs
-from silica.kernel.graph.mindmap import _matches_in, _resolve_in, answer_resolver
+from silica.kernel.recall.resolve import _matches_in, _resolve_in, answer_resolver
 
 PATHS = ["Corso B/Lezione 16.md", "Inbox/ml/Lezione 16.md", "Inbox/ml/Lezione 6.md",
          "Percettrone.md", "ML.md"]

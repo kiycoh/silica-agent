@@ -56,13 +56,13 @@ def test_the_turn_names_its_reads_by_title_and_the_offer_resolves_them(monkeypat
     """A chat turn names a read note as its tool call did, often a bare title;
     the rule needs the path the ledger keys it by (seen in the app: no offer
     under an answer that had read "Teorema di Novikoff")."""
-    from silica.kernel.graph import mindmap as mm
+    from silica.kernel.recall import resolve
     from silica.session import offers
 
     monkeypatch.setattr("silica.session.offers.read_refs", lambda messages: ["Teorema di Novikoff"])
-    monkeypatch.setattr(mm, "answer_resolver",
+    monkeypatch.setattr(resolve, "answer_resolver",
                         lambda refs, graph=None: (None, ["ML/Teorema di Novikoff.md"] if refs == ["Teorema di Novikoff"] else []))
-    monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto"}, None))
+    monkeypatch.setattr(resolve, "driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto"}, None))
     monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
     monkeypatch.setattr("silica.kernel.learn.quiz.entries", lambda: [])
     # the offer log's caps and declines are tested on their own
@@ -70,11 +70,11 @@ def test_the_turn_names_its_reads_by_title_and_the_offer_resolves_them(monkeypat
     o = offers.study_offer("non ho capito il teorema", [], "")
     assert o and o["note"] == "ML/Teorema di Novikoff.md"
     # ...but the note the message names comes before a neighbour the turn read first
-    monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto",
+    monkeypatch.setattr(resolve, "driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto",
                                                           "ML/Teorema di Novikoff.md": "Teorema di Novikoff"}, None))
     o = offers.study_offer("non ho capito i punti di supporto", [], "")
     assert o and o["note"] == "ML/Punti di supporto.md"
-    monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto"}, None))
+    monkeypatch.setattr(resolve, "driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto"}, None))
 
     # a turn that read nothing still has the note the reader named
     monkeypatch.setattr("silica.session.offers.read_refs", lambda messages: [])
@@ -237,13 +237,13 @@ def test_the_escalated_aid_takes_the_form_the_note_calls_for():
 def test_the_chat_escalation_in_shadow_logs_and_adds_nothing(monkeypatch, tmp_path):
     import json
 
-    from silica.kernel.graph import mindmap as mm
+    from silica.kernel.recall import resolve
     from silica.session import offers
     from silica.kernel.learn import items
 
     monkeypatch.setattr(offer, "_log_path", lambda: tmp_path / "offers.jsonl")
     monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
-    monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Lezione 14.md": "Lezione 14"}, None))
+    monkeypatch.setattr(resolve, "driver_graph", lambda: ({}, {"ML/Lezione 14.md": "Lezione 14"}, None))
     monkeypatch.setattr("silica.kernel.learn.quiz.entries", lambda: [])
     monkeypatch.setattr(items, "read_note", lambda path: SPINE)
     lost = [{"role": "user", "content": "non ho capito la Lezione 14"}]
