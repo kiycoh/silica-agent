@@ -222,6 +222,53 @@ root_packages = ["silica", "silica_core"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
+name = "one order: every package imports only those below it (F20 of the 2026-11-06 untangle)"
+type = "layers"
+# High to low. Lazy imports count, as everywhere in this file. Where this order
+# differs from the one first written down (docs/audits/2026-11-06-untangle-decision-log.md,
+# F20), it is the order the code has and the log says why: capabilities sit under
+# the agent loop, which dispatches the workers (agent.subagent); connectors over
+# sources, since the mail connector is one; onboarding under the tools, since
+# silica_doctor reads onboarding.checks and nothing in onboarding reads a tool.
+# A new package or kernel module goes on a line here: tests/test_layers_contract.py
+# fails until it does.
+layers = [
+  "silica.entry",
+  "silica.cli",
+  "silica.ui",
+  "silica.commands",
+  "silica.session",
+  "silica.tools",
+  "silica.onboarding",
+  "silica.connectors",
+  "silica.sources",
+  "silica.router",
+  "silica.agent",
+  "silica.capabilities",
+  # the kernel lanes, a tier a line; a lane may import its own tier
+  "silica.kernel.analyst_plan",
+  "silica.kernel.report : silica.kernel.organize",
+  "silica.kernel.vault : silica.kernel.progress : silica.kernel.learn : silica.kernel.link : silica.kernel.public_site : silica.kernel.check : silica.kernel.user_memory : silica.kernel.vault_language : silica.kernel.graph : silica.kernel.outline",
+  "silica.kernel.recall : silica.kernel.rights",
+  "silica.kernel.code : silica.kernel.calendar : silica.kernel.prep_delegation : silica.kernel.publish : silica.kernel.run_context : silica.kernel.vault_files",
+  "silica.kernel.write : silica.kernel.proposed_skills",
+  "silica.kernel.text : silica.kernel.context_builder : silica.kernel.image_meta : silica.kernel.partition : silica.kernel.prompts : silica.kernel.scrub : silica.kernel.system_lines : silica.kernel.vault_instructions : silica.kernel.contested_register : silica.kernel.distill_cache : silica.kernel.forms : silica.kernel.graph_diff : silica.kernel.job_records : silica.kernel.personas : silica.kernel.plans : silica.kernel.raws : silica.kernel.residue : silica.kernel.workqueue : silica.kernel.workspaces",
+  "silica.driver",
+  "silica.model",
+  "silica.obs",
+  "silica.kernel.base",
+  "silica.metrics | silica.term | silica.update",
+  "silica.config",
+  "silica.command_table | silica.view_table | silica.provider_table | silica.prompts | silica._version",
+]
+# `silica.tools` is two things under one name: the registry (silica/tools/__init__.py:
+# Tool, TOOLS, @tool) that the loop and the sources register into, and the tool bodies
+# above them. A layer cannot be both, so imports of the registry module itself are let
+# through; tests/test_layers_contract.py holds it to importing nothing from silica, so
+# no chain runs through it. Any import of a tool body from below still fails.
+ignore_imports = ["silica.** -> silica.tools"]
+
+[[tool.importlinter.contracts]]
 name = "one arrow: silica-agent depends on silica-core, never the reverse (ADR-0043)"
 type = "forbidden"
 source_modules = ["silica_core"]
@@ -383,19 +430,6 @@ forbidden_modules = ["silica.kernel.organize"]
 # taxonomy, classify and its arbiter serve one user-facing command (/organize)
 # and nothing else. Keeping the arrow one-way is what lets them stay one lane
 # instead of dissolving back into text/ and recall/.
-allow_indirect_imports = true
-
-[[tool.importlinter.contracts]]
-name = "text and code lanes sit low — they reach only recall and write"
-type = "forbidden"
-source_modules = ["silica.kernel.text", "silica.kernel.code"]
-forbidden_modules = [
-  "silica.kernel.report", "silica.kernel.link", "silica.kernel.organize",
-]
-# The seven lanes are mutually recursive (136 cycles between them), so there is
-# no layering to declare here. These two arrows are the exception that is
-# actually true, and freezing them keeps the two most reusable lanes from
-# acquiring dependencies on the vault-shaped ones.
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
