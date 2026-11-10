@@ -1,7 +1,6 @@
 """The one check behind `int_flag`, the parser the five `--flag=N` sites share."""
 from __future__ import annotations
 
-from silica.commands.index import _REFRESH
 from silica.session.words import int_flag
 
 
@@ -22,11 +21,19 @@ class TestIntFlag:
         assert int_flag(["--top-k=15"], "--top-k=", 10) == 15
 
 
-def test_refresh_commands_map_to_real_tools():
-    from silica.tools import TOOLS
+def test_each_index_command_builds_its_own_index(monkeypatch):
+    """The three commands call `kernel.recall.refresh` itself, not a tool by its
+    registry name: each reaches its own index, with the folder and --force."""
+    from silica.commands import dispatch
+    from silica.kernel.recall import refresh
 
-    for cmd, (tool, _label) in _REFRESH.items():
-        assert tool in TOOLS, f"{cmd} points at a missing tool"
+    called = []
+    for name in ("embed", "cooccurrence", "lexical"):
+        monkeypatch.setattr(refresh, name, lambda folder, force, ask=None, _n=name: (
+            called.append((_n, folder, force)), {"indexed": 1, "total_notes": 1})[1])
+    for line in ("/embed A --force", "/cooccur B", "/lexical --folder=C"):
+        dispatch(line, [])
+    assert called == [("embed", "A", True), ("cooccurrence", "B", False), ("lexical", "C", False)]
 
 
 def test_the_command_word_is_cut_one_way():
