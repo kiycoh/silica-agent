@@ -581,6 +581,25 @@ def active_write_dir() -> str:
     return declared if declared is not None else _UNRESOLVABLE_WRITE_DIR
 
 
+def mirrors() -> bool:
+    """Whether the active vault stages its writes in the mirror (SAFE_WRITE_DIR).
+
+    Asked here and read nowhere else: eight seams compared the write dir with
+    the folder name by hand, and one tested the prefix with no mode check at all
+    (re-audit 2026-11-10, kernel 4)."""
+    return active_write_dir() == SAFE_WRITE_DIR
+
+
+def original_of(path: str) -> str | None:
+    """The vault path a mirror copy stands for: `silica/Projects/x.md` is
+    `Projects/x.md`, the mirror folder itself is "", and a path outside it is
+    None. A mapping only, whatever the mode: ask `mirrors()` first. Membership is
+    `within`'s, case-insensitive, as the write boundary tests it."""
+    if not within(path, SAFE_WRITE_DIR):
+        return None
+    return (path or "").replace("\\", "/").strip("/")[len(SAFE_WRITE_DIR) + 1:]
+
+
 def resolve_inbox_dir(vault_root: str | Path, write_dir: str, inbox: str) -> str:
     """Where the inbox IS, given a declared boundary and a folder name.
 

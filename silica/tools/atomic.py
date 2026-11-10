@@ -1068,14 +1068,12 @@ def _with_prop(files: list[str], key: str, value: str, folder: str) -> list[str]
     copy is not a member, its original is: counting both made 18 contracts of
     17. Unless the listing asks for the staging folder itself.
     """
-    from silica.kernel.base.manifest import active_write_dir, within
-    from silica.kernel.base.manifest import SAFE_WRITE_DIR
+    from silica.kernel.base.manifest import mirrors, original_of
 
-    skip_copies = (active_write_dir() == SAFE_WRITE_DIR
-                   and not within(vault_rel(folder), SAFE_WRITE_DIR))
+    skip_copies = mirrors() and original_of(vault_rel(folder)) is None
     out: list[str] = []
     for f in files:
-        if skip_copies and within(f, SAFE_WRITE_DIR):
+        if skip_copies and original_of(f) is not None:
             continue
         props = DRIVER.props_of(f) or {}
         got = next((v for k, v in props.items() if str(k).casefold() == key), None)

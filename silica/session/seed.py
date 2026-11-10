@@ -60,8 +60,7 @@ def vault_scope() -> str:
     this the model reads "vault" as the folder it writes in and reports an empty
     vault while sitting on a repo full of Markdown.
     """
-    from silica.kernel.base.manifest import active_write_dir
-    from silica.kernel.base.manifest import SAFE_WRITE_DIR
+    from silica.kernel.base.manifest import active_write_dir, mirrors
 
     vault = CONFIG.vault_path
     write_dir = active_write_dir()
@@ -73,7 +72,7 @@ def vault_scope() -> str:
         f"{write_dir}/, the only place you may write; that folder being empty "
         f"does not mean the vault is empty."
     )
-    if write_dir != SAFE_WRITE_DIR:
+    if not mirrors():
         return scope
     # The mirror only earns its merge-by-paste if the model replicates the tree
     # it can already see in the vault map, so the instruction ships with it.

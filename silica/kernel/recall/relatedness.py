@@ -510,21 +510,16 @@ def _fuse(
     return dedupe_mirror_shadows(out)[:k]
 
 
-def _mirror_prefix() -> str:
-    """`"silica/"` when the ACTIVE vault stages writes in the mirror, else "".
-
-    Keyed on the one write_dir name whose contents mirror the vault tree
-    (SAFE_WRITE_DIR, as mirror.seed_mirror_copy reads it); `docs/silica` is
+def _mirrors() -> bool:
+    """Whether the ACTIVE vault stages writes in the mirror. `docs/silica` is
     Silica's own folder in a repo, not a mirror of it, so no dedupe applies there.
-    """
+    An unreadable manifest answers no, which leaves the pool as it is."""
     try:
-        from silica.kernel.base.manifest import active_write_dir
-        from silica.kernel.base.manifest import SAFE_WRITE_DIR
+        from silica.kernel.base.manifest import mirrors
 
-        wd = active_write_dir()
-        return wd + "/" if wd == SAFE_WRITE_DIR else ""
+        return mirrors()
     except Exception:
-        return ""
+        return False
 
 
 def dedupe_mirror_shadows(results: list[RelatedNote]) -> list[RelatedNote]:
@@ -536,13 +531,14 @@ def dedupe_mirror_shadows(results: list[RelatedNote]) -> list[RelatedNote]:
     mirror twin made the pool. Memory-lane results are never compared: their
     paths belong to the memory vault (ADR-0019).
     """
-    prefix = _mirror_prefix()
-    if not prefix:
+    if not _mirrors():
         return results
+    from silica.kernel.base.manifest import original_of
+
     mirrored = {
-        r.path[len(prefix):].removesuffix(".md").casefold()
+        original.removesuffix(".md").casefold()
         for r in results
-        if r.origin == "vault" and r.path.startswith(prefix)
+        if r.origin == "vault" and (original := original_of(r.path)) is not None
     }
     if not mirrored:
         return results
@@ -550,7 +546,7 @@ def dedupe_mirror_shadows(results: list[RelatedNote]) -> list[RelatedNote]:
         r for r in results
         if not (
             r.origin == "vault"
-            and not r.path.startswith(prefix)
+            and original_of(r.path) is None
             and r.path.removesuffix(".md").casefold() in mirrored
         )
     ]

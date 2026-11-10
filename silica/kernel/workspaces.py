@@ -56,11 +56,12 @@ def _mirror_copies(paths) -> set[str]:
     """Safe mode stages a patched note at `silica/<same path>`
     (vault_manifest.seed_mirror_copy): that copy counts as its original and is
     never a member of its own, as ADR-0109 point 1 counts it."""
-    from silica.kernel.base.manifest import SAFE_WRITE_DIR
+    from silica.kernel.base.manifest import mirrors, original_of
 
-    prefix = SAFE_WRITE_DIR + "/"
+    if not mirrors():
+        return set()
     have = set(paths)
-    return {p for p in have if p.startswith(prefix) and p[len(prefix):] in have}
+    return {p for p in have if original_of(p) in have}
 
 
 def read_workspace(path: str, text: str | None = None) -> dict:

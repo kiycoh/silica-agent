@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 
-from silica.kernel.base.manifest import active_write_dir, within
+from silica.kernel.base.manifest import mirrors, original_of
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +29,8 @@ def seed_mirror_copy(path: str) -> None:
     Best-effort: a copy that cannot be made leaves the read to report it.
     """
     from silica.driver import DRIVER
-    from silica.kernel.base.manifest import SAFE_WRITE_DIR
 
-    if active_write_dir() != SAFE_WRITE_DIR or not within(path, SAFE_WRITE_DIR):
-        return
-    rel = path.replace("\\", "/").strip("/")[len(SAFE_WRITE_DIR) + 1:]
+    rel = original_of(path) if mirrors() else None
     if not rel:
         return
     try:
