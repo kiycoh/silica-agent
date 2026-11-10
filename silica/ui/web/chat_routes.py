@@ -475,7 +475,6 @@ def load_session(payload: dict):
         raise HTTPException(status_code=404, detail="no such session")
 
     def scope(last: dict) -> None:
-        SESSION.chat.collapsed = set()
         # The scope its last turn ran in (ADR-0112 point 4): the seed holds no
         # workspace line, so it is written again here, as the seed is.
         ws = session.resolve_workspace(str(last.get("silica_workspace") or ""))

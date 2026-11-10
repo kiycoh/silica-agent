@@ -207,6 +207,28 @@ def test_repl_sessions_resume_handlers(narrator, monkeypatch, capsys):
     assert _handle_slash_command("/sessions prune", Conversation()) is True  # usage line, no delete
 
 
+def test_a_resumed_repl_chat_starts_with_nothing_collapsed(narrator, monkeypatch):
+    """Bug 3 (entry-sources re-audit, 2026-11-10): /resume replaced the history and
+    kept the old chat's `collapsed`, and both compaction passes skip every index in
+    it, so the reopened chat's tool results at those places were never stubbed.
+    The browser's /session/load always started the set over."""
+    from silica.cli import _handle_slash_command
+    from silica.session.conversation import Conversation
+
+    narrator.turn({"role": "user", "content": "prima domanda"})
+    narrator.turn({"role": "assistant", "content": "prima risposta"})
+    narrator.close()
+    monkeypatch.setattr("silica.session.seed.fresh_messages", lambda: [{"role": "system", "content": "seed"}])
+    monkeypatch.setattr("silica.session.meter.update_context_tokens", lambda m: None)
+
+    conv = Conversation(messages=[{"role": "system", "content": "old"}] * 6, collapsed={2, 3, 4})
+    assert _handle_slash_command("/resume 1", conv) is True
+    assert len(conv.messages) == 3 and conv.collapsed == set()
+    kept = Conversation(collapsed={1})
+    assert _handle_slash_command("/resume 99", kept) is True
+    assert kept.collapsed == {1}  # nothing reopened, nothing reset
+
+
 # --- observability levers (2026-09-06 audit) ---------------------------------
 # The call beat is the one record every lane writes, so the trace, the wire
 # request and the retries all land on it; the tool beat gains the MCP lane;

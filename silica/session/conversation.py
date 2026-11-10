@@ -42,7 +42,8 @@ def reopen(chat: Conversation, sid: str, *, driver: str, seed: Callable[[], list
     A narration session this vault lists goes on in place; a legacy snapshot,
     or one another vault or incognito holds, goes on as a new session seeded
     with its turns (emit new, recognise legacy: ticket 05). The narration
-    records turns and never the seed, so `seed()` goes in front; `scope` writes
+    records turns and never the seed, so `seed()` goes in front, and nothing is
+    collapsed yet; `scope` writes
     what the surface keeps beside it from the last user message (the browser's
     workspace line) before the persona's, since both insert before the seed's
     last system line. Then the persona that message wore (ADR-0127 point 3),
@@ -66,6 +67,9 @@ def reopen(chat: Conversation, sid: str, *, driver: str, seed: Callable[[], list
         for m in replayed:
             narration.NARRATOR.turn(m)
     chat.messages[:] = seed() + replayed
+    # The indices compaction recorded were the old history's: kept, both passes
+    # would skip the reopened chat's messages at those places forever.
+    chat.collapsed = set()
     last: dict = next((m for m in reversed(replayed) if m.get("role") == "user"), {})
     if scope is not None:
         scope(last)
