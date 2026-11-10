@@ -6,14 +6,14 @@
 A reading is keyed by the SHA-256 of the image bytes and kept in the vault's
 index namespace, never in a note: the vault is the person's, and a reading
 written into it would pass for their words. A second map, basename -> sha, is
-what lets `_note_text` and the lexical store swap an `![[name.png]]` embed for
+what lets `note_text` and the lexical store swap an `![[name.png]]` embed for
 its reading without being handed the note's path, so every embedding path (bulk
 /embed, the query-time sweep, the write-time refresh, the dedup query text)
 encodes the same text and none re-embeds what another just did.
 
 Only `read_missing` calls the model, and only bulk /embed calls it: the sweep
 runs on the query path, where 2 s an image is not an option.
-The model call is handed in (`ask`), never imported: `_note_text` reaches this
+The model call is handed in (`ask`), never imported: `note_text` reaches this
 module from the graph structure modules, which stay free of the model stack (P2/DKB).
 """
 from __future__ import annotations
@@ -126,7 +126,7 @@ def by_name() -> dict[str, dict]:
 def texts_by_name() -> dict[str, str]:
     """basename -> the reading as one line of words, for the index text.
 
-    Cached with the store: `_note_text` asks once per note, 730 times a bulk
+    Cached with the store: `note_text` asks once per note, 730 times a bulk
     pass on the test vault."""
     store = _load()
     if _cache.get("texts_of") is not store:

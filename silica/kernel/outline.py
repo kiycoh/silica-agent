@@ -593,7 +593,7 @@ def flag_cosine_near_titles(ops: list[dict], *, tau: float, embedder=None, store
     loser to mark. Fail-open: no embedder, no store, no flag. Returns the
     number of ops flagged.
     """
-    from silica.kernel.recall.embed import _note_text
+    from silica.kernel.recall.embed import note_text
     from silica.kernel.base.layout import is_inbox_path
 
     todo = [o for o in ops if o.get("op") == "write" and o.get("section") != SPINE_SECTION
@@ -609,7 +609,7 @@ def flag_cosine_near_titles(ops: list[dict], *, tau: float, embedder=None, store
             store = store or get_store()
             if embedder is None or len(store) == 0:
                 return 0
-        vecs = embedder.embed([_note_text(o["title"], o["snippet"]) for o in todo])
+        vecs = embedder.embed([note_text(o["title"], o["snippet"]) for o in todo])
     except Exception as exc:  # noqa: BLE001
         # A dead embedder costs this lane its cosine door, never the lecture:
         # the title band and same_as still run, as they did before the door.

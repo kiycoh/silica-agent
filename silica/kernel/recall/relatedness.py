@@ -132,7 +132,7 @@ def _rrf_fuse(rankings: list[list[tuple[str, float]]]) -> dict[str, float]:
     return fused
 
 
-def _rank_embeddings_from_vec(
+def rank_embeddings_from_vec(
     embed_store: EmbedStore | None,
     vec: list[float] | None,
     *,
@@ -170,7 +170,7 @@ def _embed_ranking(
     """Embed ranking for an INDEXED note: resolve its vector by path, then rank."""
     if embed_store is None:
         return None
-    return _rank_embeddings_from_vec(
+    return rank_embeddings_from_vec(
         embed_store, embed_store.get_vec(store_key(query_path)), k=k, exclude=exclude
     )
 
@@ -213,7 +213,7 @@ def _seed_from_text(text: str, lang: str) -> dict[str, float]:
     return seeds
 
 
-def _concept_idf(
+def concept_idf(
     cooccur_store: CooccurStore,
     stems: set[str],
     *,
@@ -284,7 +284,7 @@ def _rank_cooccur_from_profile(
     from silica.config import CONFIG
 
     bm25 = bool(CONFIG.cooccur_bm25)
-    idf = _concept_idf(cooccur_store, set(profile), scope=scope)
+    idf = concept_idf(cooccur_store, set(profile), scope=scope)
     postings = cooccur_store.stem_postings()
     lens, avgdl = cooccur_store.doc_lengths() if bm25 else ({}, 1.0)
 
@@ -363,7 +363,7 @@ def _rank_cooccur_from_profile(
     return ranked
 
 
-def _cooccur_ranking(
+def cooccur_ranking(
     cooccur_store: CooccurStore | None,
     query_path: str,
     *,
@@ -621,7 +621,7 @@ def related_notes(
 
     Structural (V1) and coupling (V3) legs are not parameters any more: both
     failed the ADR-0027 gate, and `evals/probe_graph_variables.py` mounts them
-    on `_embed_ranking`/`_cooccur_ranking` itself so the negative results stay
+    on `_embed_ranking`/`cooccur_ranking` itself so the negative results stay
     reproducible without a production seam nobody passes.
     """
     # Normalize to the STORE keyspace before anything is excluded. CooccurStore
@@ -633,12 +633,12 @@ def related_notes(
     pool = max(k * 3, _POOL_MIN)
 
     embed_rank = _embed_ranking(embed_store, query_path, k=pool, exclude=blocked)
-    cooc_rank = _cooccur_ranking(cooccur_store, query_path, k=pool, exclude=blocked, scope=scope)
+    cooc_rank = cooccur_ranking(cooccur_store, query_path, k=pool, exclude=blocked, scope=scope)
 
     mem_embed_rank = None
     if memory_embed_store is not None and embed_store is not None:
         vec = embed_store.get_vec(store_key(query_path))
-        mem_embed_rank = _rank_embeddings_from_vec(
+        mem_embed_rank = rank_embeddings_from_vec(
             memory_embed_store, vec, k=pool, exclude=set()
         )
     mem_cooc_rank = None
@@ -696,7 +696,7 @@ def related_notes_many(
         embed_rank = None
         if cands and max(c.get("score", 0.0) for c in cands) > _NOISE_FLOOR:
             embed_rank = [(c["path"], c["name"], float(c.get("score", 0.0))) for c in cands]
-        cooc_rank = _cooccur_ranking(cooccur_store, key, k=pool, exclude={key}, scope=scope)
+        cooc_rank = cooccur_ranking(cooccur_store, key, k=pool, exclude={key}, scope=scope)
         out[path] = _fuse(embed_rank, cooc_rank, k=k)
     return out
 
@@ -745,7 +745,7 @@ def related_notes_for_query(
     blocked = set(exclude or ())
     pool = max(k * 3, _POOL_MIN)
 
-    embed_rank = _rank_embeddings_from_vec(embed_store, query_vec, k=pool, exclude=blocked, allow=allow)
+    embed_rank = rank_embeddings_from_vec(embed_store, query_vec, k=pool, exclude=blocked, allow=allow)
 
     cooc_rank = None
     if cooccur_store is not None and query_text:
@@ -758,7 +758,7 @@ def related_notes_for_query(
             cooccur_store, profile, k=pool, blocked=blocked, scope=scope, allow=allow
         )
 
-    mem_embed_rank = _rank_embeddings_from_vec(
+    mem_embed_rank = rank_embeddings_from_vec(
         memory_embed_store, query_vec, k=pool, exclude=set()
     )
     mem_cooc_rank = None

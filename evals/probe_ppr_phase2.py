@@ -154,11 +154,11 @@ def _run_arm(endpoints, eligible, store, es, *, profile_fn=None, rank_fn=None) -
 # ---------------------------------------------------------------------------
 
 def _legs(key: str, store, es, *, pool: int):
-    from silica.kernel.recall.relatedness import _cooccur_ranking, _embed_ranking
+    from silica.kernel.recall.relatedness import cooccur_ranking, _embed_ranking
 
     blocked = {key}
     embed_rank = _embed_ranking(es, key, k=pool, exclude=blocked)
-    cooc_rank = _cooccur_ranking(store, key, k=pool, exclude=blocked)
+    cooc_rank = cooccur_ranking(store, key, k=pool, exclude=blocked)
     row = store.note_edges_for(key)
     ranked = sorted(((p, s) for p, s in row.items() if p not in blocked),
                     key=lambda kv: (-kv[1], kv[0]))
@@ -422,7 +422,7 @@ def diagnose(vault: Path, *, samples: int = 100, record: Path | None = None) -> 
     import random
 
     from evals.golden.runner import _open_stores
-    from silica.kernel.recall.relatedness import _concept_idf
+    from silica.kernel.recall.relatedness import concept_idf
 
     store, _embed = _open_stores(vault)
     adj = store.adjacency()
@@ -440,7 +440,7 @@ def diagnose(vault: Path, *, samples: int = 100, record: Path | None = None) -> 
         base = None
 
     def stats(profile: dict[str, float], seeds: dict[str, float]) -> tuple[float, float]:
-        idf = _concept_idf(store, set(profile), scope=None)
+        idf = concept_idf(store, set(profile), scope=None)
         mass = sum(profile.values())
         off_seed = sum(w for s, w in profile.items() if s not in seeds)
         mean_idf = sum(w * idf.get(s, 0.0) for s, w in profile.items()) / mass if mass else 0.0

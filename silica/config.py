@@ -496,7 +496,7 @@ EMBEDDER_DEFAULTS: dict[str, dict[str, str]] = {
     "embeddinggemma-2": {
         "dim": "768",
         # The model card's retrieval prompts; the document side has no title
-        # slot here because _note_text already leads with the title.
+        # slot here because note_text already leads with the title.
         "SILICA_EMBEDDING_QUERY_PREFIX": "task: search result | query: ",
         "SILICA_EMBEDDING_DOCUMENT_PREFIX": "title: none | text: ",
         "SILICA_SIM_THRESHOLD_HIGH": "0.911",

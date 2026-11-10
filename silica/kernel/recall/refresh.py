@@ -22,7 +22,7 @@ def _read_all(folder: str) -> tuple[list, list[tuple[str, str, str]], list[str],
     """(the listing, (index key, name, body) per note, read errors, refusal).
 
     One loop for the three indexes, and the body stays RAW for all of them, as
-    the sweep and the write hook pass it: `_note_text` alone decides what a figure
+    the sweep and the write hook pass it: `note_text` alone decides what a figure
     becomes, build_contribution strips frontmatter and media itself, and a
     bulk-seeded index has to match an incrementally maintained one, or the two
     paths sign the same note differently and redo each other's work.

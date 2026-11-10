@@ -336,9 +336,9 @@ def nominate(vault: Path, query: str, *, pool: int = _NOMINEE_POOL, query_vec=No
             out["notes"] = len(es)
         vec = query_vec() if query_vec is not None else _query_vec(query)
         if vec is not None:
-            from silica.kernel.recall.relatedness import _rank_embeddings_from_vec
+            from silica.kernel.recall.relatedness import rank_embeddings_from_vec
 
-            ranked = _rank_embeddings_from_vec(es, vec, k=pool, exclude=set()) or []
+            ranked = rank_embeddings_from_vec(es, vec, k=pool, exclude=set()) or []
             if ranked:
                 out["stages"].append("embed")
                 out["best"] = round(float(ranked[0][2]), 3)

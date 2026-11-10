@@ -66,10 +66,10 @@ def test_the_reading_beats_the_converter_caption():
 
 
 def test_a_read_screenshot_reaches_the_embedding_text(vault):
-    from silica.kernel.recall.embed import _note_text
+    from silica.kernel.recall.embed import note_text
     _image(vault, "a.png")
     image_readings.read_missing([("N", "![[a.png]]")], ask=lambda m: SPARK)
-    assert "Architettura di Spark" in _note_text("Spark", "Testo ![[a.png]] fine")
+    assert "Architettura di Spark" in note_text("Spark", "Testo ![[a.png]] fine")
 
 
 def test_the_lexical_index_holds_a_reading(vault):
@@ -118,7 +118,7 @@ def test_bulk_embed_reads_images_first_and_embeds_raw_bodies(monkeypatch):
     monkeypatch.setattr(providers, "get_embedder", lambda cfg: object())
     graph.silica_embed_refresh()
     assert [step for step, _ in order] == ["read", "embed"]
-    assert "<details>" in order[1][1][0][2]  # raw: _note_text alone decides what a figure becomes
+    assert "<details>" in order[1][1][0][2]  # raw: note_text alone decides what a figure becomes
 
 
 def test_an_image_with_no_text_becomes_its_reading(vault, monkeypatch):

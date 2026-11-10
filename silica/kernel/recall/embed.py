@@ -597,8 +597,12 @@ def clear() -> None:
     _STORE_CACHE.clear()
 
 
-def _note_text(title: str, body: str, *, folder: str = "") -> str:
+def note_text(title: str, body: str, *, folder: str = "") -> str:
     """Combine title and body prefix for embedding.
+
+    Public, with note_title_text, because it is a contract: a text compared
+    against the stored vectors (collision's concepts, outline's titles, Learn's
+    topics) is embedded by this same recipe or the cosines mean nothing.
 
     If `folder` is provided, it is prepended as a bracketed domain hint
     (e.g. "[Robotica] CAN\n\n...") to anchor domain-ambiguous acronyms
@@ -615,10 +619,10 @@ def _note_text(title: str, body: str, *, folder: str = "") -> str:
     combined = f"{prefix}{title}\n\n{figures_as_text(body, image_readings.texts_by_name())}"
     return combined[:MAX_CHARS]
 
-def _note_title_text(title: str, *, folder: str = "") -> str:
+def note_title_text(title: str, *, folder: str = "") -> str:
     """Title-only text for the secondary title-similarity embedding vector.
 
-    Used alongside `_note_text` to build a compact, body-free representation
+    Used alongside `note_text` to build a compact, body-free representation
     that captures title-level semantic relationships (e.g. "ROS" ↔ "JSON in
     ROS 2") even when the full-note vectors diverge below the dedup threshold.
     """
@@ -646,7 +650,7 @@ def embedder_identity(embedder: Any) -> str:
 def _embed_signature(name: str, body: str, *, folder: str = "", model: str = "") -> str:
     """Stable hash of the exact text that determines a note's embedding.
 
-    Signed over the truncated `_note_text` (figures as their words) plus `_note_title_text`
+    Signed over the truncated `note_text` (figures as their words) plus `note_title_text`
     — not the raw body — so edits past the truncation point or inside stripped
     media syntax don't trigger a needless re-embed. build_index compares this
     against the stored hash to detect content changes on incremental refresh.
@@ -657,8 +661,8 @@ def _embed_signature(name: str, body: str, *, folder: str = "", model: str = "")
     ones — a mixed-dimension store that can silently zero the whole embed leg.
     """
     import hashlib
-    basis = (_note_text(name, body, folder=folder) + "\x00"
-             + _note_title_text(name, folder=folder) + "\x00" + model)
+    basis = (note_text(name, body, folder=folder) + "\x00"
+             + note_title_text(name, folder=folder) + "\x00" + model)
     return hashlib.sha1(basis.encode("utf-8", "ignore")).hexdigest()
 
 
@@ -720,8 +724,8 @@ def build_index(
     for i in range(0, len(to_embed), batch_size):
         batch = to_embed[i : i + batch_size]
         folders = [path.rsplit("/", 1)[0] if "/" in path else "" for path, _, _ in batch]
-        full_texts  = [_note_text(name, body, folder=f)  for (_, name, body), f in zip(batch, folders)]
-        title_texts = [_note_title_text(name, folder=f)  for (_, name, _),    f in zip(batch, folders)]
+        full_texts  = [note_text(name, body, folder=f)  for (_, name, body), f in zip(batch, folders)]
+        title_texts = [note_title_text(name, folder=f)  for (_, name, _),    f in zip(batch, folders)]
         # Interleave: [full_0, title_0, full_1, title_1, ...]
         interleaved = [t for pair in zip(full_texts, title_texts) for t in pair]
         try:
@@ -773,8 +777,8 @@ def refresh_note(
     if store is None:
         store = get_store()
     _folder = path.rsplit("/", 1)[0] if "/" in path else ""
-    full_text  = _note_text(name, body, folder=_folder)
-    title_text = _note_title_text(name, folder=_folder)
+    full_text  = note_text(name, body, folder=_folder)
+    title_text = note_title_text(name, folder=_folder)
     vecs = embedder.embed([full_text, title_text])
     store.upsert(path, name, vecs[0], title_vec=vecs[1],
                  content_hash=_embed_signature(name, body, folder=_folder, model=embedder_identity(embedder)))

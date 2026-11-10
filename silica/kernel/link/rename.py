@@ -44,7 +44,7 @@ def _build_skip_mask(text: str) -> list[bool]:
     return build_skip_mask(text, SKIP_PATTERNS_BASE)
 
 
-def _span_is_clear(mask: list[bool], start: int, end: int) -> bool:
+def span_is_clear(mask: list[bool], start: int, end: int) -> bool:
     """Return True iff no character in [start, end) is masked."""
     return not any(mask[i] for i in range(start, end))
 
@@ -98,7 +98,7 @@ def _rewrite_wikilinks(
     replacements: list[tuple[re.Match, str]] = []
 
     for m in WIKILINK_SPAN_RE.finditer(content):
-        if not _span_is_clear(mask, m.start(), m.end()):
+        if not span_is_clear(mask, m.start(), m.end()):
             continue
 
         bang = m.group(1)        # "!" or ""
@@ -211,7 +211,7 @@ def _rewrite_markdown_links(
     replacements: list[tuple[re.Match, str]] = []
 
     for m in _MD_LINK_RE.finditer(content):
-        if not _span_is_clear(mask, m.start(), m.end()):
+        if not span_is_clear(mask, m.start(), m.end()):
             continue
 
         text = m.group(1)
@@ -353,7 +353,7 @@ def explicit_links(path: str) -> bool:
     at = 0
     for m in WIKILINK_SPAN_RE.finditer(content):
         target = m.group(2).strip()
-        if not target or "/" in target or not _span_is_clear(mask, m.start(), m.end()):
+        if not target or "/" in target or not span_is_clear(mask, m.start(), m.end()):
             continue
         if len(DRIVER.notes_named(target)) < 2:
             continue

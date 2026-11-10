@@ -170,13 +170,13 @@ def _links(text: str):
     from silica.kernel.base.frontmatter import FM_RE_TOLERANT
     from silica.kernel.link.autolink import SKIP_PATTERNS_BASE, build_skip_mask
     from silica.kernel.base.syntax import WIKILINK_SPAN_RE
-    from silica.kernel.link.rename import _span_is_clear
+    from silica.kernel.link.rename import span_is_clear
 
     mask = build_skip_mask(text, SKIP_PATTERNS_BASE)
     fm = FM_RE_TOLERANT.match(text)
     if fm:
         mask[:fm.end()] = [False] * fm.end()
-    return [m for m in WIKILINK_SPAN_RE.finditer(text) if _span_is_clear(mask, m.start(), m.end())]
+    return [m for m in WIKILINK_SPAN_RE.finditer(text) if span_is_clear(mask, m.start(), m.end())]
 
 
 def plan_additions(vault: Path, state: dict, top: str) -> Plan:

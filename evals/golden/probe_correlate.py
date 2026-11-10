@@ -27,7 +27,7 @@ import contextlib
 from silica.kernel.report.health import pair as _pair
 from silica.kernel.report.health import wikilink_graph as _wikilink_graph
 
-# Per-note expanded ranking depth — matches graph_report's _cooccur_ranking(k=10).
+# Per-note expanded ranking depth — matches graph_report's cooccur_ranking(k=10).
 EXPANDED_K = 10
 
 # The associative expansion lives here and not in relatedness.py: no production
@@ -77,7 +77,7 @@ def expansion_enabled():
 
 
 def expanded_ranking(store, key: str, *, k: int) -> list[tuple[str, float]] | None:
-    """`_cooccur_ranking` over the expanded profile of an indexed note."""
+    """`cooccur_ranking` over the expanded profile of an indexed note."""
     from silica.kernel.recall.relatedness import _rank_cooccur_from_profile
 
     profile = expanded_profile(store, store.note_nodes(key), scope=None)

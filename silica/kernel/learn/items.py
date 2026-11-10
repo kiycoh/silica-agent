@@ -148,7 +148,7 @@ def span_of(text: str, leaf_text: str) -> tuple[int, str]:
     fails a right answer against it (seen 2026-11-06 on a leaf of one
     templated line per character).
     """
-    from silica.kernel.write.provenance import GROUNDING_FLOOR, _local_match_fraction
+    from silica.kernel.write.provenance import GROUNDING_FLOOR, local_match_fraction
 
     needle = norm(text)
     if len(needle) < 8:
@@ -177,7 +177,7 @@ def span_of(text: str, leaf_text: str) -> tuple[int, str]:
             # narrower window, then the one sharing more characters, is the
             # line that names what the claim names. Width comes before share
             # since a second line adds characters without adding a match.
-            rank = (_local_match_fraction(needle, window), -width, share)
+            rank = (local_match_fraction(needle, window), -width, share)
             if rank > best:
                 best, at, span, won, tied = rank, i + 1, " ".join(raw.split()), window, False
             elif rank == best and window != won:
@@ -922,7 +922,7 @@ def note_block(n: int, row: dict) -> str:
 def _point_holding(span: str, points: dict[int, dict]) -> int:
     """The point whose text holds *span*: exact after normalisation, else the
     provenance gate's fuzzy match at its floor; 0 when none does."""
-    from silica.kernel.write.provenance import GROUNDING_FLOOR, _local_match_fraction
+    from silica.kernel.write.provenance import GROUNDING_FLOOR, local_match_fraction
 
     needle = norm(span)
     if len(needle) < 8:
@@ -932,7 +932,7 @@ def _point_holding(span: str, points: dict[int, dict]) -> int:
             return i
     best, at = 0.0, 0
     for i, p in points.items():
-        frac = _local_match_fraction(needle, norm(p["text"]))
+        frac = local_match_fraction(needle, norm(p["text"]))
         if frac > best:
             best, at = frac, i
     return at if best >= GROUNDING_FLOOR else 0

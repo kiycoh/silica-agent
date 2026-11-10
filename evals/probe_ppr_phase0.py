@@ -219,11 +219,11 @@ def run(vault: Path, *, hops: int = HOPS, alpha: float = ALPHA,
     # PPR replaces the cooccur leg's profile, so it can only move a pair the
     # cooccur leg itself can surface. If the counterpart is already inside that
     # leg's pool and RRF still buries it, the lever is fusion, not the profile.
-    from silica.kernel.recall.relatedness import _POOL_MIN, _cooccur_ranking
+    from silica.kernel.recall.relatedness import _POOL_MIN, cooccur_ranking
     pool_k = max(K * 3, _POOL_MIN)
     cooc: dict[str, dict[str, int]] = {}
     for key in {e for pr in missed for e in pr}:
-        ranked = _cooccur_ranking(store, key, k=pool_k, exclude={key}) or []
+        ranked = cooccur_ranking(store, key, k=pool_k, exclude={key}) or []
         cooc[key] = {p: i for i, (p, _s) in enumerate(ranked)}
     in_pool = sum(1 for a, b in missed if b in cooc[a] or a in cooc[b])
     print(f"\n5. channel: of the {len(missed)} missed pairs, {in_pool} "

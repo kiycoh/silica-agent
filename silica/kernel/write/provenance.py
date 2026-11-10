@@ -731,7 +731,7 @@ def _norm_math(s: str) -> str:
     return _BOLD_MACRO_RE.sub(r"\\bf", _SINGLE_BRACE_RE.sub(r"\1", s))
 
 
-def _local_match_fraction(s: str, src: str) -> float:
+def local_match_fraction(s: str, src: str) -> float:
     """Best matched-char fraction of *s* with all blocks inside one source
     window of LOCALITY_WINDOW * len(s). Global scatter would let a formula
     recombined from fragments across the excerpt self-ground; localization
@@ -763,7 +763,7 @@ def ungrounded_spans(body: str, source: str) -> list[str]:
     - numeric literals (≥2 chars) must appear verbatim in the source —
       numbers survive re-typesetting and translation, so an absent constant
       is the sharpest fabrication signal (altered 0.01→0.1, invented ε=10⁻⁸);
-    - fuzzy match must be LOCAL (see _local_match_fraction).
+    - fuzzy match must be LOCAL (see local_match_fraction).
     """
     return [span for span, ok in _span_verdicts(body, source) if not ok]
 
@@ -816,7 +816,7 @@ def _span_verdicts(body: str, source: str) -> list[tuple[str, bool]]:
         if s in src:
             out.append((_norm_ws(span), True))
             continue
-        out.append((_norm_ws(span), _local_match_fraction(s, src) >= GROUNDING_FLOOR))
+        out.append((_norm_ws(span), local_match_fraction(s, src) >= GROUNDING_FLOOR))
     return out
 
 

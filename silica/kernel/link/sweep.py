@@ -130,7 +130,7 @@ def links_in(text: str | None) -> frozenset[str]:
     return frozenset(m.group(2).strip() for m in WIKILINK_RE.finditer(text or "") if not m.group(1))
 
 
-def _unlink_body(body: str, resolves, keep: frozenset[str] = frozenset()) -> tuple[str, list[str], list[str]]:
+def unlink_body(body: str, resolves, keep: frozenset[str] = frozenset()) -> tuple[str, list[str], list[str]]:
     """Unlink what does not resolve, repoint what resolves under another
     spelling; return (new, stripped, relinked). A target in `keep` was in the
     note before the run and is the owner's to keep, resolved or not."""
@@ -160,7 +160,7 @@ def _unlink_body(body: str, resolves, keep: frozenset[str] = frozenset()) -> tup
     return WIKILINK_RE.sub(_sub, body), stripped, relinked
 
 
-def _prune_related(fm_text: str, resolves, keep: frozenset[str] = frozenset()) -> tuple[str, list[str]]:
+def prune_related(fm_text: str, resolves, keep: frozenset[str] = frozenset()) -> tuple[str, list[str]]:
     """Drop unresolved `related:` entries from the raw frontmatter text, but
     never one the note held before the run (`keep`)."""
     out: list[str] = []
@@ -203,11 +203,11 @@ def sweep_note(rel_path: str, resolves, keep: frozenset[str] = frozenset()) -> d
         return None  # a note this pass cannot read keeps its related: as it is
     content = nc.content
     if m := FM_RE.match(content):
-        fm_new, dropped = _prune_related(m.group(0), resolves, keep)
-        body_new, stripped, relinked = _unlink_body(content[m.end():], resolves, keep)
+        fm_new, dropped = prune_related(m.group(0), resolves, keep)
+        body_new, stripped, relinked = unlink_body(content[m.end():], resolves, keep)
         new = fm_new + body_new
     else:
-        new, stripped, relinked = _unlink_body(content, resolves, keep)
+        new, stripped, relinked = unlink_body(content, resolves, keep)
         dropped = []
     if new == content:
         return None
