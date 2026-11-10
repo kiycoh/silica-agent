@@ -139,11 +139,11 @@ def test_the_rails_classes_are_ones_the_page_styles_or_reads():
     from tests.webassets import app_css
 
     page = app_css() + "".join(_page_scripts().values())
-    written = set(re.findall(r'class="((?:tree|find|fm)-[\w-]+)', _py("kernel/graph/file_tree.py", "ui/web/explore_routes.py", "ui/web/render.py")))
+    written = set(re.findall(r'class="((?:tree|find|fm)-[\w-]+)', _py("kernel/graph/file_tree.py", "ui/web/rail.py", "ui/web/explore_routes.py", "ui/web/render.py")))
     assert {"tree-row", "tree-pin", "find-result", "fm-row"} <= written
     assert not {c for c in written if c not in page}
     # a tree row's address is the hash router's grammar
-    assert 'href="#chat?note=' in _py("kernel/graph/file_tree.py") and 'params.get("note")' in page
+    assert 'href="#chat?note=' in _py("ui/web/rail.py") and 'params.get("note")' in page
 
 
 def test_an_embed_in_a_streaming_answer_draws_what_the_page_can_draw():

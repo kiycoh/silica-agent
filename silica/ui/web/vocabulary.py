@@ -23,7 +23,7 @@ from silica.kernel.learn import grade, items, mastery, objectives, pick, quiz, r
 from silica.kernel.report import note_context
 from silica.sources.discover import story
 from silica.tools import TOOLS, note_keys
-from silica.ui.web import discover_routes, failures, jobs, library_routes, stt_routes
+from silica.ui.web import discover_routes, failures, jobs, library_routes, rail, stt_routes
 from silica.view_table import VIEWS
 
 
@@ -64,6 +64,7 @@ def table() -> dict[str, Any]:
                    "resets": failures.LIMIT_RESETS},
         "discover": {"tabs": discover_routes.TABS, "desktop_only": story.DESKTOP_ONLY},
         "notes": {"unwritten": note_context.UNWRITTEN},
+        "files": {"says": rail.FILE_SAYS},
         "mic": {"max_ms": stt_routes.MIC_MAX_MS, "explain_max_ms": stt_routes.MIC_EXPLAIN_MAX_MS},
         # The two differ on purpose: what the chat model is sent, and what a note
         # may hold (formats.WEB_IMAGE_EXTS, the hosted images). Then two lists of

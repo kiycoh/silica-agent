@@ -15,11 +15,10 @@ from fastapi.responses import HTMLResponse, Response
 
 from silica.config import CONFIG
 from silica.kernel.base.frontmatter import split_shown
-from silica.kernel.graph import file_tree
 from silica.kernel.recall.resolve import note_resolver
 from silica.kernel.report import brief, note_context
 from silica.kernel.text import note_parts
-from silica.ui.web import render
+from silica.ui.web import rail, render
 from silica.ui.web.failures import explain as _failure
 
 logger = logging.getLogger(__name__)
@@ -621,10 +620,10 @@ def vault_info():
         # never did.
         "path": CONFIG.vault_path or "",
         "unresolved": sum(1 for n in nodes if n.get("type") == "ghost"),
-        # actions=True: the rail's tree carries a pin per note. The graph
-        # frame renders the same tree without one, because a pin there would
-        # point at a rail that document does not have.
-        "tree": file_tree.rail_tree(nodes, raws := _tree_raws(), _tree_files(raws)),
+        # The rail's tree, a pin and a menu per note. The graph frame draws the
+        # same shape without them (file_tree.frame_tree), because a pin there
+        # would point at a rail that document does not have.
+        "tree": rail.rail_tree(nodes, raws := _tree_raws(), _tree_files(raws)),
         # Silica's own folders: no folder in view and no "Write a note" (ADR-0155
         # points 4, 5). The page asks here because it has the tree from here.
         "never": list(never_dirs()),
