@@ -17,7 +17,8 @@ from unittest.mock import patch
 import pytest
 
 import silica.cli  # noqa: F401  registers every chat tool, silica_web_answer included
-from silica.agent.constraints import AgentConstraints, web_answer_constraints
+from silica.agent.constraints import AgentConstraints
+from silica.sources.web_research import web_answer_constraints
 from silica.obs.events import LLMStreamEvent, ToolCompleteEvent
 from silica.agent.loop import run_agent
 from silica.tools import found_nothing

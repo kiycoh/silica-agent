@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from silica.agent import turn_notes
-from silica.agent.constraints import AgentConstraints, chat_constraints, web_turn_constraints
+from silica.agent.constraints import AgentConstraints, chat_constraints
 from silica.agent.loop import run_agent
 from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
 from silica.agent.sentinels import EMPTY_COMPLETION
@@ -27,7 +27,7 @@ from silica.obs.events import LLMStreamEvent, ToolErrorEvent, ToolStartEvent
 from silica.session import meter, offers
 from silica.session.conversation import Conversation
 from silica.session.words import command_word, first_word
-from silica.sources.web_research import WebTurn
+from silica.sources.web_research import WebTurn, web_turn_constraints
 
 logger = logging.getLogger(__name__)
 

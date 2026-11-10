@@ -51,11 +51,14 @@ def _tool_names() -> set[str]:
 # --- pass 1: the named declaration sites ------------------------------------
 
 
-def test_web_turn_constraints_names_only_real_tools():
-    from silica.agent.constraints import web_turn_constraints
+def test_the_web_lanes_name_only_real_tools():
+    """/web, the chat's web door and /web-search, which adds `plan` when it
+    steers: one tuple in sources/web_research.py, so no literal for pass 2."""
+    from silica.sources import web_research as wr
 
-    missing = set(web_turn_constraints().tools) - _tool_names()
-    assert not missing, f"/web lane names tools that do not exist: {sorted(missing)}"
+    named = {*wr.web_turn_constraints().tools, *wr.web_answer_constraints().tools, "plan"}
+    missing = named - _tool_names()
+    assert not missing, f"a web lane names tools that do not exist: {sorted(missing)}"
 
 
 def test_every_tool_a_plan_can_name_exists():
@@ -129,31 +132,15 @@ def _declared_tool_names() -> list[tuple[str, int, str]]:
 def test_the_ast_scan_actually_finds_the_known_sites():
     """A scan that silently matches nothing would make the next test vacuous.
 
-    Pinned to the two sites that exist today: the /web constraints in
-    agent/constraints.py and the inline (steering-dependent) tuple in
-    sources/web_research.py.
+    Pinned to two sites that exist today: the chat's web door in
+    sources/web_research.py and the views' rows in view_table.py.
     """
     files = {f for f, _, _ in _declared_tool_names()}
-    assert "agent/constraints.py" in files
     assert "sources/web_research.py" in files
+    assert "view_table.py" in files
 
 
 @pytest.mark.parametrize("site", _declared_tool_names(), ids=lambda s: f"{s[0]}:{s[1]}:{s[2]}")
 def test_every_literal_tools_declaration_resolves(site):
     path, line, name = site
     assert name in TOOLS, f"{path}:{line} names tool {name!r}, which is not registered"
-
-
-def test_web_research_and_the_web_lane_declare_the_same_core_tools():
-    """The two /web declarations are duplicated by hand (the import direction is
-    sources -> agent, so constraints.py cannot read web_research). Duplication is
-    fine; drifting apart is not. `plan` is the one sanctioned difference: it is
-    added only under steering."""
-    from silica.agent.constraints import web_turn_constraints
-
-    declared = {
-        name for f, _, name in _declared_tool_names() if f == "sources/web_research.py"
-    }
-    lane = set(web_turn_constraints().tools)
-    assert lane <= declared
-    assert declared - lane <= {"plan"}, f"unexplained drift: {sorted(declared - lane)}"
