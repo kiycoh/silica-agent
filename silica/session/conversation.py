@@ -43,11 +43,11 @@ def reopen(chat: Conversation, sid: str, *, driver: str, seed: Callable[[], list
     or one another vault or incognito holds, goes on as a new session seeded
     with its turns (emit new, recognise legacy: ticket 05). The narration
     records turns and never the seed, so `seed()` goes in front, and nothing is
-    collapsed yet; `scope` writes
-    what the surface keeps beside it from the last user message (the browser's
-    workspace line) before the persona's, since both insert before the seed's
-    last system line. Then the persona that message wore (ADR-0127 point 3),
-    the numbers the session read (ADR-0095) and the meter."""
+    collapsed yet. `scope` writes what the surface keeps beside it from the last
+    user message (the browser's workspace line) before the persona's, since
+    both insert before the seed's last system line. Then the persona that
+    message wore (ADR-0127 point 3), the numbers the session read (ADR-0095)
+    and the meter."""
     from silica.agent.recall_watch import numbers_of_session
     from silica.config import CONFIG
     from silica.kernel import personas
