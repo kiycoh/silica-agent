@@ -708,6 +708,18 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   color: var(--accent);
 }
 
+/* A file no note names (ADR-0129, amended 2026-11-08): its name, and no menu
+   to promise, since every item behind the title acts on a note. */
+#note-title:disabled {
+  cursor: default;
+  background: none;
+  color: inherit;
+}
+
+#note-title:disabled .chev {
+  display: none;
+}
+
 /* The tree row's pin, at the 24px target floor: lit while the note is in the
    rail, which is what tells you the pin took. The workspaces ◇ beside it
    (ADR-0112) wears the same button. */
@@ -951,6 +963,85 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   border: 0;
   border-radius: var(--r-sm);
   background: var(--void);
+}
+
+/* A picture no note names, in the raw view in place of the frame (ADR-0129,
+   amended 2026-11-08): whole, on the frame's ground. */
+#raw-img {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  border-radius: var(--r-sm);
+  background: var(--void);
+}
+
+#raw-img[hidden],
+#raw-frame[hidden] {
+  display: none;
+}
+
+/* A PDF's chapters, its second view (ADR-0156 point 6): one row a chapter,
+   its pages at the end in the accent, the row the way into the PDF there. */
+#raw-chapters {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.raw-ch-from {
+  margin: 0.2rem 0 0.6rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.raw-ch {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.raw-ch button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.raw-ch li:first-child button {
+  border-top: 0;
+}
+
+.raw-ch button:hover {
+  background: var(--sel-hover);
+  color: var(--frost);
+}
+
+.raw-ch button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.raw-ch-sub {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.raw-ch-p {
+  color: var(--accent);
+  font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* The strip over a source (ADR-0129): .note-paper's line, the file named in

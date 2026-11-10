@@ -5,7 +5,7 @@
 rail, whose rows act, and the sidebar of the graph frame, which only opens notes.
 
 Pure: nodes -> HTML. Folders become nested <details>/<summary> (native collapse, no
-JS) whose summary carries the note count under them; notes show NAME without its
+JS) whose summary carries the count of rows under them; notes show NAME without its
 `.md` (the drawer states the path; the extension said nothing a reader of a rail of
 notes did not already know, audit P19). Ghost nodes (type == "ghost" or empty path)
 are unresolved links, not files, so they are skipped. Folders sort before notes at
@@ -16,6 +16,8 @@ from __future__ import annotations
 import html
 from collections.abc import Callable
 from urllib.parse import quote
+
+from silica.kernel.base.formats import file_act
 
 
 def _more_button(target: str, shown: str, *, folder: bool) -> str:
@@ -38,8 +40,15 @@ _RAW_GLYPH = ('<svg aria-hidden="true" width="13" height="13" viewBox="0 0 16 16
               '<path d="M4 1.75h5.25L12.5 5v9.25h-8.5z"></path><path d="M9 1.75V5.25h3.5"></path>'
               '<path d="M6.25 8.5h4M6.25 11h4"></path></svg>')
 
+# A file row's mark (ADR-0129, amended 2026-11-08): only what Silica lacks is
+# marked, since a row with nothing on it is a file Silica reads.
+_FILE_MARKS = {
+    "unread": ("not read", "Silica holds no text of this file"),
+    "unindexed": ("not indexed", "Silica has not indexed this file yet: the next search reads it"),
+}
 
-def _grow(nodes: list[dict], raws: dict[str, list[str]]) -> dict:
+
+def _grow(nodes: list[dict], raws: dict[str, list[str]], files: dict[str, str] | None = None) -> dict:
     root: dict = {}
     for n in nodes:
         if n.get("type") == "ghost":
@@ -58,42 +67,70 @@ def _grow(nodes: list[dict], raws: dict[str, list[str]]) -> dict:
         for f in folders:
             cur = cur.setdefault(f, {})
         cur.setdefault("__notes__", []).append((leaf, raw, notes[0]))
+    for rel, state in (files or {}).items():
+        *folders, leaf = rel.split("/")
+        cur = root
+        for f in folders:
+            cur = cur.setdefault(f, {})
+        cur.setdefault("__notes__", []).append((leaf, rel, None, state))
     return root
 
 
-def _count(tree: dict) -> int:
-    # notes only, raws not: the folder menu's delete names this count, and
-    # tree_delete removes the notes the tree counts, never their raws
-    return sum(1 for row in tree.get("__notes__", []) if len(row) == 2) + sum(
-        _count(v) for k, v in tree.items() if k != "__notes__")
+def _count(tree: dict, notes_only: bool = False) -> int:
+    # notes_only for the folder menu's delete, which names how many notes
+    # go: tree_delete removes the notes, never a raw or another file
+    return sum(1 for row in tree.get("__notes__", []) if not notes_only or len(row) == 2) + sum(
+        _count(v, notes_only) for k, v in tree.items() if k != "__notes__")
 
 
-def _draw(tree: dict, folder_head: Callable[[str, str, int], str], note_row: Callable[[str, str], str],
+def _tally(tree: dict) -> str:
+    """A folder's number: every row under it. The notes alone ride on it as
+    `data-notes`, which the folder's delete names, only where files make the
+    number larger."""
+    total, notes = _count(tree), _count(tree, True)
+    apart = f' data-notes="{notes}"' if notes != total else ""
+    return f'<span class="tree-n"{apart}>{total}</span>'
+
+
+def _draw(tree: dict, folder_head: Callable[[str, str, str], str], note_row: Callable[[str, str], str],
           prefix: str = "") -> str:
-    """The rows under `tree`: `folder_head(folder, name, count)` is the <details>'
+    """The rows under `tree`: `folder_head(folder, name, tally)` is the <details>'
     <summary>, `note_row(id, shown)` a note's row."""
     out = []
     for name in sorted((k for k in tree if k != "__notes__"), key=str.lower):
         folder = f"{prefix}{name}/"
-        out.append(f"<details>{folder_head(folder, name, _count(tree[name]))}")
+        out.append(f"<details>{folder_head(folder, name, _tally(tree[name]))}")
         out.append(_draw(tree[name], folder_head, note_row, folder))
         out.append("</details>")
     for leaf, nid, *raw_note in sorted(tree.get("__notes__", []), key=lambda x: x[0].lower()):
         if raw_note:
             stem, dot, ext = leaf.rpartition(".")
+            shown = (f'{_RAW_GLYPH}<span>{html.escape(stem or leaf)}<span class="tree-ext">'
+                     f'{dot}{html.escape(ext if stem else "")}</span></span>')
+            if raw_note[0] is None:  # a file no note names, keyed by its own path
+                state = raw_note[1]
+                mark = _FILE_MARKS.get(state)
+                act = file_act(nid) if state == "unread" else ""
+                out.append(
+                    f'<div class="tree-row"><a class="tree-file" '
+                    f'href="/file?path={quote(nid, safe="")}" '
+                    f'data-file="{html.escape(nid, quote=True)}" data-state="{state}"'
+                    + (f' data-act="{act}"' if act else "") + f">{shown}"
+                    + (f'<span class="tree-mark" title="{mark[1]}">{mark[0]}</span>' if mark else "")
+                    + "</a></div>")
+                continue
             out.append(
                 f'<div class="tree-row"><a class="tree-file" '
                 f'href="/raw?path={quote(raw_note[0], safe="")}" '
                 f'data-raw="{html.escape(nid, quote=True)}" data-note="{html.escape(raw_note[0], quote=True)}">'
-                f'{_RAW_GLYPH}'
-                f'<span>{html.escape(stem or leaf)}<span class="tree-ext">{dot}{html.escape(ext if stem else "")}</span></span></a></div>')
+                f"{shown}</a></div>")
             continue
         out.append(note_row(nid, leaf[:-3] if leaf.endswith(".md") else leaf))
     return "".join(out)
 
 
-def _frame_head(_folder: str, name: str, count: int) -> str:
-    return f'<summary>{html.escape(name)}<span class="tree-n">{count}</span></summary>'
+def _frame_head(_folder: str, name: str, tally: str) -> str:
+    return f"<summary>{html.escape(name)}{tally}</summary>"
 
 
 def _frame_note(nid: str, shown: str) -> str:
@@ -112,7 +149,7 @@ def frame_tree(nodes: list[dict]) -> str:
     return f'<div id="file-tree">{_draw(_grow(nodes, {}), _frame_head, _frame_note)}</div>'
 
 
-def _rail_head(folder: str, name: str, count: int) -> str:
+def _rail_head(folder: str, name: str, tally: str) -> str:
     more = _more_button(folder.rstrip("/"), name, folder=True)
     # the folder's globe (ADR-0143 point 2), drawn hidden: app-public.js
     # shows it where the account gets Public page and the folder is not Silica's
@@ -125,8 +162,7 @@ def _rail_head(folder: str, name: str, count: int) -> str:
             f"plan</button>")
     # a note's <a> drags by itself; a summary only when told, and the
     # rail drops a folder on a workspace row as its menu adds one
-    return (f'<summary draggable="true">{html.escape(name)}'
-            f'<span class="tree-n">{count}</span>{more}{pub}{plan}</summary>')
+    return f'<summary draggable="true">{html.escape(name)}{tally}{more}{pub}{plan}</summary>'
 
 
 def _rail_note(nid: str, shown: str) -> str:
@@ -151,11 +187,16 @@ def _rail_note(nid: str, shown: str) -> str:
     )
 
 
-def rail_tree(nodes: list[dict], raws: dict[str, list[str]] | None = None) -> str:
+def rail_tree(nodes: list[dict], raws: dict[str, list[str]] | None = None,
+              files: dict[str, str] | None = None) -> str:
     """The app's rail: each note a link with its pin and "…", each folder its tools.
 
     `raws` is {a raw's vault path: the notes naming it} (ADR-0129, amended
     2026-11-04): each raw is a row in its own folder, with its extension, a link
     to the note that opens it. Not a `.tree-note`, which every search, count,
-    selection and drag of the rail reads as a note."""
-    return f'<div id="file-tree">{_draw(_grow(nodes, raws or {}), _rail_head, _rail_note)}</div>'
+    selection and drag of the rail reads as a note.
+
+    `files`, the laptop's (ADR-0129, amended 2026-11-08), is every other vault
+    file with what Silica holds of it, `read`, `unread` or `unindexed`: a row as
+    a raw's, keyed by the file and not a note, marked when Silica lacks its text."""
+    return f'<div id="file-tree">{_draw(_grow(nodes, raws or {}, files), _rail_head, _rail_note)}</div>'

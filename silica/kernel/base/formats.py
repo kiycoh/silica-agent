@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from functools import partial
+from pathlib import PurePosixPath
 from typing import NamedTuple
 
 # `Format.reader` for the one format whose reader is a setting, the PDF provider
@@ -234,3 +235,12 @@ VISUAL_MEDIA_EXTS = (*SHOWN_IMAGE_EXTS, ".tif", ".tiff", ".avif", ".mp4", ".mov"
 ATTACHMENT_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".avif", ".pdf",
                    ".mp3", ".mp4", ".m4a", ".wav", ".ogg", ".webm", ".mov", ".canvas", ".base",
                    ".csv", ".xls", ".xlsx", ".doc", ".docx", ".ppt", ".pptx", ".zip", ".epub")
+
+
+def file_act(rel: str) -> str:
+    """What the drawer offers a file Silica holds no text of (ADR-0156): `ocr`
+    for a PDF or a picture, whose words are pixels; `convert` for a document
+    convert() reads (an e-book, an office file, a recording); "" for a kind it
+    does not. The rail and Explore both offer it, so it is said once."""
+    suffix = PurePosixPath(rel).suffix.lower()
+    return "ocr" if suffix == ".pdf" or suffix in IMG_EXTS else "convert" if suffix in DOC_EXTS else ""

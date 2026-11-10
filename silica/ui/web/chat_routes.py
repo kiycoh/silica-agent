@@ -405,6 +405,16 @@ async def narration_sse(request: Request, from_seq: int = 0):
             pass   # loop closed: the client is gone, and GET /jobs answers its next page
 
     BUS.subscribe(jobs.TOPIC, on_job)
+    # The page vectors' build too, for the rail's line (ADR-0156, amended 2026-11-08).
+    from silica.ui.web import vectors
+
+    def on_vectors(status: dict) -> None:
+        try:
+            loop.call_soon_threadsafe(q.put_nowait, ("vectors", status))
+        except RuntimeError:
+            pass   # loop closed: the client is gone, and GET /vectors answers its next page
+
+    BUS.subscribe(vectors.TOPIC, on_vectors)
 
     async def gen():
         try:
@@ -429,7 +439,7 @@ async def narration_sse(request: Request, from_seq: int = 0):
                         return
                     continue
                 if isinstance(rec, tuple):
-                    yield f"event: job\ndata: {json.dumps(rec[1], default=str)}\n\n"
+                    yield f"event: {rec[0]}\ndata: {json.dumps(rec[1], default=str)}\n\n"
                     continue
                 if not _beat_for_tab(rec):
                     continue
@@ -438,6 +448,7 @@ async def narration_sse(request: Request, from_seq: int = 0):
         finally:
             BUS.unsubscribe(_narr.BEAT_TOPIC, on_beat)
             BUS.unsubscribe(jobs.TOPIC, on_job)
+            BUS.unsubscribe(vectors.TOPIC, on_vectors)
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})

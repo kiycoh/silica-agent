@@ -35,6 +35,7 @@ from silica.ui.web import (
     files_routes,
     jobs_routes,
     learn_routes,
+    library_routes,
     metrics_routes,
     notes_routes,
     public_routes,
@@ -110,6 +111,10 @@ async def _lifespan(app: FastAPI):
     from silica.connectors.mcp_tools import start as _start_connectors
     asyncio.get_running_loop().run_in_executor(None, _start_connectors)
     asyncio.get_running_loop().run_in_executor(None, _prewarm_learn)
+    # The page vectors of whatever changed while the app was closed, and of a
+    # first build cut by the last close (ADR-0156, amended 2026-11-08).
+    from silica.ui.web import vectors
+    asyncio.get_running_loop().run_in_executor(None, vectors.refresh)
     yield
     if bridge is not None:
         await bridge.stop()
@@ -153,7 +158,7 @@ app.add_exception_handler(HTTPException, _http_refused)
 
 for _routes in (chat_routes, files_routes, workspaces_routes, metrics_routes, calendar_routes, explore_routes,
                 notes_routes, tree_routes, stt_routes, settings_routes, zotero_web, learn_routes, skills_routes,
-                jobs_routes, discover_routes, public_routes):
+                jobs_routes, discover_routes, public_routes, library_routes):
     app.include_router(_routes.router)
 
 

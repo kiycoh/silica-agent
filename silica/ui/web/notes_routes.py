@@ -20,7 +20,6 @@ from silica.kernel.base.frontmatter import split_shown
 from silica.kernel import vault_files
 from silica.kernel.base.syntax import WIKILINK_WHOLE_RE
 from silica.kernel.graph.mindmap import note_resolver
-from silica.kernel.recall import note_index
 from silica.kernel.text import note_parts
 from silica.kernel.write import session_changes
 from silica.ui.web import drop, note_ops, render, session, sse
@@ -84,14 +83,6 @@ def _saved_identity(props: dict | None) -> dict:
                       "saved": str(props.get("saved") or "")}}
 
 
-# The raws the drawer shows in the browser's own viewer (ADR-0129 point 1);
-# every other one is a download.
-# shortcut: PDF only, the one type checked in an iframe under ASSET_HEADERS'
-# sandbox (Chrome 156, Firefox 158, 2026-11-03); images and audio, which the
-# ADR also lets open, join when that is checked for them.
-_RAW_OPENS = (".pdf",)
-
-
 def _raw_found(canon: str, props: dict | None) -> tuple[str, Path | None]:
     """The note's `source_file` and the file it names in the vault, which is
     None when the file is gone or not one Silica brings in as a raw."""
@@ -134,7 +125,7 @@ def _raw_of(canon: str, props: dict | None) -> dict | None:
     ints = {k: props[k] for k in ("source_pages", "source_page", "source_page_end")
             if isinstance(props.get(k), int) and props[k] > 0}
     out = {"name": name, "kept": found is not None,
-           "open": found is not None and found.suffix.lower() in _RAW_OPENS,
+           "open": found is not None and found.suffix.lower() in render.RAW_OPENS,
            "pages": ints.get("source_pages"), "from": ints.get("source_page"),
            "to": ints.get("source_page_end")}
     if found is None:
@@ -188,45 +179,11 @@ def _etag(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
 
-# --- the index follows the person (ADR-0155 point 18) --------------------------
-# A save comes every 800 ms of pause, and a re-embed is a paid call on hosted, so
-# one refresh goes 60 s after a note's LAST save or when it is let go, never per
-# save. It never runs on /note/save's thread and it asks no chat model.
-_INDEX_AFTER_S = 60.0
-_INDEX_LOCK = threading.Lock()
-_INDEX_PENDING: dict[str, threading.Timer] = {}
-
-
-def _index_later(canon: str) -> None:
-    """(Re)start the note's refresh. The vault rides along: a timer that fires
-    after a switch must not read the same path in another vault."""
-    key = canon.removesuffix(".md")
-    timer = threading.Timer(_INDEX_AFTER_S, _index_due, (key, CONFIG.vault_path))
-    timer.daemon = True
-    with _INDEX_LOCK:
-        if (old := _INDEX_PENDING.get(key)) is not None:
-            old.cancel()
-        _INDEX_PENDING[key] = timer
-    timer.start()
-
-
-def _index_due(key: str, vault: str) -> None:
-    with _INDEX_LOCK:
-        _INDEX_PENDING.pop(key, None)
-    if vault == CONFIG.vault_path:
-        note_index.index_note(key)
-
-
 @router.post("/note/let-go")
 def note_let_go(payload: dict):
     """The editor left this note: its pending refresh runs now, and a note
     with none pending costs nothing, so the page can send this on every leave."""
-    key = str(payload.get("path") or "").removesuffix(".md")
-    with _INDEX_LOCK:
-        timer = _INDEX_PENDING.pop(key, None)
-    if timer is not None:
-        timer.cancel()
-        note_index.index_note(key)
+    note_ops.let_go(str(payload.get("path") or ""))
     return {"ok": True}
 
 
@@ -275,7 +232,7 @@ def raw_file(path: str = "", download: bool = False):
     _value, found = _raw_found(canon, split_shown(text)[0])
     if found is None:
         raise HTTPException(404)
-    attach = download or found.suffix.lower() not in _RAW_OPENS
+    attach = download or found.suffix.lower() not in render.RAW_OPENS
     return FileResponse(found, headers=render.ASSET_HEADERS, filename=found.name,
                         content_disposition_type="attachment" if attach else "inline")
 
@@ -305,7 +262,7 @@ def note_save(payload: dict):
             from silica.kernel.write.preserve import Loss
 
             DRIVER.overwrite(canon, text, loss=Loss.PERSON)  # the person typed it
-            _index_later(canon)
+            note_ops.index_later(canon)
     # overwrite() may stamp a derived `type:` into the frontmatter, so what
     # landed is read back rather than assumed: the editor's next etag has to be
     # the disk's, or its next save refuses itself.
@@ -368,7 +325,7 @@ def note_new(payload: dict):
         except ValueError:
             # contain_in_vault: a folder that is a link out of the vault
             raise HTTPException(400, note_ops.BAD_NAME_WHY) from None
-    _index_later(path)
+    note_ops.index_later(path)
     landed = session_changes.current_text(path)
     landed = text if landed is None else landed
     other = next((p for p in DRIVER.notes_named(name) if p != path), None)

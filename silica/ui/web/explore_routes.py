@@ -592,6 +592,17 @@ def _tree_raws() -> dict[str, list[str]]:
             if Path(r).suffix.lower() in DOC_EXTS}
 
 
+def _tree_files(raws: dict[str, list[str]]) -> dict[str, str]:
+    """Every other file in the vault with what Silica holds of it (ADR-0129,
+    amended 2026-11-08), the rule Explore's file nodes read too (ADR-0156):
+    the laptop's only, empty on the server."""
+    from silica.sources.library import file_states
+
+    if not CONFIG.vault_path:
+        return {}
+    return file_states(Path(CONFIG.vault_path), raws)
+
+
 @router.get("/vault_info")
 def vault_info():
     """Sidebar data: vault stats + file tree, from the same builders as the
@@ -613,7 +624,7 @@ def vault_info():
         # actions=True: the rail's tree carries a pin per note. The graph
         # frame renders the same tree without one, because a pin there would
         # point at a rail that document does not have.
-        "tree": file_tree.rail_tree(nodes, _tree_raws()),
+        "tree": file_tree.rail_tree(nodes, raws := _tree_raws(), _tree_files(raws)),
         # Silica's own folders: no folder in view and no "Write a note" (ADR-0155
         # points 4, 5). The page asks here because it has the tree from here.
         "never": list(never_dirs()),

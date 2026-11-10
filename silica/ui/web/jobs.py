@@ -282,7 +282,10 @@ def _run(job_id: str) -> None:
     try:
         if rec.get("vault") != (CONFIG.vault_path or ""):
             raise Refused("the vault changed since this file was added: add it again in this one")
-        notes = _converted(job_id, src, rec.get("dest_dir") or "", beside=rec.get("origin") == "import")
+        # The drawer's "OCR this" (origin `ocr`) reads a file where it sits,
+        # as an import's does: its note goes beside it, not to the inbox.
+        notes = _converted(job_id, src, rec.get("dest_dir") or "",
+                           beside=rec.get("origin") in ("import", "ocr"))
         hidden = _hidden(src)
         pages, unread = _pages(src)
     except Exception as exc:
@@ -300,6 +303,10 @@ def _run(job_id: str) -> None:
     if rec is None:
         return
     _settle_source(rec)
+    if rec.get("state") == "done":
+        from silica.ui.web import vectors
+
+        vectors.refresh()  # the pages of the note it wrote
     hook = _ON_END.pop(job_id, None)
     if hook is not None:
         hook(rec)

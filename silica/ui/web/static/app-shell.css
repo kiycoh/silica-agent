@@ -1255,8 +1255,26 @@ body.sidebar-collapsed #sidebar {
   display: none;
 }
 
-/* The last import's outcome, above the tree it changed. */
-#vault-import {
+/* One bar for every task that knows its count (progressBar in app-shell.js):
+   Discover's reading of the feeds, .dv-track, drawn the same. */
+.pbar {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.pbar > i {
+  display: block;
+  height: 2px;
+  background: var(--accent);
+  transition: width .3s var(--ease);
+}
+
+/* The last import's outcome, above the tree it changed, and the page
+   vectors' build in the same box under it. */
+#vault-import,
+#vectors-line {
   flex-shrink: 0;
   margin: 0.1rem 0 0.5rem;
   padding: 0.45rem 0.55rem;
@@ -1267,18 +1285,29 @@ body.sidebar-collapsed #sidebar {
   line-height: 1.45;
 }
 
-#vault-import[hidden] {
+#vault-import[hidden],
+#vectors-line[hidden] {
   display: none;
 }
 
-#vault-import .vi-head {
+:is(#vault-import, #vectors-line) .pbar {
+  margin-top: 0.35rem;
+}
+
+#vectors-line b {
+  color: var(--frost);
+  font-weight: 500;
+}
+
+
+:is(#vault-import, #vectors-line) .vi-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.2rem 0.6rem;
 }
 
-#vault-import .vi-head > span {
+:is(#vault-import, #vectors-line) .vi-head > span {
   flex: 1 1 10rem;
 }
 
@@ -1619,6 +1648,17 @@ body.sidebar-collapsed #sidebar {
 
 .tree-ext {
   color: var(--ash-dim);
+}
+
+/* What Silica lacks of a file no note names (ADR-0129, amended 2026-11-08),
+   at the row's end: a file it reads carries nothing. */
+.tree-file .tree-mark {
+  flex: none;
+  margin-left: auto;
+  padding-right: 0.4rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  white-space: nowrap;
 }
 
 .tree-note.sel {

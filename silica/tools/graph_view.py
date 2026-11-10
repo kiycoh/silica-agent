@@ -212,7 +212,10 @@ def _frame_context(
     # in this vault, and stays out of them for the same reason.
     missing = {n["id"] for n in nodes if n.get("type") == "missing"}
     outside = {n["id"] for n in nodes if n.get("type") == "outside"}
-    nodes_all, nodes = nodes, [n for n in nodes if n["id"] not in missing | outside]
+    # A file or an edition (ADR-0156) is a node and not a note: the counts
+    # below are the notes'.
+    files = {n["id"] for n in nodes if n.get("type") in ("file", "edition")}
+    nodes_all, nodes = nodes, [n for n in nodes if n["id"] not in missing | outside | files]
     n_notes      = sum(1 for n in nodes if n.get("type") != "ghost")
     n_ghost      = sum(1 for n in nodes if n.get("type") == "ghost")
     # A written requires is drawn and switched as its own row (ADR-0145), so
@@ -779,9 +782,28 @@ def export_graph(
     except Exception as exc:
         logger.warning("graph_view: coupled layer skipped (%s)", exc)
 
+    # The vault's files as nodes (ADR-0156), joined here, after every
+    # partition and size above, so no area of the notes moves for them: they
+    # bring their own areas, the folders they sit in, and their own edges.
+    # Best-effort as the proposal layers are: a vault with no file to draw, or
+    # an engine that cannot read, gets the graph it always got.
+    files: dict = {"nodes": [], "edges": [], "areas": []}
+    try:
+        from silica.sources.library import file_layer
+
+        files = file_layer(first_group=len(communities))
+    except Exception as exc:
+        logger.warning("graph_view: file layer skipped (%s)", exc)
+    from silica.kernel.graph.graph_export import Community, _community_color
+
+    file_areas = [Community(id=g, label=label, color=_community_color(g),
+                            color_paper=_community_color(g, on_paper=True), size=n)
+                  for g, label, n in files["areas"]]
+
     html_out = render_html(
-        nodes + missing + outside, edges + sim + gaps + proposed + coupled + cites + covers,
-        communities, title=title, lib_js=lib_js, discourse=discourse, zones=zones,
+        nodes + missing + outside + files["nodes"],
+        edges + sim + gaps + proposed + coupled + cites + covers + files["edges"],
+        list(communities) + file_areas, title=title, lib_js=lib_js, discourse=discourse, zones=zones,
         covers=covers_meta, subs=subs,
     )
 

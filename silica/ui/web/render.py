@@ -28,6 +28,13 @@ ASSET_HEADERS = {
     "X-Content-Type-Options": "nosniff",
 }
 
+# The raws the drawer shows in the browser's own viewer (ADR-0129 point 1);
+# every other one is a download.
+# shortcut: PDF only, the one type checked in an iframe under ASSET_HEADERS'
+# sandbox (Chrome 156, Firefox 158, 2026-11-03); images and audio, which the
+# ADR also lets open, join when that is checked for them.
+RAW_OPENS = (".pdf",)
+
 
 def anchor(path: str, display: str) -> str:
     return (

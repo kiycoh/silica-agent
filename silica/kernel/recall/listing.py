@@ -120,7 +120,11 @@ def unconverted_under(folder: str) -> list[str]:
     if not scope:
         return []
     inbox = active_inbox_dir()
-    if inbox and in_folder(scope, inbox):
+    # Spelled as configured, not in_folder, which folds case: on Linux a
+    # library's own `inbox/` matched the configured `Inbox/`, list_inbox_files
+    # walked an `Inbox/` that did not exist, and a folder of 144 PDFs read as
+    # empty (lost-books-library, 2026-11-07).
+    if inbox and (scope == inbox or scope.startswith(inbox + "/")):
         paths: Iterable[str] = (r.path for r in DRIVER.list_inbox_files())
     else:
         paths = vault_files_under(scope)

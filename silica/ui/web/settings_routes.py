@@ -175,6 +175,9 @@ def _apply_vault_switch(path: str) -> dict:
     result = {"ok": True, "values": {st.VAULT_KEY: switched.vault}}
     # The fresh-session seed carries the old vault's map until it is rebuilt.
     session.prewarm_seed()
+    from silica.ui.web import vectors
+
+    vectors.refresh()  # a build of the old vault stops at its next document
     notes = []
     if switched.write_dir:
         notes.append(f"writes confined to {switched.write_dir}/")

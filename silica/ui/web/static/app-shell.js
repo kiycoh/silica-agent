@@ -15,6 +15,28 @@ function toggleSidebar() {
 }
 for (const b of document.querySelectorAll(".side-toggle")) b.addEventListener("click", toggleSidebar);
 
+// --- how far a task is ---------------------------------------------------------
+// One bar for every task that knows its count (the page vectors, a conversion's
+// pages, an import's files, a nucleation's chunks), drawn as Discover's reading
+// of the feeds is: two pixels under the words that already say the count.
+function progressBar(fraction, label) {
+  const bar = document.createElement("div");
+  bar.className = "pbar";
+  bar.setAttribute("role", "progressbar");
+  bar.setAttribute("aria-label", label);
+  bar.setAttribute("aria-valuemin", "0");
+  bar.setAttribute("aria-valuemax", "100");
+  bar.append(document.createElement("i"));
+  setProgress(bar, fraction);
+  return bar;
+}
+
+function setProgress(bar, fraction) {
+  const pct = Math.round(Math.min(1, Math.max(0, fraction || 0)) * 100);
+  bar.setAttribute("aria-valuenow", String(pct));
+  bar.firstElementChild.style.width = `${pct}%`;
+}
+
 // --- the 1120 floor: the deck folds, it does not reflow ----------------------
 // Below the width that holds rail + reading measure + right sidebar side by
 // side, the rail becomes five icons summoned over the transcript. It does not
@@ -145,7 +167,9 @@ async function loadVaultInfo() {
     setCheckWeb(data.check_web);
     $("#tree").innerHTML = data.tree || "";
     applyTreeOpen();         // the folders the person opened or closed (ADR-0126 point 9)
-    if (!$("#tree .tree-note")) {
+    // A vault of files and no notes is not empty: its files are rows (ADR-0129,
+    // amended 2026-11-08), and the empty line over them would say otherwise.
+    if (!$("#tree .tree-note, #tree .tree-file")) {
       // An empty vault has one next step (ADR-0098 point 1), and on the server
       // the + is the only door besides a drop: the line's words open its menu.
       // Not `!data.tree`: an empty vault's tree is still its <div id=file-tree>,
@@ -716,13 +740,15 @@ $("#tree").addEventListener("click", (e) => {
   // inside the folder's summary: the details must not toggle under it
   const plan = e.target.closest(".tree-plan");
   if (plan) { e.preventDefault(); learnPlanFolder(plan.dataset.folder); return; }
-  // a raw's row (ADR-0129): its PDF in the drawer; a modified click is the
-  // browser's, which opens /raw in a tab of its own
+  // a raw's row (ADR-0129): its PDF in the drawer, and a file no note names
+  // as itself (amended 2026-11-08); a modified click is the browser's, which
+  // opens /raw or /file in a tab of its own
   const file = e.target.closest(".tree-file");
   if (file) {
     if (e.button !== 0 || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return;
     e.preventDefault();
-    openRaw(file.dataset.note);
+    if (file.dataset.note) openRaw(file.dataset.note);
+    else openFile(file.dataset.file, file.dataset.state, file.dataset.act);
     return;
   }
   const leaf = e.target.closest(".tree-note");
@@ -793,9 +819,11 @@ function openTreeMenu(btn, x, y) {
   const note = btn.dataset.note, folder = btn.dataset.folder;
   // the selection, when the row is in it and holds more (ADR-0126 point 7)
   const sel = note && treeSel.size > 1 && treeSel.has(note) ? [...treeSel] : null;
-  // the count the summary shows is the count the server deletes: both come
-  // from the notes the tree is drawn with (tree_delete)
-  const n = sel ? sel.length : note ? 1 : Number(btn.closest("summary")?.querySelector(".tree-n")?.textContent || 0);
+  // the count the server deletes: the notes the tree is drawn with
+  // (tree_delete), which the summary carries apart from its number, since
+  // that one counts every file the folder holds (ADR-0129, amended 2026-11-08)
+  const count = btn.closest("summary")?.querySelector(".tree-n");
+  const n = sel ? sel.length : note ? 1 : Number(count?.dataset.notes ?? count?.textContent ?? 0);
   const notes = `${n} ${n === 1 ? "note" : "notes"}`;
   // Not class s-menu: closeSessionMenus removes every .s-menu on any click
   // outside a chat row, this one included. The id takes its look (app-shell.css).
@@ -985,12 +1013,14 @@ function plainClick(e) {
 function markOpenNote() {
   const open = notePanel.classList.contains("open") ? (lastNotePath || "") : "";
   const centre = activeTab === "note" ? centreNote.path : "";
-  // On its PDF, the drawer is on the raw's row and not the note's (ADR-0129).
+  // On its PDF, the drawer is on the raw's row and not the note's (ADR-0129),
+  // and on a file no note names, on that file's row.
   const raw = open && rawShowing() ? drawerRaw.path : "";
+  const file = notePanel.classList.contains("open") && drawerMode === "file" ? drawerFile.path : "";
   for (const el of $("#tree").querySelectorAll(".tree-note"))
     el.classList.toggle("open", (!!open && !raw && el.dataset.id === open) || (!!centre && el.dataset.id === centre));
   for (const el of $("#tree").querySelectorAll(".tree-file"))
-    el.classList.toggle("open", !!raw && el.dataset.raw === raw);
+    el.classList.toggle("open", (!!raw && el.dataset.raw === raw) || (!!file && el.dataset.file === file));
 }
 
 // --- changes (what this session did to the vault) ----------------------------
@@ -1091,7 +1121,7 @@ function applySidebarFilter() {
   // notes and raws (ADR-0129): substring on name or full path
   $("#tree").querySelectorAll(".tree-note, .tree-file").forEach((el) => {
     const off = !!q && !el.textContent.toLowerCase().includes(q) &&
-                !(el.dataset.id || el.dataset.raw || "").toLowerCase().includes(q);
+                !(el.dataset.id || el.dataset.raw || el.dataset.file || "").toLowerCase().includes(q);
     el.hidden = off;
     // The pin rides in a wrapper, so hiding the label alone would leave a bare
     // pin on an empty line. Both, because every count below still asks the

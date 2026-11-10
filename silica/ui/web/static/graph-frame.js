@@ -1674,6 +1674,9 @@ function nodeState(n) {
   // Not counted, so no reading of the counts (ADR-0070): nobody links to a
   // plan, and an orphan ring on one would be an alarm about how Learn works.
   if (NATIVE[n.type]) return "note";
+  // A file or an edition (ADR-0156) links by what it says, never by a
+  // wikilink: the orphan ring would ring every book of a library.
+  if (n.type === "file" || n.type === "edition") return "note";
   if ((n.betweenness || 0) >= HUB_MIN) return "hub";
   // Nobody links to a day (ADR-0062): an orphan ring on every daily note would
   // be an alarm about how a journal works, not about the vault.
@@ -5452,6 +5455,12 @@ function selectNode(node) {
       // A paper on the rim (ADR-0066 decision 4): its covering notes with the
       // k/K a reader judges a systematic association by.
       outside: isRim(node) ? rimContext(node) : null,
+      // A file or an edition (ADR-0156): opened as itself, in the drawer's
+      // file mode, since no note is behind it. `state` above is the graph's
+      // reading of the node; what Silica holds of the file is `fileState`.
+      file: node.type === "file" || node.type === "edition",
+      fileState: node.state || "",
+      act: node.act || "",
     }, "*");
     return;
   }

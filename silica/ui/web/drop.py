@@ -428,5 +428,8 @@ def embed_imported(folders: set[str]) -> None:
                     # The import is done and the notes are searchable by words;
                     # vectors arrive with the next /embed instead.
                     logger.warning("vault import: embedding %s failed: %s", folder, type(exc).__name__)
+        from silica.ui.web import vectors
+
+        vectors.refresh()  # and the pages of what it brought, the PDFs among them
 
     threading.Thread(target=run, name="vault-import-embed", daemon=True).start()

@@ -40,7 +40,7 @@ class Vectors:
 def client(tmp_vault, tmp_path, monkeypatch):
     from silica.config import CONFIG
     from silica.ui.web import server
-    from silica.ui.web import notes_routes
+    from silica.ui.web import note_ops
     from silica.ui.web.session import SESSION
 
     monkeypatch.setattr("silica.kernel.recall.embed._index_path", lambda: tmp_path / "embeddings.json")
@@ -48,9 +48,9 @@ def client(tmp_vault, tmp_path, monkeypatch):
     tmp_vault.note("Altro/Preso.md", "# Preso\n")
     SESSION.reset()
     yield TestClient(server.app), server, Path(CONFIG.vault_path)
-    with notes_routes._INDEX_LOCK:
-        pending = list(notes_routes._INDEX_PENDING.values())
-        notes_routes._INDEX_PENDING.clear()
+    with note_ops._INDEX_LOCK:
+        pending = list(note_ops._INDEX_PENDING.values())
+        note_ops._INDEX_PENDING.clear()
     for timer in pending:
         timer.cancel()
     SESSION.release()
@@ -90,9 +90,9 @@ def test_hand_written_text_is_found_after_a_let_go_with_the_chat_model_down(clie
 
 
 def test_a_save_schedules_one_refresh_and_each_save_moves_it_on(client, embedder, monkeypatch):
-    from silica.ui.web import notes_routes
+    from silica.ui.web import note_ops
     tc, server, _ = client
-    monkeypatch.setattr(notes_routes, "_INDEX_AFTER_S", 0.2)
+    monkeypatch.setattr(note_ops, "_INDEX_AFTER_S", 0.2)
     etag = tc.get("/note/raw", params={"path": "Corso/Lezione"}).json()["etag"]
     for i in range(3):
         etag = tc.post("/note/save", json={"path": "Corso/Lezione", "etag": etag, "text": f"zebra {i}\n"}).json()["etag"]
@@ -103,15 +103,15 @@ def test_a_save_schedules_one_refresh_and_each_save_moves_it_on(client, embedder
         time.sleep(0.02)
     time.sleep(0.3)
     assert len(embedder.calls) == 1 and "zebra 2" in embedder.calls[0][0]
-    assert not notes_routes._INDEX_PENDING
+    assert not note_ops._INDEX_PENDING
 
 
 def test_a_save_that_changes_nothing_schedules_nothing(client, embedder):
-    from silica.ui.web import notes_routes
+    from silica.ui.web import note_ops
     tc, server, vault = client
     raw = tc.get("/note/raw", params={"path": "Corso/Lezione"}).json()
     tc.post("/note/save", json={"path": raw["path"], "etag": raw["etag"], "text": raw["text"]})
-    assert not notes_routes._INDEX_PENDING
+    assert not note_ops._INDEX_PENDING
 
 
 def test_a_let_go_with_nothing_pending_is_free_and_answers_ok(client, embedder):
@@ -166,9 +166,9 @@ def test_a_note_deleted_before_its_refresh_is_left_alone(client, embedder):
 
 
 def test_a_timer_from_another_vault_reads_nothing_here(client, embedder):
-    from silica.ui.web import notes_routes
+    from silica.ui.web import note_ops
     _, server, _ = client
-    notes_routes._index_due("Corso/Lezione", "/some/other/vault")
+    note_ops._index_due("Corso/Lezione", "/some/other/vault")
     assert embedder.calls == []
 
 

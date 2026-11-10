@@ -209,6 +209,8 @@ function makePipelineBlock(label, tracks) {
     `<div class="pipe-track pipe-file"></div><div class="pipe-track pipe-chunk"></div>`;
   const head = el.querySelector(".pipe-title");
   const pos = el.querySelector(".pipe-pos");
+  const bar = progressBar(0, "nucleation");
+  el.querySelector(".pipe-head").after(bar);
   head.textContent = `» injector · ${label}`;
 
   // Both tracks are drawn once, greyed out, so the pipeline reads as a known
@@ -254,6 +256,11 @@ function makePipelineBlock(label, tracks) {
       if (ev.file_total > 1) bits.push(`file ${ev.file_idx + 1}/${ev.file_total}`);
       if (ev.chunk_total > 0) bits.push(`chunk ${ev.chunk_idx + 1}/${ev.chunk_total}`);
       pos.textContent = bits.join(" · ");
+      // A file's chunks are counted per file (agent/events.py PhaseEvent), so
+      // the run's share is the files before this one plus this one's part.
+      if (ev.file_total > 0) {
+        setProgress(bar, (ev.file_idx + (ev.chunk_total > 0 ? ev.chunk_idx / ev.chunk_total : 0)) / ev.file_total);
+      }
       if (ev.source_file) head.textContent = `» injector · ${ev.source_file}`;
 
       const key = `${ev.file_idx}:${ev.chunk_idx}`;
@@ -296,6 +303,7 @@ function makePipelineBlock(label, tracks) {
     finish(summary) {
       clearInterval(timer);
       running = null;
+      bar.remove();
       const s = summary || { kind: "failed", reason: "", notes: 0, links: 0, files: 0, committed: 0, failed_chunks: [] };
       const name = (head.textContent || "").replace(/^» injector · /, "");
       el.classList.remove("running");

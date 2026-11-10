@@ -134,6 +134,17 @@ def test_a_source_folder_of_pdfs_is_not_an_empty_folder(tmp_vault):
     assert "nucleate" in res["hint"]
 
 
+def test_a_lowercase_inbox_folder_is_not_the_configured_inbox(tmp_vault):
+    """A library kept under `inbox/` while the configured inbox is `Inbox`: on
+    a case-sensitive disk they are two folders, and the files are this one's."""
+    tmp_vault.note("inbox/02-apocrifi/Book-of-Enoch.pdf", "%PDF")
+
+    with patch("silica.kernel.base.manifest.active_inbox_dir", return_value="Inbox"):
+        res = silica_files("inbox/02-apocrifi")
+
+    assert res["unconverted"] == ["inbox/02-apocrifi/Book-of-Enoch.pdf"]
+
+
 def test_notes_in_a_source_folder_still_come_back_as_notes(tmp_vault):
     tmp_vault.note("04-massoneria/Mackey.md", "# Mackey\n")
     tmp_vault.note("04-massoneria/book.pdf", "%PDF")
