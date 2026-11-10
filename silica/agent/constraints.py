@@ -326,6 +326,19 @@ def chat_tools(messages: "list[dict] | None" = None) -> tuple[str, ...]:
     return tuple(offered)
 
 
+def chat_constraints(messages: "list[dict] | None", withhold=(), max_iterations: int | None = None) -> AgentConstraints:
+    """What a chat turn runs on, built once for every surface and for the evals
+    that measure one: a cut they rebuilt by hand never got `withhold`.
+
+    The chat_tools cut, because the tool block is the biggest per-iteration
+    cost. interactive=True keeps the live stream and keeps the turn off the
+    worker-slot cap, which is what the cut silently cost when it was first wired
+    in. Slash directives carry origin="cli", so excluded tools a command names
+    are summoned back."""
+    return AgentConstraints(tools=tuple(n for n in chat_tools(messages) if n not in withhold),
+                            deferred=chat_deferred(messages), interactive=True, max_iterations=max_iterations)
+
+
 def chat_deferred(messages: "list[dict] | None" = None) -> tuple[str, ...]:
     """The loadable tools this conversation has not brought in yet: what the
     loop may add to `chat_tools(messages)` mid-turn. None in a demo, whose

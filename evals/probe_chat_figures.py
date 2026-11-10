@@ -117,7 +117,7 @@ def run_one(kind: str, arm: str, out_file: Path) -> None:
     from silica.kernel.base.manifest import apply_manifest_to_config
     apply_manifest_to_config()
     from silica.obs import narration as _narr
-    from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
+    from silica.agent.constraints import chat_constraints
     from silica.agent.loop import run_agent
     from silica.commands import dispatch
     from silica.session.seed import seed_messages
@@ -139,8 +139,7 @@ def run_one(kind: str, arm: str, out_file: Path) -> None:
         t0 = time.time()
         try:
             answer = run_agent(messages, model=CONFIG.model, cancel_token=threading.Event(),
-                               constraints=AgentConstraints(tools=chat_tools(messages), interactive=True,
-                                                            deferred=chat_deferred(messages)))
+                               constraints=chat_constraints(messages))
             error = ""
         except Exception as e:  # one dead turn is a row that says so, not a dead run
             answer, error = "", f"{type(e).__name__}: {e}"
