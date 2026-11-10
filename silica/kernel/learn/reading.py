@@ -46,7 +46,7 @@ SECTION_CHARS = 9000
 NEXT_CHARS = 3000
 SECTION_MAX_TOKENS = 2200
 # The practice after a reading asks one question a note, up to a session's cap
-# (pick.SESSION_MAX).
+# (pace.SESSION_MAX).
 SESSION_MIN = 4
 # Reading speed for the minutes shown: technical prose with formulas.
 WORDS_PER_MINUTE = 150
@@ -143,7 +143,7 @@ def reading_path(plan: dict, step: int) -> str:
 
 
 def session_size(n_notes: int) -> int:
-    from silica.kernel.learn.pick import SESSION_MAX
+    from silica.kernel.learn.pace import SESSION_MAX
 
     return max(SESSION_MIN, min(SESSION_MAX, n_notes))
 

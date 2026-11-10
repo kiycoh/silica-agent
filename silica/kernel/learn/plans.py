@@ -28,9 +28,9 @@ from silica.kernel.base.noteshape import is_plan
 from silica.kernel.learn import store
 from silica.kernel.learn.mastery import DEPTH_LABEL
 from silica.kernel.learn.pace import budget, pace_of, today_line
-from silica.kernel.learn.reference import (HEADING_LINE_RE, RESTRICT_SEP, STEP_LINK_RE, assessment_text, note_title,
-                                           parse_assessment, parse_steps, reference_rows, section_lines, section_links,
-                                           step_label, step_marks)
+from silica.kernel.learn.reference import (HEADING_LINE_RE, RESTRICT_SEP, STEP_LINK_RE, assessment_text, has_line,
+                                           line_id, note_title, parse_assessment, parse_lines, parse_steps,
+                                           reference_rows, section_lines, section_links, step_label, step_marks)
 from silica.kernel.learn.sources import resolve_title, steps_scope
 from silica.kernel.write.gate import journaled_write
 
@@ -73,7 +73,6 @@ def list_plans() -> list[dict]:
 def read_plan(path: str, text: str | None = None) -> dict:
     """The note as a plan: scope kind, target, reach, deadline, steps, sessions."""
     from silica.kernel.base import frontmatter
-    from silica.kernel.learn import session
 
     if text is None:
         text = (store.vault() / path).read_text(encoding="utf-8")
@@ -110,7 +109,7 @@ def read_plan(path: str, text: str | None = None) -> dict:
         "completed": str(data.get("completed") or "") or None,
         "revisit": [str(x) for x in (data.get("revisit") or [])],
         "assessment_set": "assessment" in data,
-        "steps": parse_steps(body), "sessions": session.parse_lines(section_lines(body, "Sessions")),
+        "steps": parse_steps(body), "sessions": parse_lines(section_lines(body, "Sessions")),
         "tree_links": section_links(body, "Tree"),
         "legacy": legacy,
     }
@@ -770,12 +769,10 @@ def percent_done(met: int, notes: int, gaps: int) -> int:
 def append_session(plan_path: str, line: str) -> str:
     """The session's summary line under `## Sessions`, once: a retry with
     the same session id appends nothing."""
-    from silica.kernel.learn import session
-
-    sid = session.line_id(line)
+    sid = line_id(line)
 
     def mutate(text: str) -> str:
-        if sid and session.has_line(text, sid):
+        if sid and has_line(text, sid):
             return text
         lines = text.rstrip("\n").split("\n")
         idx = next((i for i, ln in enumerate(lines) if (h := HEADING_LINE_RE.match(ln)) and h.group(2).casefold().startswith("sessions")), None)

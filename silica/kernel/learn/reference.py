@@ -2,8 +2,9 @@
 # Copyright (C) 2026 Alessandro Carosia
 
 """A reference note read as text (ADR-0131): the lines a plan's steps come
-from, what a line says beside its topic, the assessment it states, and the step
-line a plan note writes back.
+from, what a line says beside its topic, the assessment it states, the step
+line a plan note writes back, and the line a closed session leaves under its
+`## Sessions`.
 
 A plan's own step is a reference line with its marks, so both grammars are
 here. No vault, no model: every reader takes the note's body.
@@ -11,6 +12,7 @@ here. No vault, no model: every reader takes the note's body.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 
 # Several bounds in one `restrict:` line, the separator `refused:` already uses
 RESTRICT_SEP = " | "
@@ -329,3 +331,49 @@ def step_label(step: dict) -> str:
     text = STEP_LINK_RE.sub(r"\1", step.get("text") or "")
     head = text.split(":", 1)[0].strip() if ":" in text else text.strip()
     return _STEP_MARKS_RE.sub("", head)[:90] or ", ".join(step.get("notes") or [])[:90]
+
+
+# ---------------------------------------------------------------- the `## Sessions` line
+# A closed session's line on its plan note, composed and read here and nowhere
+# else: position 0 is the date, 1 the items, and the id, the tag's value, is
+# what makes a retry append nothing. Here and not in session.py, which only
+# composes it: plans reads every line back, and reaching session for that kept
+# plans and the session engine one import ring (re-audit 2026-11-10, kernel 11).
+
+_SESSION_ID_RE = re.compile(r"session:\s*([0-9a-f]{8,32})")
+
+
+def compose_line(rc: dict, sid: str) -> str:
+    """The receipt as its plan's line."""
+    t = rc["tally"]
+    met = " · met: " + ", ".join(f"{d['objective']} {d['met']}" for d in rc["by_objective"]) if rc["by_objective"] else ""
+    return (f"{datetime.now(timezone.utc).date().isoformat()} · {rc['recorded']} items · ratings: "
+            f"{t['Good'] + t['Easy']} Good/Easy · {t['Hard']} Hard · {t['Again']} Again{met} · {rc['next'].rstrip('.')} · session: {sid}")
+
+
+def line_id(line: str) -> str:
+    m = _SESSION_ID_RE.search(line)
+    return m.group(1) if m else ""
+
+
+def has_line(text: str, sid: str) -> bool:
+    """Whether a note already carries this session's line."""
+    return f"session: {sid}" in text
+
+
+def parse_lines(lines: list[str]) -> list[dict]:
+    """The `## Sessions` section's lines as {date, items, line, session, met,
+    rest}. `rest` is what follows the items without the id, the column a line
+    with no `met:` shows, so the page holds no copy of this format."""
+    out = []
+    for line in lines:
+        line = line.strip()
+        if not line.startswith("- "):
+            continue
+        parts = [p.strip() for p in line[2:].split(" · ")]
+        m = re.match(r"(\d+) item", parts[1] if len(parts) > 1 else "")
+        met = next((x[len("met: "):] for x in parts if x.startswith("met: ")), "")
+        rest = " · ".join(re.sub(r" · session: [0-9a-f]+$", "", line[2:]).split(" · ")[2:])
+        out.append({"date": parts[0][:10], "items": int(m.group(1)) if m else 0,
+                    "line": line[2:], "session": line_id(line), "met": met, "rest": rest})
+    return out

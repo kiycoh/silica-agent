@@ -255,7 +255,14 @@ def memorize(c: Call) -> Result:
     if status is not None:
         from silica.kernel.learn import mastery
 
-        line = mastery.status_line(status)
+        if not status:
+            line = mastery.status_line()
+        else:
+            from silica.kernel.learn import plans
+
+            p = plans.find_plan(status)
+            line = (f"No plan named {status!r}." if p is None
+                    else mastery.status_line(plans.scope_of(p)["paths"], p["name"]))
         return out.to_model(f"Relay this status line to the reader verbatim, then stop:\n{line}")
     teach = _kv_flag(args, "--teach")
     if teach is not None:

@@ -9,6 +9,14 @@ from __future__ import annotations
 
 from silica.kernel.learn.reference import step_label
 
+# The two numbers a pace is cut by. Here and not in pick, where they were: pace
+# reaching pick for them kept it in Learn's import ring (re-audit 2026-11-10,
+# kernel 11).
+SESSION_MAX = 24   # the most questions one session asks
+# The last days before a dated plan's `by`: reviews only, as RemNote's Final
+# Review Period. ponytail: 2 is a simulation's number, not a measurement;
+# reopen at 20 completed dated plans in the ledger or 2027-03-31.
+FINAL_DAYS = 2
 
 # Answers a note needs by the date: a simulation of the dated picker gave 2.4
 # to 2.8 attempts per note by an 18-day exam (research report
@@ -28,12 +36,10 @@ def _count(n: int, word: str) -> str:
 
 def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | None = None) -> dict | None:
     """Workload arithmetic for a deadline (D24): the answers a day the notes
-    below reach need before the final pass (pick.FINAL_DAYS), set against the
+    below reach need before the final pass (FINAL_DAYS), set against the
     reader's own answers a day lately. Never a promise, never a division by zero."""
     import math
     from datetime import date, datetime, timedelta, timezone
-
-    from silica.kernel.learn.pick import FINAL_DAYS, SESSION_MAX
 
     if not plan.get("by"):
         return None
@@ -83,7 +89,7 @@ def day_by_day(plan: dict, today=None, passed: list[bool] | None = None) -> list
     """[{day, steps: [(label, notes)], hours: {label: h}}] from today to the
     plan's date: the steps in their order over the study days, each given
     days in proportion to its weight and its notes split evenly over them,
-    then the pick.FINAL_DAYS days of review and the date itself. None
+    then the FINAL_DAYS days of review and the date itself. None
     without a date or a step.
 
     The weight is the reference's own number for the step (its hours, `· 8
@@ -155,8 +161,6 @@ def budget(plan: dict, today=None, passed: list[bool] | None = None) -> dict | N
     left) against the hours before the date at the plan's hours a day. None
     without a date or a step."""
     from datetime import date
-
-    from silica.kernel.learn.pick import FINAL_DAYS
 
     every = plan.get("steps") or []
     if not plan.get("by") or not every:

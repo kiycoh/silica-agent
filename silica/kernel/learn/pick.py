@@ -19,19 +19,15 @@ from pathlib import Path
 from silica.kernel.base import note_index
 from silica.kernel.base.noteshape import is_material
 from silica.kernel.learn.items import LEVEL_OF
+from silica.kernel.learn.pace import FINAL_DAYS
 from silica.kernel.learn.schedule import DUE_R, events_by_key
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_N = 8
-SESSION_MAX = 24   # the most questions one session asks
 AMNESTY_FACTOR = 2   # due > 2n: one calm line, the capped session, never the backlog
 # engram's copy (MIT): a break is not a debt.
 AMNESTY_LINE = "{due} due after a break is spacing doing its job, not a debt. This session takes {n}; the rest waits."
-# The last days before a dated plan's `by`: reviews only, as RemNote's Final
-# Review Period. ponytail: 2 is a simulation's number, not a measurement;
-# reopen at 20 completed dated plans in the ledger or 2027-03-31.
-FINAL_DAYS = 2
 
 
 def _days_to(deadline: str | None, now_ts: float) -> int | None:

@@ -13,7 +13,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from silica.kernel.learn import pick, plans, quiz, session  # noqa: E402
+from silica.kernel.learn import pick, plans, quiz, reference, session  # noqa: E402
 from tests.test_learn_panel import client  # noqa: E402,F401
 
 
@@ -76,16 +76,16 @@ def test_the_sessions_line_is_composed_and_read_by_one_definition(client):
     rc = {"recorded": 3, "tally": {"Good": 1, "Easy": 1, "Hard": 1, "Again": 0}, "next": "Next session draws from what is due.",
           "by_objective": [{"objective": "explain", "met": 2}]}
     sid = "0123456789abcdef"
-    line = session.compose_line(rc, sid)
+    line = reference.compose_line(rc, sid)
     assert line.endswith(f"ratings: 2 Good/Easy · 1 Hard · 0 Again · met: explain 2 · Next session draws from what is due · session: {sid}")
-    assert session.line_id(line) == sid and session.has_line(f"- {line}\n", sid)
-    got = session.parse_lines(["", "text", f"- {line}"])
+    assert reference.line_id(line) == sid and reference.has_line(f"- {line}\n", sid)
+    got = reference.parse_lines(["", "text", f"- {line}"])
     assert len(got) == 1 and got[0]["items"] == 3 and got[0]["met"] == "explain 2" and got[0]["session"] == sid
     assert got[0]["date"] == line[:10] and got[0]["line"] == line
 
 
 def test_a_line_from_before_the_id_reads_with_none(client):
-    assert session.parse_lines(["- 2026-01-02 · 1 item · ratings"]) == [
+    assert reference.parse_lines(["- 2026-01-02 · 1 item · ratings"]) == [
         {"date": "2026-01-02", "items": 1, "line": "2026-01-02 · 1 item · ratings", "session": "", "met": "",
          "rest": "ratings"}]
 
