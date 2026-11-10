@@ -35,6 +35,7 @@ from silica.kernel.base import frontmatter
 from silica.kernel.base.noteshape import SPINE_SECTION, is_spine
 from silica.kernel.base.syntax import HEADING_RE, section_end
 from silica.kernel.text.media import strip_images
+from silica.kernel.text.title import near_title_flag
 
 logger = logging.getLogger(__name__)
 
@@ -538,7 +539,7 @@ def outline_ops(outline: Outline, *, target: str, hub: str | None, source_basena
                 related.append(e["to"])
                 continue
             if e["relation"] == "same_as":
-                review = f"near_title candidate='{e['to']}' path='{existing[e['to']]}' ratio=1.00"
+                review = near_title_flag(e["to"], existing[e["to"]], 1.0)
                 continue
             lines.append(f"- {RELATION_LABEL[e['relation']]} [[{e['to']}]] ({spine_title} -> earlier): {e['why']}")
             related.append(e["to"])
@@ -633,7 +634,7 @@ def flag_cosine_near_titles(ops: list[dict], *, tau: float, embedder=None, store
             if path.removesuffix(".md") == o["path"].removesuffix(".md") \
                     or is_inbox_path(path) or hidden(path):
                 continue
-            o["review"] = f"near_title candidate='{h['name']}' path='{path}' ratio={score:.2f}"
+            o["review"] = near_title_flag(h["name"], path, score)
             flagged += 1
             break
     return flagged

@@ -16,6 +16,11 @@ Two functions, stdlib only:
   near_titles(t, titles)    — fuzzy neighbours below key-equality, via
                               difflib.SequenceMatcher.
 
+And the near-title verdict as text, written and read in one place:
+  near_title_flag(...)      — the flag a near title leaves in `review:`;
+  review_flags(review)      — every flag a `review:` value holds;
+  near_title_of(review)     — the first near-title flag's (candidate, path, ratio).
+
 `templates.slugify` stays what it is — a filename sanitizer, not an identity.
 """
 from __future__ import annotations
@@ -146,3 +151,55 @@ def near_titles(
         if ratio >= band:
             out.append((other, ratio))
     return sorted(out, key=lambda kv: -kv[1])
+
+
+
+# ---------------------------------------------------------------- the review flags
+# The soft verdicts validate leaves on a landed note, `"; "`-joined in its
+# `review:` key. The router routes on them (a near title to the dedup judge, a
+# thin body to the expand worker) and Learn reads the near-title pair back off
+# disk, so the text is composed and parsed here. Four writers spelled it by hand
+# and three readers parsed it three ways (re-audit 2026-11-10, agent-runtime W1).
+
+REVIEW_SEP = "; "
+SHORT_FLAG = "snippet too short"
+
+# The flag's grammar, as on disk since the C3 gate: a quote inside the title or
+# the path ends the field, so such a flag reads as no near title at all, which
+# is what every reader did before the readers were one.
+_NEAR_TITLE_RE = re.compile(r"near_title candidate='([^']*)' path='([^']*)'(?: ratio=([0-9.]+))?")
+# A flag ends at the next separator; a near-title flag is taken whole first,
+# because the title it quotes may itself hold "; ".
+_FLAG_RE = re.compile(
+    rf"(?:^|{REVIEW_SEP})(near_title candidate='[^']*' path='[^']*'(?: ratio=[0-9.]+)?(?={REVIEW_SEP}|$)"
+    rf"|.+?(?={REVIEW_SEP}|$))",
+    re.S,
+)
+
+
+def near_title_flag(candidate: str, path: str, ratio: float | None = None) -> str:
+    """The near-title verdict as `review:` text. No ratio for band 1, an equal
+    key whose surfaces differ, which has no fuzzy score to carry."""
+    flag = f"near_title candidate='{candidate}' path='{path}'"
+    return flag if ratio is None else f"{flag} ratio={ratio:.2f}"
+
+
+def review_flags(review: str) -> list[str]:
+    """Every flag in a `review:` value (or one rejection's reason), in the order
+    they were raised."""
+    return [m.group(1) for m in _FLAG_RE.finditer(review or "")]
+
+
+def near_title_of(review: str) -> tuple[str, str, float | None] | None:
+    """(candidate, path, ratio) of the first near-title flag in `review`, None
+    when it holds none. The ratio is None when the flag carries none or it does
+    not parse as a number."""
+    for flag in review_flags(review):
+        m = _NEAR_TITLE_RE.search(flag)
+        if m:
+            try:
+                ratio = float(m.group(3)) if m.group(3) else None
+            except ValueError:
+                ratio = None
+            return m.group(1), m.group(2), ratio
+    return None

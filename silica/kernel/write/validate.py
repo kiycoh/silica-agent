@@ -16,6 +16,7 @@ from silica.kernel.write.templates import slugify
 from silica.kernel.base.manifest import within
 from silica.kernel.base.manifest import SAFE_WRITE_DIR, mirrors, original_of
 from silica.kernel.base.markdown import extract_links
+from silica.kernel.text.title import REVIEW_SEP, SHORT_FLAG, near_title_flag
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,7 @@ def _flag(op: Op, reason: str) -> None:
     Two soft gates can fire on one op; both stay readable in the one key
     (`"; "`-joined) so the note names everything that was suspicious about it.
     """
-    op.review = f"{op.review}; {reason}" if op.review else reason
+    op.review = f"{op.review}{REVIEW_SEP}{reason}" if op.review else reason
 
 
 @dataclass
@@ -463,8 +464,7 @@ def _coerce_types(ops: list[Op], *, index: PayloadIndex, has_payloads: bool,
                 # judge settles it exactly as for band 2 below.
                 from silica.kernel.write.contested import follow_superseded
                 cand_path = follow_superseded(match[1] if match[1].endswith(".md") else f"{match[1]}.md")
-                _flag(op, f"near_title candidate='{os.path.splitext(os.path.basename(cand_path))[0]}' "
-                          f"path='{cand_path}'")
+                _flag(op, near_title_flag(os.path.splitext(os.path.basename(cand_path))[0], cand_path))
                 match = None
             if match is not None:
                 logger.info(
@@ -1022,8 +1022,7 @@ def _validate_write(op: Op, batch: _Batch) -> Rejection | _Skip | None:
             if winner != cand_path:
                 cand_path = winner
                 cand_title = os.path.splitext(os.path.basename(winner))[0]
-        _flag(op, f"near_title candidate='{cand_title}' path='{cand_path}' "
-                  f"ratio={ratio:.2f}")
+        _flag(op, near_title_flag(cand_title, cand_path, ratio))
 
     body_len = len(_content_only(op.snippet or "", claim_first=bool(getattr(op, "section", None))))
     if body_len == 0 and batch.has_payloads:
@@ -1056,7 +1055,7 @@ def _validate_write(op: Op, batch: _Batch) -> Rejection | _Skip | None:
         return Rejection(
             op=op,
             reason=(
-                f"snippet too short ({body_len} < {_min_snippet} chars) "
+                f"{SHORT_FLAG} ({body_len} < {_min_snippet} chars) "
                 f"— would write a placeholder note, deferred for retry"
             ),
         )
@@ -1065,7 +1064,7 @@ def _validate_write(op: Op, batch: _Batch) -> Rejection | _Skip | None:
         # the expand worker re-authors it in place (expand.py); before,
         # the same op sat in the deferred store where deterministic
         # re-validation could never clear it.
-        _flag(op, f"snippet too short ({body_len} < {_min_snippet} chars)")
+        _flag(op, f"{SHORT_FLAG} ({body_len} < {_min_snippet} chars)")
 
     # Shape gate: a long-enough body can still be an announcement of the
     # section instead of the section. Skipped under extractive enforce

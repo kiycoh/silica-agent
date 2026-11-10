@@ -245,11 +245,10 @@ def test_outline_ops_cross_edge_patches_the_existing_note():
 
 
 def test_outline_ops_same_as_becomes_a_soft_near_title_flag_not_a_patch():
-    from silica.router.states.distill import _NEAR_TITLE_RE
+    from silica.kernel.text.title import near_title_of
     out, ops = _ops()
     w = next(o for o in ops if o["heading"] == "Margine geometrico")
-    m = _NEAR_TITLE_RE.search(w["review"])
-    assert m and m.group(1) == "Margine" and m.group(2) == "ML/Margine.md"
+    assert near_title_of(w["review"]) == ("Margine", "ML/Margine.md", 1.0)
     assert not any(o["op"] == "patch" and o["path"] == "ML/Margine.md" for o in ops)
 
 

@@ -13,7 +13,6 @@ generators do, after the pick. Rows are the learner view's, so the surfaces
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 
 from silica.kernel.base import note_index
@@ -21,6 +20,7 @@ from silica.kernel.base.noteshape import is_material
 from silica.kernel.learn.items import LEVEL_OF
 from silica.kernel.learn.pace import FINAL_DAYS
 from silica.kernel.learn.schedule import DUE_R, events_by_key
+from silica.kernel.text.title import near_title_of
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +81,9 @@ def contrast_pairs(notes: dict[str, dict]) -> list[tuple[str, str]]:
             other = by_title.get(cand.split("|")[0].split("#")[0].strip().casefold())
             if other:
                 add(path, other)
-        m = re.search(r"path='([^']+)'", str((data or {}).get("review") or ""))
-        if m and m.group(1) in notes:
-            add(path, m.group(1))
+        near = near_title_of(str((data or {}).get("review") or ""))
+        if near and near[1] in notes:
+            add(path, near[1])
     return out
 
 
