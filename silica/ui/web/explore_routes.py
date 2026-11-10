@@ -305,7 +305,7 @@ def context(path: str = "", name: str = "", ghost: bool = False):
     """
     from silica.driver import get_driver
     from silica.driver.base import NoteRef
-    from silica.tools.graph import silica_related
+    from silica.kernel.report import related as report_related
 
     if ghost or (not path and name):
         return _ghost_context(name or path)
@@ -353,7 +353,9 @@ def context(path: str = "", name: str = "", ghost: bool = False):
         frontmatter.append({"name": display, "path": resolve(target) or ""})
 
     try:
-        rel_out = silica_related(note=canon, k=12)
+        # related() and not the tool, whose payload drops the fused score for the
+        # model: each `suggested` row states it, in `why` and as `score`.
+        rel_out = report_related.related(canon, 12)
     except Exception:
         logger.debug("context: related failed for %s", canon, exc_info=True)
         rel_out = {}

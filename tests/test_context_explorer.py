@@ -176,8 +176,8 @@ def test_suggested_skips_notes_that_are_already_linked(client, monkeypatch):
     vault.note("Far.md", "# Far\n")
 
     monkeypatch.setattr(
-        "silica.tools.graph.silica_related",
-        lambda note="", k=5: {"results": [
+        "silica.kernel.report.related.related",
+        lambda note, k=5, memory=True: {"results": [
             {"path": "B", "name": "B", "score": 0.91, "distance": 1},      # linked
             {"path": "Far", "name": "Far", "score": 0.77, "distance": None},  # unreachable
         ]},
@@ -187,3 +187,6 @@ def test_suggested_skips_notes_that_are_already_linked(client, monkeypatch):
     assert [s["name"] for s in notes] == ["Far"]
     assert notes[0]["path"] == "Far.md"          # resolved back to a graph key
     assert "unreachable" in notes[0]["why"]
+    # The fused score, which silica_related's payload drops for the model since
+    # 2026-11-04 (survey card C2): read through the tool, every row said 0.00.
+    assert notes[0]["score"] == 0.77 and notes[0]["why"] == "unreachable · score 0.77"
