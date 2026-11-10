@@ -114,8 +114,10 @@ def test_the_chat_hears_of_no_view_the_account_does_not_get(monkeypatch):
     from silica.ui.web.app_help import panel
 
     monkeypatch.setenv("SILICA_VIEWS", "graph")
+    monkeypatch.setenv("SILICA_HOSTED", "1")
     free = [t for t, _ in dict(panel(hosted=True))["the views"]]
     assert free == ["a chat", "Explore", "a new note"]
+    monkeypatch.delenv("SILICA_HOSTED")
     local = [t for t, _ in dict(panel(hosted=False))["the views"]]
     assert {"Memorize", "Calendar", "Examine"} <= set(local)
 

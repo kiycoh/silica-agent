@@ -22,8 +22,11 @@ def test_every_row_of_the_panel_is_read():
     assert len(_rows(panel(hosted=False))) == block.count('class="hp-row"', 0, block.index("</div>\n  <!--"))
 
 
-def test_the_views_are_read_and_hosted_drops_what_it_hides():
-    local, hosted = dict(panel(hosted=False)), dict(panel(hosted=True))
+def test_the_views_are_read_and_hosted_drops_what_it_hides(monkeypatch):
+    monkeypatch.delenv("SILICA_HOSTED", raising=False)
+    local = dict(panel(hosted=False))
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    hosted = dict(panel(hosted=True))
     assert [t for t, _ in local["the views"]] == ["a chat", "Discover", "Explore", "Memorize", "Calendar",
                                                   "My Wikis", "Examine", "a new note"]
     assert "Examine" not in [t for t, _ in hosted["the views"]]
@@ -63,3 +66,15 @@ def test_the_tabs_row_names_the_tabs_explore_has():
     row = dict(dict(panel(hosted=False))["explore"])["the tabs"]
     said = set(re.findall(r"\b[A-Z][a-z]+\b", row)) - {"The"}
     assert said == set(labels), row
+
+
+def test_a_demo_without_the_hosted_flag_tells_its_chat_of_the_views_its_page_shows(monkeypatch):
+    """A demo is clamped by served_views() even on a unit that lost SILICA_HOSTED, and
+    index() stamps the page so; the chat was told of every view because its rows were
+    gated on hosted() alone."""
+    monkeypatch.delenv("SILICA_HOSTED", raising=False)
+    monkeypatch.setenv("SILICA_DEMO", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    views = [t for t, _ in dict(panel(hosted=False))["the views"]]
+    assert views == ["a chat", "Explore", "a new note"]
+    assert "- [Memorize](#memorize):" not in app_message()

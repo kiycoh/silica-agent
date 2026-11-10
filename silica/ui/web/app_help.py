@@ -46,11 +46,14 @@ class _Panel(HTMLParser):
     row whose last direct child is the text and the children before it the term."""
 
     def __init__(self, hosted: bool):
-        from silica.config import hosted_views, withheld
+        from silica.config import served_views, withheld
 
         super().__init__()
-        self.served = {"chat", *(hosted_views() if hosted else VIEWS)}
-        self.gone = withheld("routes") if hosted else frozenset()
+        # The views and routes this process serves, as index() stamps them: a
+        # demo is clamped even on a unit that lost SILICA_HOSTED, and gating
+        # this on `hosted` told such a demo's chat of every view.
+        self.served = {"chat", *served_views()}
+        self.gone = withheld("routes")
         self.hosted = hosted
         self.sections: list[tuple[str, list[tuple[str, str]]]] = []
         self.depth = 0            # depth inside #help-panel, 0 when outside
