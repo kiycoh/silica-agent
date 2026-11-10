@@ -118,6 +118,21 @@ class _Job:
         """The context a persisted item carries in workqueue.json."""
         return asdict(self)  # type: ignore[call-overload]
 
+    def provenance(self) -> tuple[str, str, str] | None:
+        """(source key, content sha, ledger run id) the notes this job writes are
+        filed under, None for a job whose notes come from no source. A job type
+        answers for itself, so a new worker never edits the consumer."""
+        return None
+
+
+def _provenance(src: str, content_hash: str, run_id: str) -> tuple[str, str, str] | None:
+    """The run id is the FSM's own `progress.run_id`: the key CLEANUP stamps and
+    the key the dangling-link sweep and check_renucleate read back. It is NOT the
+    undo journal's run id, which is a separate uuid4 keyspace."""
+    from silica.kernel.base.manifest import source_key
+
+    return (source_key(src), content_hash, run_id) if src and content_hash else None
+
 
 @dataclass(kw_only=True)
 class DedupJob(_Job):
@@ -156,6 +171,10 @@ class DedupJob(_Job):
                    inbox_file=loser, loser_path=loser,
                    hub=None, content_hash="", run_id="", target_dir="")
 
+    def provenance(self) -> tuple[str, str, str] | None:
+        # The inbox path, so the key is the path under the inbox (ADR-0114).
+        return _provenance(self.inbox_file, self.content_hash, self.run_id)
+
     @property
     def effective_score(self) -> float:
         full = self.score if self.full_score is None else self.full_score
@@ -187,6 +206,11 @@ class DedupFamily(_Job):
         shared["concepts"] = [{k: r[k] for k in _BATCH_CONCEPT_KEYS if k in r} for r in rows]
         return shared
 
+    def provenance(self) -> tuple[str, str, str] | None:
+        # One batch is always one file (the sha it carries is
+        # fsm.current_content_hash), so the first member answers for all.
+        return next((m for m in self.members if m.inbox_file), self.members[0]).provenance()
+
 
 @dataclass(kw_only=True)
 class ExpandJob(_Job):
@@ -199,6 +223,12 @@ class ExpandJob(_Job):
     content_hash: str
     run_id: str
     target_dir: str
+
+    def provenance(self) -> tuple[str, str, str] | None:
+        # Only the op's source_basename, which the ledger reads as that file
+        # when the vault holds one of the name.
+        return _provenance(self.inbox_file or self.op.get("source_basename") or "",
+                           self.content_hash, self.run_id)
 
 
 @dataclass(kw_only=True)
@@ -229,6 +259,10 @@ class WorkItem(Generic[JobT]):
         compare=False,
         hash=False,
     )
+
+    def provenance(self) -> tuple[str, str, str] | None:
+        """The job's (_Job.provenance); None for a plain-dict context."""
+        return self.context.provenance() if isinstance(self.context, _Job) else None
 
     def to_dict(self) -> dict[str, Any]:
         return {

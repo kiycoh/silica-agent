@@ -562,24 +562,21 @@ def test_orphan_hub_is_none_when_context_has_no_hub():
 def test_item_provenance_reads_a_batched_dedup_context():
     """A family answers for its source through its first member. Values copied
     from a real run's workqueue.json."""
-    from types import SimpleNamespace
-    from silica.agent.subagent import _item_provenance
     from silica.kernel.workqueue import DedupFamily
 
     shared = {"candidate": "Single Module", "content_hash": "5f7e4c65", "hub": "Papers",
               "run_id": "run-77", "target_dir": "docs/silica/Papers",
               "inbox_file": "docs/silica/Inbox/physics_0607100v2/2-vi-conclusions.md"}
-    item = SimpleNamespace(context=DedupFamily([
+    item = WorkItem(kind="dedup", target_path="t.md", context=DedupFamily([
         dedup_job(shared, concept="partitions"), dedup_job(shared, concept="modularity")]))
-    assert _item_provenance(item) == ("2-vi-conclusions.md", "5f7e4c65", "run-77")
+    assert item.provenance() == ("2-vi-conclusions.md", "5f7e4c65", "run-77")
 
 
 def test_item_provenance_is_none_without_a_source():
-    from types import SimpleNamespace
-    from silica.agent.subagent import _item_provenance
+    assert WorkItem(kind="dedup", target_path="t.md", context=dedup_job(content_hash="x")).provenance() is None
+    assert WorkItem(kind="enrich", target_path="t.md", context={}).provenance() is None
+    assert WorkItem(kind="orphan", target_path="t.md", context=OrphanJob(candidates=[])).provenance() is None
 
-    assert _item_provenance(SimpleNamespace(context=dedup_job(content_hash="x"))) is None
-    assert _item_provenance(SimpleNamespace(context={})) is None
 
 
 def test_dedup_items_carry_the_chunk_s_own_file_not_file_zero():
@@ -591,7 +588,6 @@ def test_dedup_items_carry_the_chunk_s_own_file_not_file_zero():
     version."""
     from types import SimpleNamespace
 
-    from silica.agent.subagent import _item_provenance
     from silica.router.states.distill import enqueue_near_title_dedups
 
     class _Q:
@@ -615,13 +611,12 @@ def test_dedup_items_carry_the_chunk_s_own_file_not_file_zero():
     }])
 
     assert len(q.items) == 1
-    assert _item_provenance(q.items[0]) == ("c.md", "sha-of-c", "run-9")
+    assert q.items[0].provenance() == ("c.md", "sha-of-c", "run-9")
 
 
 def test_expand_items_carry_the_same_triple():
     from types import SimpleNamespace
 
-    from silica.agent.subagent import _item_provenance
     from silica.router.states.distill import enqueue_short_snippet_expands
 
     class _Q:
@@ -642,7 +637,7 @@ def test_expand_items_carry_the_same_triple():
     ])
 
     assert len(q.items) == 1
-    assert _item_provenance(q.items[0]) == ("c.md", "sha-of-c", "run-9")
+    assert q.items[0].provenance() == ("c.md", "sha-of-c", "run-9")
 
 
 def _decide_capturing_call(raw_text: str) -> dict:

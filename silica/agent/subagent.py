@@ -23,35 +23,9 @@ from typing import Any
 from silica.kernel.run_context import RunContext
 from silica.config import CONFIG
 from silica.capabilities import CAPABILITIES, Capability
-from silica.kernel.workqueue import DedupFamily, DedupJob, ExpandJob, WorkItem
+from silica.kernel.workqueue import WorkItem
 
 logger = logging.getLogger(__name__)
-
-
-def _item_provenance(item: Any) -> tuple[str, str, str] | None:
-    """(source key, content sha, ledger run id) of the work item.
-
-    dedup carries the inbox path, so its key is the path under the inbox
-    (ADR-0114); expand carries only the op's source_basename, which the ledger
-    reads as that file when the vault holds one of the name. The run id
-    is the FSM's own `progress.run_id` — the key CLEANUP stamps and the key the
-    dangling-link sweep and check_renucleate read back. It is NOT the undo
-    journal's run id, which is a separate uuid4 keyspace.
-    """
-    job = item.context
-    if isinstance(job, DedupFamily):
-        # One batch is always one file — the sha it carries is
-        # fsm.current_content_hash — so the first member answers for all.
-        job = next((m for m in job.members if m.inbox_file), job.members[0])
-    if isinstance(job, ExpandJob):
-        src = job.inbox_file or job.op.get("source_basename") or ""
-    elif isinstance(job, DedupJob):
-        src = job.inbox_file
-    else:
-        return None
-    from silica.kernel.base.manifest import source_key
-
-    return (source_key(src), job.content_hash, job.run_id) if src and job.content_hash else None
 
 
 def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None, undo_run: Any = None) -> None:
@@ -85,7 +59,7 @@ def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None, undo_run: Any =
             "subagent", item.id, f"{item.kind} {item.target_path}".strip(),
             {"kind": item.kind}, attach=True)
         try:
-            with in_run(provenance=_item_provenance(item),
+            with in_run(provenance=item.provenance(),
                         undo=undo_run() if undo_run is not None else None):
                 res = agent.handle(item)
         except BaseException:
