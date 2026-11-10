@@ -18,11 +18,31 @@ from typing import Any
 # is go back to opening PDFs in this process.
 pdf_reader: Any = None
 
+# (this tree's field, silica-core's) for every key both read. silica-core's CONFIG
+# reads the environment once, with defaults of its own (qwen3-embedding-4b and no
+# base URL, where this tree has embeddinggemma-2 at :1234), and an embedder changed
+# in Settings reaches only this tree's: with three of the six mirrored, core built
+# the page vectors with the old model under the new one's prefixes until a restart,
+# or built none at all (found 2026-11-10). tests/test_engine_mirror.py holds every
+# embedder field core has to a row here.
+MIRRORED = (
+    ("vault_path", "vault_path"),
+    ("embedding_model", "embedding_model"),
+    ("embedding_base_url", "embedding_base_url"),
+    ("embedding_api_key", "embedding_api_key"),
+    # The engine reads SILICA_EMBEDDING_DOC_PREFIX and this tree
+    # SILICA_EMBEDDING_DOCUMENT_PREFIX: unmirrored, a page would be embedded
+    # bare while every query carried "Query: " (found 2026-11-08 on jina v5).
+    ("embedding_document_prefix", "embedding_doc_prefix"),
+    ("embedding_query_prefix", "embedding_query_prefix"),
+)
+
 
 def engine():
     """The retrieval engine, from the silica-core package (ADR-0043). It
-    carries its own CONFIG singleton, so the vault this tree serves is
-    mirrored into it at every call, and it gets its own index file: its
+    carries its own CONFIG singleton, so the vault and the embedder this tree
+    serves are mirrored into it at every call (`MIRRORED`), and it gets its
+    own index file: its
     build drops every path its walk did not produce, so pointed at
     `lexical.json` it would prune the fusion leg's entries (ADR-0029).
 
@@ -34,12 +54,8 @@ def engine():
     from silica_core import core
 
     core.INDEX = "retrieval"
-    core_config.CONFIG.vault_path = CONFIG.vault_path
-    # The engine reads SILICA_EMBEDDING_DOC_PREFIX and this tree
-    # SILICA_EMBEDDING_DOCUMENT_PREFIX: unmirrored, a page would be embedded
-    # bare while every query carried "Query: " (found 2026-11-08 on jina v5).
-    core_config.CONFIG.embedding_doc_prefix = CONFIG.embedding_document_prefix
-    core_config.CONFIG.embedding_query_prefix = CONFIG.embedding_query_prefix
+    for ours, theirs in MIRRORED:
+        setattr(core_config.CONFIG, theirs, getattr(CONFIG, ours))
     # A silica-core that renamed either name would go back to opening PDFs in
     # this process without a word, so the engine refuses to run instead. The
     # server installs the lock (0.10.1), but a wheel install resolves

@@ -24,8 +24,10 @@ def engine(tmp_vault, monkeypatch):
     from silica_core.config import CONFIG as CORE
 
     monkeypatch.setattr(vectors, "_eligible", real_eligible)
-    monkeypatch.setattr(CORE, "embedding_base_url", "http://127.0.0.1:1234/v1")
-    monkeypatch.setattr(CORE, "embedding_model", "fake")
+    # This tree's embedder: the engine mirrors it into core's CONFIG at every call.
+    monkeypatch.setattr(CONFIG, "embedding_base_url", "http://127.0.0.1:1234/v1")
+    monkeypatch.setattr(CONFIG, "embedding_model", "fake")
+    monkeypatch.setattr(CORE, "embedding_base_url", "")
     monkeypatch.setattr(embeddings, "embed_texts", _fake_embed)
     monkeypatch.setattr(embeddings, "_CACHE", None)
     monkeypatch.setattr("silica.onboarding.serve.ready", lambda base: True)
@@ -54,11 +56,9 @@ def test_a_refresh_builds_the_page_vectors_when_the_embedder_is_this_machines(en
 
 
 def test_nothing_is_built_on_the_server_or_with_an_embedder_elsewhere(engine, monkeypatch):
-    from silica_core.config import CONFIG as CORE
-
-    monkeypatch.setattr(CORE, "embedding_base_url", "https://api.example.com/v1")
+    monkeypatch.setattr(CONFIG, "embedding_base_url", "https://api.example.com/v1")
     assert vectors.refresh() is False
-    monkeypatch.setattr(CORE, "embedding_base_url", "http://127.0.0.1:1234/v1")
+    monkeypatch.setattr(CONFIG, "embedding_base_url", "http://127.0.0.1:1234/v1")
     monkeypatch.setenv("SILICA_HOSTED", "1")
     assert vectors.refresh() is False
     assert vectors._THREAD is None
