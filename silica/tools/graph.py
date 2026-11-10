@@ -262,7 +262,13 @@ def silica_backlink(new_titles: Annotated[list[str], Field(description='Titles o
         return {"error": f"Failed to list vault files: {e}"}
 
     title_index = build_title_index(all_refs)
-    added_map = backlink_pass(new_titles, title_index=title_index, neighbourhood=neighbourhood)
+    added_map, undo = backlink_pass(new_titles, title_index=title_index, neighbourhood=neighbourhood)
+    if undo:
+        from silica.kernel.write import gate
+
+        run = gate.open_run("chat:silica_backlink")
+        for inverse in undo:
+            gate.record_landed(run, inverse)
     total = sum(len(v) for v in added_map.values())
     return {"added": total, "notes_modified": len(added_map), "details": added_map}
 

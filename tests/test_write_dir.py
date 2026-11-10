@@ -533,7 +533,7 @@ def test_backlinks_never_edit_a_note_outside_the_boundary(bounded_vault):
     readme = bounded_vault.note("README.md", "This project uses Kubernetes for scheduling.\n")
     bounded_vault.note("docs/silica/Notes.md", "Kubernetes shows up here too.\n")
 
-    touched = backlink_pass(
+    touched, _undo = backlink_pass(
         ["Kubernetes"],
         title_index=["Kubernetes"],
         neighbourhood=["README.md", "docs/silica/Notes.md"],

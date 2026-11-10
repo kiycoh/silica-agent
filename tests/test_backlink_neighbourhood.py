@@ -120,8 +120,9 @@ def test_backlink_pass_wraps_the_mention_in_the_pre_existing_note(tmp_vault):
     drv = _driver()
     drv.create("Sparse attention.md", "# Sparse attention\n\nA cheaper attention variant.\n")
 
+    before = tmp_vault.read(home)
     hood = _backlink_neighbourhood(["Sparse attention"], set())
-    added = backlink_pass(
+    added, undo = backlink_pass(
         ["Sparse attention"],
         title_index=build_title_index(list(drv.list_files())),
         neighbourhood=hood,
@@ -129,6 +130,28 @@ def test_backlink_pass_wraps_the_mention_in_the_pre_existing_note(tmp_vault):
 
     assert added == {"Attention.md": ["Sparse attention"]}
     assert "[[Sparse attention]]" in tmp_vault.read(home)
+    # The rollback inverse is the body the pass rewrote, for the FSM's chunk.
+    assert [(u.path, u.prior_content) for u in undo] == [("Attention.md", before)]
+
+
+def test_the_backlink_tool_can_be_reverted(tmp_vault):
+    """A ledger task runs silica_backlink from the chat. Its links went to disk
+    with no journal run (probe 2026-11-10), so /revert had nothing to take back."""
+    from silica.kernel.write import gate, undo_journal
+    from silica.tools import TOOLS, catalog
+
+    catalog.load()
+    before = "# Attention\n\nSparse attention is a cheaper variant used in long-context models.\n"
+    home = tmp_vault.note("Attention.md", before)
+    _driver().create("Sparse attention.md", "# Sparse attention\n\nA cheaper attention variant.\n")
+
+    TOOLS["silica_backlink"].run(new_titles=["Sparse attention"], neighbourhood=["Attention.md"])
+    assert "[[Sparse attention]]" in tmp_vault.read(home)
+
+    run = undo_journal.get_undo_journal().last_active_run(undo_journal.active_vault())
+    assert run, "the backlink tool recorded no journal run"
+    gate.revert_run(run)
+    assert tmp_vault.read(home) == before
 
 
 def test_backlink_never_writes_into_the_inbox(tmp_vault):
@@ -156,7 +179,7 @@ def test_backlink_never_writes_into_the_inbox(tmp_vault):
     drv.create("Sparse attention.md", "# Sparse attention\n\nA cheaper attention variant.\n")
 
     index = build_title_index(list(drv.list_files()))
-    added = backlink_pass(
+    added, _undo = backlink_pass(
         ["Sparse attention"], title_index=index,
         neighbourhood=["Inbox/paper/03-method.md", "Notes/Attention.md"],
     )

@@ -230,20 +230,14 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
             fsm.transition_success()
             return
 
-        # Pre-read prior content before backlink_pass writes, for rollback inverses
-        prior_contents: dict[str, str] = {}
-        for path in neighbourhood:
-            try:
-                prior_contents[path] = DRIVER.read_note(path).content or ""
-            except Exception:
-                pass  # backlink_pass skips a note it cannot read too, so no inverse is owed
-
         all_refs = _run_title_refs(fsm)
         title_index = build_title_index(all_refs)
-        added_map = backlink_pass(new_titles, title_index=title_index, neighbourhood=neighbourhood)
+        # The rollback inverses come back from the pass, built from the body each
+        # note had when it was rewritten: a pre-read here was a second read of
+        # every neighbour, and older than the write it undid.
+        added_map, undo = backlink_pass(new_titles, title_index=title_index, neighbourhood=neighbourhood)
 
         if added_map and fsm.chunk.txn is not None:
-            from silica.kernel.write.ops import InverseOp, InverseOpKind
             existing_snapshot_paths = {d["path"] for d in fsm.chunk.snapshot_domain}
             for path_modified in added_map:
                 if path_modified not in existing_snapshot_paths:
@@ -252,13 +246,7 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
                         {"name": stem, "path": path_modified}
                     )
                     existing_snapshot_paths.add(path_modified)
-                if path_modified in prior_contents:
-                    inverse = InverseOp(
-                        kind=InverseOpKind.restore_version,
-                        path=path_modified,
-                        prior_content=prior_contents[path_modified],
-                    )
-                    fsm.chunk.txn.inverses.append(inverse)
+            fsm.chunk.txn.inverses.extend(undo)
 
         total_links = sum(len(v) for v in added_map.values())
         logger.info(
