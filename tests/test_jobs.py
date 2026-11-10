@@ -742,3 +742,18 @@ def test_nucleate_it_runs_the_typed_command_with_every_flag_on_the_jobs_notes(cl
     assert {k: asked[k] for k in ("target_dir", "hub", "profile", "seen", "keep_sources")} == {
         "target_dir": "Lectures", "hub": "H", "profile": "P", "seen": "2026-11-01", "keep_sources": False}
     assert "text" not in ran  # no agent turn around it
+
+
+def test_nucleate_it_on_a_typed_convert_nucleates_its_notes_without_its_target(client, monkeypatch):
+    """/convert's --target is where the note was written, not where /nucleate files it."""
+    from silica.sources import ingest
+
+    tc, _, _ = client
+    asked: dict = {}
+    monkeypatch.setattr(ingest, "nucleate", lambda files, **kw: (asked.update(files=files, **kw), "")[1])
+    _inbox().mkdir(parents=True, exist_ok=True)
+    (_inbox() / "talk.mp3").write_bytes(b"\0" * 16)
+    job = tc.post("/chat", json={"text": "/convert Inbox/talk.mp3 --target=Lectures"}).json()["jobs"][0]
+    _drain()
+    assert tc.post(f"/jobs/{job['id']}/turn", json={"as": "nucleate"}).status_code == 200
+    assert asked["files"] == _record(job["id"])["notes"] and asked["target_dir"] == ""
