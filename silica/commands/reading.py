@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # /contested scan memo: (epoch, rows) — the scan parses every note's
 # frontmatter, so it runs once per file-state epoch.
-_CONTESTED_SCAN_MEMO: dict[str, tuple[str, list]] = {}
+_CONTESTED_SCAN_MEMO: dict[tuple[str, str], list] = {}
 
 
 def find(c: Call) -> Result:
@@ -142,16 +142,10 @@ def contested(c: Call) -> Result:
     """/contested — notes flagged with an unresolved contradiction."""
     out = c.out
     from silica.driver import DRIVER
-    from silica.kernel.base.layout import vault_epoch
+    from silica.kernel.base import layout
     from silica.kernel.write.contested import CONTESTED_KEY, CONTRADICTIONS_KEY
 
-    # The scan frontmatter-parses every note, so it runs once per
-    # file-state epoch; between vault changes a repeat costs a stat walk.
-    epoch = vault_epoch()
-    hit = _CONTESTED_SCAN_MEMO.get("scan") if epoch else None
-    found: list[tuple[str, list[str]]] | None = (
-        hit[1] if hit is not None and hit[0] == epoch else None)
-    if found is None:
+    def scan() -> list[tuple[str, list[str]]]:
         found = []
         for ref in DRIVER.list_files(""):
             try:
@@ -161,8 +155,11 @@ def contested(c: Call) -> Result:
             if props and props.get(CONTESTED_KEY):
                 contras = [str(x) for x in (props.get(CONTRADICTIONS_KEY) or [])]
                 found.append((ref.path, contras))
-        if epoch:
-            _CONTESTED_SCAN_MEMO["scan"] = (epoch, found)
+        return found
+
+    # The scan frontmatter-parses every note, so it runs once per
+    # file-state epoch; between vault changes a repeat costs a stat walk.
+    found = layout.on_epoch(_CONTESTED_SCAN_MEMO, "scan", scan)
     if not found:
         out.print("  No contested notes — no unresolved contradictions.")
         return out

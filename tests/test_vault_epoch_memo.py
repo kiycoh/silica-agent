@@ -111,3 +111,35 @@ class TestTheTimelineMemo:
 
         rows = timeline(tmp_path)["rows"]
         assert [r[2] for r in rows] == ["note"]
+
+
+class TestOnEpoch:
+    """The one memo rule the twelve derivatives share (layout.on_epoch)."""
+
+    def test_keeps_per_key_and_drops_other_epochs(self, monkeypatch):
+        from silica.kernel.base import layout
+
+        epoch = ["e1"]
+        monkeypatch.setattr(layout, "vault_epoch", lambda v=None: epoch[0])
+        memo: dict = {}
+        calls: list[str] = []
+
+        def build(tag):
+            return lambda: (calls.append(tag), [tag])[1]
+
+        a = layout.on_epoch(memo, "a", build("a"))
+        assert layout.on_epoch(memo, "a", build("a")) is a
+        layout.on_epoch(memo, "b", build("b"))  # a second key lives beside the first
+        assert set(memo) == {("e1", "a"), ("e1", "b")} and calls == ["a", "b"]
+        epoch[0] = "e2"
+        layout.on_epoch(memo, "a", build("a"))
+        assert set(memo) == {("e2", "a")} and calls == ["a", "b", "a"]
+
+    def test_no_epoch_and_a_none_build_keep_nothing(self, monkeypatch):
+        from silica.kernel.base import layout
+
+        memo: dict = {}
+        monkeypatch.setattr(layout, "vault_epoch", lambda v=None: "")
+        assert layout.on_epoch(memo, "k", lambda: [1]) == [1] and memo == {}
+        monkeypatch.setattr(layout, "vault_epoch", lambda v=None: "e1")
+        assert layout.on_epoch(memo, "k", lambda: None) is None and memo == {}

@@ -36,14 +36,15 @@ from silica.kernel.report.graph_report.models import (
 
 logger = logging.getLogger(__name__)
 
-# Epoch-keyed memo for compute_report — see the comment inside it. The epoch
+# Epoch-keyed memo for compute_report, kept by layout.on_epoch (see the comment
+# inside compute_report). The epoch
 # lives INSIDE the key: freshness checked against a separate global raced under
 # one-thread-per-request dispatch, seen on the MCP server and the GUI's way of
 # serving too (a slow analytics pass could store its stale report after a
 # newer epoch had cleared the memo). A key that
 # names its own epoch cannot be served stale; entries from older epochs are
 # swept on the next miss so they cannot pile up.
-_report_memo: dict[tuple, VaultReport] = {}
+_report_memo: dict[tuple[str, tuple], VaultReport] = {}
 
 
 def _index_stores_sig(with_embeddings: bool, with_cooccurrence: bool,
@@ -124,6 +125,53 @@ def compute_report(
 
     Pass _nodes_edges_override for testing without a live driver.
     """
+    # Memoized on the vault's file-state epoch: silica_graph_explain calls this
+    # with analytics=True on EVERY invocation, and a full analytics pass reads
+    # every body + runs PageRank and betweenness — seconds on a real vault, to
+    # answer a question about one note. Any file change bumps the epoch; the
+    # override seams (tests, custom feeds) bypass the memo entirely.
+    # The quiz log lives outside the epoch walk, so its stat rides the key
+    # (analytics only — nothing else reads it). Every other analytics input,
+    # the contested/temporal scan included, is note text the epoch hashes.
+    # Callers treat VaultReport as read-only (its fields are "read-only
+    # signals" by contract); a caller that mutates one would poison the
+    # memo for the rest of the epoch.
+    def build() -> VaultReport | None:
+        return _compute_report(
+            folder, top_k=top_k, analytics=analytics, with_embeddings=with_embeddings,
+            with_cooccurrence=with_cooccurrence, _nodes_edges_override=_nodes_edges_override,
+            _cooccur_store_override=_cooccur_store_override, _mtimes_override=_mtimes_override,
+            _quiz_override=_quiz_override, _transactions_override=_transactions_override)
+
+    overrides = (_nodes_edges_override, _cooccur_store_override,
+                 _mtimes_override, _quiz_override, _transactions_override)
+    if any(o is not None for o in overrides):
+        report = build()
+    else:
+        from silica.kernel.base import layout
+
+        key = (_index_stores_sig(with_embeddings, with_cooccurrence, analytics),
+               folder, top_k, analytics, with_embeddings, with_cooccurrence)
+        report = layout.on_epoch(_report_memo, key, build)
+    # No graph is the empty report, and it is not kept: the next call asks the
+    # driver again.
+    return _empty_report(folder) if report is None else report
+
+
+def _compute_report(
+    folder: str,
+    *,
+    top_k: int,
+    analytics: bool,
+    with_embeddings: bool,
+    with_cooccurrence: bool,
+    _nodes_edges_override: tuple[list[dict], list[dict]] | None,
+    _cooccur_store_override: Any | None,
+    _mtimes_override: dict[str, float] | None,
+    _quiz_override: dict[str, dict] | None,
+    _transactions_override: list[set[str]] | None,
+) -> VaultReport | None:
+    """compute_report's pass, unmemoized; None when the graph cannot be built."""
     import networkx as nx
     from silica.kernel.base.noteshape import NATIVE_TYPES
     from silica.kernel.graph.graph_export import (
@@ -136,34 +184,6 @@ def compute_report(
         structural_gaps,
     )
 
-    # Memoized on the vault's file-state epoch: silica_graph_explain calls this
-    # with analytics=True on EVERY invocation, and a full analytics pass reads
-    # every body + runs PageRank and betweenness — seconds on a real vault, to
-    # answer a question about one note. Any file change bumps the epoch; the
-    # override seams (tests, custom feeds) bypass the memo entirely.
-    # The quiz log lives outside the epoch walk, so its stat rides the key
-    # (analytics only — nothing else reads it). Every other analytics input,
-    # the contested/temporal scan included, is note text the epoch hashes.
-    overrides = (_nodes_edges_override, _cooccur_store_override,
-                 _mtimes_override, _quiz_override, _transactions_override)
-    memo_key = None
-    if all(o is None for o in overrides):
-        from silica.kernel.base.layout import vault_epoch
-
-        if epoch := vault_epoch():
-            memo_key = (epoch,
-                        _index_stores_sig(with_embeddings, with_cooccurrence,
-                                          analytics),
-                        folder, top_k, analytics, with_embeddings,
-                        with_cooccurrence)
-            if (hit := _report_memo.get(memo_key)) is not None:
-                return hit
-            # Miss: sweep entries from other epochs. A concurrent slow pass
-            # may still store under its own (older) epoch key afterwards —
-            # unreadable by construction, swept on the next miss.
-            for k in [k for k in _report_memo if k[0] != epoch]:
-                del _report_memo[k]
-
     if _nodes_edges_override is not None:
         nodes, edges = _nodes_edges_override
         detect_communities(nodes, edges)
@@ -173,7 +193,7 @@ def compute_report(
             detect_communities(nodes, edges)
         except Exception as exc:
             logger.warning("graph_report: build_graph_data failed (%s) — returning empty report", exc)
-            return _empty_report(folder)
+            return None
 
     # Split real nodes from ghost nodes. A plan or an event note is neither
     # (ADR-0070): edge_graph leaves it out, so here it would be an orphan with
@@ -727,12 +747,6 @@ def compute_report(
         "code_files_total": (report.code_coverage.total if report.code_coverage else 0),
     }
     report.totals = totals
-
-    if memo_key is not None:
-        # Callers treat VaultReport as read-only (its fields are "read-only
-        # signals" by contract); a caller that mutates one would poison the
-        # memo for the rest of the epoch.
-        _report_memo[memo_key] = report
     return report
 
 

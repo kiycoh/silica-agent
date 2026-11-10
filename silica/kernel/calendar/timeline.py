@@ -33,8 +33,8 @@ from silica.kernel.base import frontmatter
 from silica.kernel.base.noteshape import note_clock
 
 
-# vault -> (epoch, dated rows, paths of the notes the walk found no date for)
-_rows_memo: dict[str, tuple[str, list[tuple[str, str, str, str]], list[str]]] = {}
+# (epoch, vault) -> (dated rows, paths of the notes the walk found no date for)
+_rows_memo: dict[tuple[str, str], tuple[list[tuple[str, str, str, str]], list[str]]] = {}
 
 # What a date bound may be: a year, a month or a day (ADR-0148 point 1).
 DATE_PREFIX = re.compile(r"\d{4}(-\d{2}(-\d{2})?)?")
@@ -60,14 +60,13 @@ def _all_rows(vault: Path) -> list[tuple[str, str, str, str]]:
 def _scan(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
     """(the dated rows of `_all_rows`, the vault-relative paths of the notes
     the same walk found no date for), memoized together."""
-    from silica.kernel.base.layout import iter_notes, vault_epoch
+    from silica.kernel.base import layout
 
-    epoch = vault_epoch(str(vault))
-    if epoch:
-        hit = _rows_memo.get(str(vault))
-        if hit is not None and hit[0] == epoch:
-            return hit[1], hit[2]
+    return layout.on_epoch(_rows_memo, str(vault), lambda: _walk(vault), str(vault))
 
+
+def _walk(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
+    from silica.kernel.base.layout import iter_notes
     from silica.kernel.calendar.daily import daily_date, daily_rule
 
     days = daily_rule(vault)
@@ -91,10 +90,6 @@ def _scan(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
             continue
         label = str((data or {}).get("session_id") or f.stem)
         rows.append((str(date)[:10], label, f.stem, rel))
-
-    if epoch:
-        _rows_memo.clear()
-        _rows_memo[str(vault)] = (epoch, rows, undated)
     return rows, undated
 
 

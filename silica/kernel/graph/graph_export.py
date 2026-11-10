@@ -199,7 +199,7 @@ def stamp_native(nodes: list[dict], vault: Path) -> None:
     Its own read and not the note index, which parses every note: the YAML is
     the cost, so only a note whose text names one of the two keys is parsed,
     211 ms to 21 ms on the 730-note test vault (2026-10-07). ponytail: still one
-    read per note per build; memoize on vault_epoch as note_index.meta does if a
+    read per note per build; memoize with layout.on_epoch as note_index.meta does if a
     5k-note vault makes /graph wait on it.
     """
     from silica.kernel.base import frontmatter
@@ -1204,9 +1204,9 @@ def ctx_from_report(report) -> dict[str, dict]:
     return ctx
 
 
-# (epoch, folder) -> nx.Graph. `Any`, not `object`: the value IS a graph and is
-# used as one three lines below the read, and `object` only moved the knowledge
-# into a comment.
+# (epoch, folder) -> nx.Graph, kept by layout.on_epoch. `Any`, not `object`: the
+# value IS a graph and is used as one by every reader, and `object` only moved
+# the knowledge into a comment.
 _distance_graph_memo: dict[tuple[str, str], Any] = {}
 # Entry bound: the epoch sweep already drops stale epochs, so this only caps
 # how many FOLDER scopes can pin a graph at once inside one epoch. Oldest out.
@@ -1220,19 +1220,15 @@ def wikilink_graph_cached(folder: str = ""):
     both read the graph and never mutate it. See graph_distances for the
     memo's bound and eviction.
     """
-    from silica.kernel.base.layout import vault_epoch
+    from silica.kernel.base import layout
 
-    epoch = vault_epoch()
-    G = _distance_graph_memo.get((epoch, folder)) if epoch else None
-    if G is None:
+    def build():
         nodes, edges = build_graph_data(folder=folder)
-        G = edge_graph(nodes, edges)
-        if epoch:
-            for k in [k for k in _distance_graph_memo if k[0] != epoch]:
-                del _distance_graph_memo[k]
-            _distance_graph_memo[(epoch, folder)] = G
-            while len(_distance_graph_memo) > _DISTANCE_MEMO_CAP:
-                del _distance_graph_memo[next(iter(_distance_graph_memo))]
+        return edge_graph(nodes, edges)
+
+    G = layout.on_epoch(_distance_graph_memo, folder, build)
+    while len(_distance_graph_memo) > _DISTANCE_MEMO_CAP:
+        del _distance_graph_memo[next(iter(_distance_graph_memo))]
     return G
 
 

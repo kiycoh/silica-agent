@@ -203,19 +203,19 @@ def validate_event(data: dict) -> list[str]:
     return errors
 
 
-_scan_memo: dict[str, tuple[str, list[Event]]] = {}  # vault -> (epoch, events)
+_scan_memo: dict[tuple[str, str], list[Event]] = {}  # (epoch, vault) -> events
 
 
 def scan_events(vault: Path) -> list[Event]:
     """Every Event note of `vault`, memoized on its file-state epoch like the
     timeline walk."""
-    from silica.kernel.base.layout import iter_notes, vault_epoch
+    from silica.kernel.base import layout
 
-    epoch = vault_epoch(str(vault))
-    if epoch:
-        hit = _scan_memo.get(str(vault))
-        if hit is not None and hit[0] == epoch:
-            return hit[1]
+    return layout.on_epoch(_scan_memo, str(vault), lambda: _scan_events(vault), str(vault))
+
+
+def _scan_events(vault: Path) -> list[Event]:
+    from silica.kernel.base.layout import iter_notes
 
     events: list[Event] = []
     for rel, f in iter_notes(vault):
@@ -229,8 +229,4 @@ def scan_events(vault: Path) -> list[Event]:
         ev = parse_event(data, stem=f.stem, path=rel)
         if ev:
             events.append(ev)
-
-    if epoch:
-        _scan_memo.clear()
-        _scan_memo[str(vault)] = (epoch, events)
     return events

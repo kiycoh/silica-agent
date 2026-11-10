@@ -30,7 +30,7 @@ def snapshot(tmp_path, monkeypatch):
     """Point the semantic snapshot at a temp file (never the real vault index)."""
     p = tmp_path / "semantic_partition.json"
     monkeypatch.setattr(ge, "semantic_snapshot_path", lambda: p)
-    monkeypatch.setattr("silica.kernel.base.layout.vault_epoch", lambda: "test-epoch")
+    monkeypatch.setattr("silica.kernel.base.layout.vault_epoch", lambda v=None: "test-epoch")
     return p
 
 
