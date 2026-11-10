@@ -167,6 +167,26 @@ def test_gui_turn_roundtrip_replay_and_endpoints(narrator, monkeypatch, tmp_path
     assert SESSION.chat.messages[-1]["content"] == "Reply"
 
 
+def test_a_chat_reopened_by_its_address_keeps_its_session_listed_or_not(narrator, monkeypatch):
+    """The page reloads a chat by the id in its address (#chat/<sid>): a drop's
+    chat has no user turn yet and is not listed, and another vault's is not
+    either. Both go on in place, as the browser always had it: a fork would
+    hand a drop's jobs a session they no longer name."""
+    from fastapi.testclient import TestClient
+    from silica.obs import narration
+    from silica.ui.web import server, session
+    from silica.ui.web.session import SESSION
+
+    narrator.close()
+    SESSION.reset()
+    dropped = session.open_session()  # what a drop does before its first turn
+    assert dropped and narration.list_sessions("/v/demo") == []
+    SESSION.reset()
+    tc = TestClient(server.app)
+    assert tc.post("/session/load", json={"id": dropped}).status_code == 200
+    assert SESSION.chat.sid == dropped
+
+
 def test_gui_stop_narrates_cancel(narrator, monkeypatch):
     import threading
     from fastapi.testclient import TestClient
@@ -186,6 +206,7 @@ def test_repl_sessions_resume_handlers(narrator, monkeypatch, capsys):
     """The REPL surface: /sessions lists, /resume rebuilds messages from the
     narration, and the meta dispatcher owns both."""
     from silica.cli import _handle_slash_command
+    from silica.session.conversation import Conversation
 
     narrator.turn({"role": "user", "content": "prima domanda"})
     narrator.turn({"role": "assistant", "content": "prima risposta"})
@@ -195,15 +216,37 @@ def test_repl_sessions_resume_handlers(narrator, monkeypatch, capsys):
     monkeypatch.setattr("silica.session.seed.fresh_messages", lambda: [{"role": "system", "content": "seed"}])
     monkeypatch.setattr("silica.session.meter.update_context_tokens", lambda m: None)
 
-    assert _handle_slash_command("/sessions", []) is True
-    messages: list[dict] = []
-    assert _handle_slash_command("/resume 1", messages) is True
-    assert [m["content"] for m in messages] == ["seed", "prima domanda", "prima risposta"]
+    assert _handle_slash_command("/sessions", Conversation()) is True
+    conv = Conversation()
+    assert _handle_slash_command("/resume 1", conv) is True
+    assert [m["content"] for m in conv.messages] == ["seed", "prima domanda", "prima risposta"]
     from silica.obs.narration import NARRATOR
-    assert NARRATOR.sid == sid              # appending continues the same account
+    assert NARRATOR.sid == sid == conv.sid  # appending continues the same account
 
-    assert _handle_slash_command("/resume 99", []) is True   # graceful, no raise
-    assert _handle_slash_command("/sessions prune", []) is True  # usage line, no delete
+    assert _handle_slash_command("/resume 99", Conversation()) is True   # graceful, no raise
+    assert _handle_slash_command("/sessions prune", Conversation()) is True  # usage line, no delete
+
+
+def test_a_resumed_repl_chat_starts_with_nothing_collapsed(narrator, monkeypatch):
+    """Bug 3 (entry-sources re-audit, 2026-11-10): /resume replaced the history and
+    kept the old chat's `collapsed`, and both compaction passes skip every index in
+    it, so the reopened chat's tool results at those places were never stubbed.
+    The browser's /session/load always started the set over."""
+    from silica.cli import _handle_slash_command
+    from silica.session.conversation import Conversation
+
+    narrator.turn({"role": "user", "content": "prima domanda"})
+    narrator.turn({"role": "assistant", "content": "prima risposta"})
+    narrator.close()
+    monkeypatch.setattr("silica.session.seed.fresh_messages", lambda: [{"role": "system", "content": "seed"}])
+    monkeypatch.setattr("silica.session.meter.update_context_tokens", lambda m: None)
+
+    conv = Conversation(messages=[{"role": "system", "content": "old"}] * 6, collapsed={2, 3, 4})
+    assert _handle_slash_command("/resume 1", conv) is True
+    assert len(conv.messages) == 3 and conv.collapsed == set()
+    kept = Conversation(collapsed={1})
+    assert _handle_slash_command("/resume 99", kept) is True
+    assert kept.collapsed == {1}  # nothing reopened, nothing reset
 
 
 # --- observability levers (2026-09-06 audit) ---------------------------------

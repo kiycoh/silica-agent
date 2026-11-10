@@ -34,6 +34,7 @@ from silica.config import (
     live_env,
     PROVIDER_PREFIXES,
     RERANK_PORT,
+    SETTINGS,
     USER_ENV,
 )
 from silica.onboarding import settings_ops
@@ -43,11 +44,10 @@ from silica.onboarding import settings_ops
 class Row:
     """One line of the panel.
 
-    ``key`` is the env var written to the .env; ``attr`` the CONFIG attribute
-    mutated live (empty when the value only lives in the environment, as the
-    hosted API keys do). ``kind`` picks the control: toggle, text (with a
-    ``<datalist>`` when options are known), enum (a closed set, so a real
-    ``<select>``), secret, int, or readonly.
+    ``key`` is the env var written to the .env, and the settings row (`SETTINGS`)
+    it reads its field and its type from. ``kind`` picks the control: toggle,
+    text (with a ``<datalist>`` when options are known), enum (a closed set, so
+    a real ``<select>``), secret, int, or readonly.
 
     ``warn`` non-empty marks an *invalidating* row: applying it degrades the
     vault unless a repair runs, so the panel confirms first and names the
@@ -55,7 +55,6 @@ class Row:
     row's suggestions.
     """
     key: str
-    attr: str
     label: str
     kind: str
     help: str = ""
@@ -63,6 +62,15 @@ class Row:
     warn: str = ""
     models_of: str = ""
     curated: tuple[str, ...] = field(default=())
+
+    @property
+    def attr(self) -> str:
+        """The CONFIG attribute mutated live: the row's field, `_provider` read
+        through the `provider` property the panel assigns. Empty when the value
+        lives in the environment only (the hosted API keys, `live_env`) or is no
+        setting (the readonly rows, safe mode)."""
+        setting = SETTINGS.get(self.key)
+        return setting.field.lstrip("_") if setting is not None else ""
 
 
 # Rows the confirm lane owns: applying them needs a server-side sequence, not an
@@ -90,7 +98,7 @@ def _hosted_key_rows() -> tuple[Row, ...]:
     """One secret row per hosted provider, from the table the fallback chain and
     the wizard already share — a provider added there shows up here for free."""
     return tuple(
-        Row(key_env, "", f"{name} key", "secret", f"api key for {name}")
+        Row(key_env, f"{name} key", "secret", f"api key for {name}")
         for name, (key_env, _models) in HOSTED_PROVIDERS.items()
     )
 
@@ -99,108 +107,108 @@ def sections() -> dict[str, tuple[Row, ...]]:
     """The admitted rows, by panel section. A row may appear twice (thinking is
     both the session's one live toggle and a display preference); the panel
     syncs every control bound to the same key after a write."""
-    from silica.onboarding.wizard import EMBED_MODELS, RERANK_MODELS
+    from silica.onboarding.serve import EMBED_MODELS, RERANK_MODELS
 
     providers = tuple(sorted(PROVIDER_PREFIXES))
     table = {
         "Session": (
-            Row("SILICA_MODEL", "model", "model", "text", "what answers you",
+            Row("SILICA_MODEL", "model", "text", "what answers you",
                 models_of="chat"),
-            Row("SILICA_PROVIDER", "provider", "provider", "enum",
+            Row("SILICA_PROVIDER", "provider", "enum",
                 "where that model is served", options=providers),
-            Row("context", "", "context", "readonly", "tokens a turn is cut to"),
-            Row("SILICA_SHOW_THINKING", "show_thinking", "thinking", "toggle",
+            Row("context", "context", "readonly", "tokens a turn is cut to"),
+            Row("SILICA_SHOW_THINKING", "thinking", "toggle",
                 "show the model's reasoning as it works"),
         ),
         "Vault": (
-            Row(VAULT_KEY, "vault_path", "vault", "text",
+            Row(VAULT_KEY, "vault", "text",
                 "the folder silica reads and writes this session; the next launch curates the folder it starts in",
                 warn="switching rebuilds every index for the new folder"),
-            Row("SILICA_INBOX_DIR", "inbox_dir", "inbox folder", "text",
+            Row("SILICA_INBOX_DIR", "inbox folder", "text",
                 "where nucleated files land"),
-            Row(settings_ops.SAFE_MODE_KEY, "", "safe mode", "toggle",
+            Row(settings_ops.SAFE_MODE_KEY, "safe mode", "toggle",
                 "new notes land in a staging folder that mirrors your vault · "
                 "paste its contents over the vault to file them in place"),
-            Row("write_dir", "", "write dir", "readonly",
+            Row("write_dir", "write dir", "readonly",
                 "writes confined here · the rest is read-only context"),
-            Row("SILICA_GIT_COMMIT", "git_commit", "git commit", "enum",
+            Row("SILICA_GIT_COMMIT", "git commit", "enum",
                 "commit each write to the vault's repo", options=("off", "auto")),
         ),
         "Brains": (
-            Row("SILICA_PROVIDER", "provider", "provider", "enum",
+            Row("SILICA_PROVIDER", "provider", "enum",
                 "who serves the chat model · changing this also sets model and base url",
                 options=providers),
-            Row("SILICA_PROVIDER_BASE_URL", "provider_base_url", "base url", "text",
+            Row("SILICA_PROVIDER_BASE_URL", "base url", "text",
                 "endpoint for the chat model · used when the provider is custom"),
-            Row("SILICA_PROVIDER_API_KEY", "provider_api_key", "api key", "secret",
+            Row("SILICA_PROVIDER_API_KEY", "api key", "secret",
                 "key for that endpoint"),
-            Row("SILICA_MODEL", "model", "model", "text", "what answers you",
+            Row("SILICA_MODEL", "model", "text", "what answers you",
                 models_of="chat"),
-            Row("SILICA_EMBEDDING_MODEL", "embedding_model", "embedding model", "text",
+            Row("SILICA_EMBEDDING_MODEL", "embedding model", "text",
                 "what turns notes into vectors", models_of="embeddings",
                 warn=_EMBED_WARN, curated=tuple(EMBED_MODELS)),
-            Row("SILICA_EMBEDDING_BASE_URL", "embedding_base_url", "embedding url", "text",
+            Row("SILICA_EMBEDDING_BASE_URL", "embedding url", "text",
                 "where embeddings are computed", warn=_EMBED_WARN),
-            Row("SILICA_RERANK_MODEL", "rerank_model", "reranker", "text",
+            Row("SILICA_RERANK_MODEL", "reranker", "text",
                 "reorders recall results · optional", models_of="rerank",
                 curated=tuple(RERANK_MODELS)),
-            Row("SILICA_RERANK_BASE_URL", "rerank_base_url", "reranker url", "text",
+            Row("SILICA_RERANK_BASE_URL", "reranker url", "text",
                 f"empty turns reranking off · the [rerank] extra serves 127.0.0.1:{RERANK_PORT}/v1"),
-            Row("SILICA_WORKER_MODEL", "worker_model", "worker model", "text",
+            Row("SILICA_WORKER_MODEL", "worker model", "text",
                 "used for distilling · falls back to the chat model", models_of="chat"),
-            Row("SILICA_FALLBACK_MODELS", "fallback_models", "fallback models", "text",
+            Row("SILICA_FALLBACK_MODELS", "fallback models", "text",
                 "comma-separated · tried in order when a model's endpoint fails"),
-            Row("SILICA_TAVILY_API_KEY", "tavily_api_key", "web search key", "secret",
+            Row("SILICA_TAVILY_API_KEY", "web search key", "secret",
                 "tavily, the backstop when duckduckgo challenges us"),
             *_hosted_key_rows(),
         ),
         "Language": (
-            Row("SILICA_COOCCURRENCE_LANG", "cooccurrence_lang", "vault language", "text",
+            Row("SILICA_COOCCURRENCE_LANG", "vault language", "text",
                 "frozen per vault · drives keyword extraction",
                 warn="the language is frozen per vault · changing it after notes "
                      "exist makes old keywords disagree with new ones"),
-            Row("SILICA_STT_LANG", "stt_lang", "dictation language", "text",
+            Row("SILICA_STT_LANG", "dictation language", "text",
                 "what the microphone expects"),
-            Row("SILICA_STT_BROWSER", "stt_browser", "browser speech", "enum",
+            Row("SILICA_STT_BROWSER", "browser speech", "enum",
                 "the browser's own recognizer, when no transcriber answers, and its voices "
                 "for reading Memorize's questions aloud · on-device keeps audio on this machine, "
                 "cloud may send it to the browser's vendor",
                 options=("off", "on-device", "cloud")),
-            Row("SILICA_PDF_PROVIDER", "pdf_provider", "pdf reader", "enum",
+            Row("SILICA_PDF_PROVIDER", "pdf reader", "enum",
                 "how pdfs are turned into text"),
-            Row("SILICA_PDF_OCR_LANG", "pdf_ocr_lang", "pdf ocr languages", "text",
+            Row("SILICA_PDF_OCR_LANG", "pdf ocr languages", "text",
                 "tried in order when a pdf has no text layer"),
         ),
         "Display": (
-            Row("SILICA_USER_NAME", "user_name", "your name", "text",
+            Row("SILICA_USER_NAME", "your name", "text",
                 "how the new chat greets you · empty greets no one by name"),
-            Row("SILICA_THEME", "theme", "theme", "enum",
+            Row("SILICA_THEME", "theme", "enum",
                 "auto follows your system · dark is the crystal, light is warm paper",
                 options=("auto", "dark", "light")),
-            Row("SILICA_SHOW_THINKING", "show_thinking", "thinking", "toggle",
+            Row("SILICA_SHOW_THINKING", "thinking", "toggle",
                 "show the model's reasoning as it works"),
-            Row("SILICA_SHOW_BANNER", "show_banner", "banner", "toggle",
+            Row("SILICA_SHOW_BANNER", "banner", "toggle",
                 "show the banner on startup"),
-            Row("SILICA_TOOL_PROGRESS", "tool_progress", "tool progress", "enum",
+            Row("SILICA_TOOL_PROGRESS", "tool progress", "enum",
                 "how much of each tool call you see",
                 options=("off", "new", "all", "verbose")),
-            Row("SILICA_CAPTURE_SESSIONS", "capture_sessions", "capture sessions", "toggle",
+            Row("SILICA_CAPTURE_SESSIONS", "capture sessions", "toggle",
                 "keep a transcript of each session"),
-            Row("SILICA_VAULT_BRIEF", "vault_brief", "vault brief", "toggle",
+            Row("SILICA_VAULT_BRIEF", "vault brief", "toggle",
                 "a written sentence about what the vault holds, which the agent "
                 "reads when it picks among vaults · one worker call"),
-            Row("SILICA_MAX_CONTEXT", "max_context_tokens", "max context", "int",
+            Row("SILICA_MAX_CONTEXT", "max context", "int",
                 "tokens before the transcript is compacted"),
-            Row("SILICA_GRAPH_PARTICLES", "graph_particles", "graph particles", "toggle",
+            Row("SILICA_GRAPH_PARTICLES", "graph particles", "toggle",
                 "drifting dots along gap and similarity edges · off is quieter and cheaper"),
-            Row("SILICA_GRAPH_SHADING", "graph_shading", "3d graph shading", "toggle",
+            Row("SILICA_GRAPH_SHADING", "3d graph shading", "toggle",
                 "faceted nodes, crystal light and depth fog · off is the plain renderer"),
         ),
         # The switch is a row like any other so it persists the way they do;
         # the two files under it are drawn by the page (app-settings.js) from
         # GET /memory, since a file is not an env var (ADR-0076 §8).
         "Memory": (
-            Row("SILICA_MEMORY", "user_memory", "memory", "toggle",
+            Row("SILICA_MEMORY", "memory", "toggle",
                 "what silica remembers about you and your work, shown to every chat · "
                 "off pauses it and keeps the files"),
         ),
@@ -343,7 +351,7 @@ def _probe_models() -> dict[str, list[str]]:
     and embeddings usually share one server, so the usual cost is two requests."""
     from concurrent.futures import ThreadPoolExecutor
 
-    from silica.onboarding.wizard import endpoint_model_ids
+    from silica.onboarding.serve import endpoint_model_ids
 
     urls = settings_ops.base_urls()
     distinct = sorted({u for u in urls.values() if u})
@@ -396,13 +404,10 @@ def _truthy(value) -> bool:
 
 
 def _live_value(row: Row, value: str):
-    """The value as the CONFIG field's own type, so the next operation reads
-    what the panel shows rather than a string that only looks right."""
-    if row.kind == "toggle":
-        return _truthy(value)
-    if row.kind == "int":
-        return int(str(value).strip())
-    return str(value)
+    """The value as the next boot reads it: the row's own type over the text the
+    .env is given, so the live value and the one after a restart are one value
+    (a name typed with a space was set with it until a restart)."""
+    return SETTINGS[row.key].type(_env_text(row, value))
 
 
 def provider_group(provider: str) -> dict[str, str]:
@@ -418,12 +423,11 @@ def provider_group(provider: str) -> dict[str, str]:
     list, or whatever a local endpoint actually advertises. Neither answers → the
     model is left alone and the user picks it in the row below.
     """
-    from silica.model.providers import PROVIDER_PRESETS
-    from silica.onboarding.wizard import endpoint_model_ids
+    from silica.model.limits import base_url as fixed_url
+    from silica.onboarding.serve import endpoint_model_ids
 
     updates = {"SILICA_PROVIDER": provider}
-    preset = PROVIDER_PRESETS.get(provider, {})
-    base_url = preset.get("base_url", "")
+    base_url = fixed_url(provider)
     hosted = HOSTED_PROVIDERS.get(provider)
     if hosted:
         updates["SILICA_MODEL"] = hosted[1][0]

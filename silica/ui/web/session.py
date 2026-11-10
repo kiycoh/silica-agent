@@ -22,6 +22,7 @@ from typing import Any
 from silica.config import CONFIG
 from silica.kernel import system_lines
 from silica.session import meter
+from silica.session import conversation
 from silica.session.conversation import Conversation
 
 logger = logging.getLogger(__name__)
@@ -92,9 +93,8 @@ class Session:
         # Incognito is per chat in the GUI (ADR-0076 §8): a new chat is back on
         # the record, so the seed below gets its memory message again.
         user_memory.set_incognito(False)
-        # In place: an abandoned turn's worker still holds this list.
-        self.chat.messages[:], CONFIG.context_tokens = seeded()
-        self.chat = Conversation(messages=self.chat.messages)
+        seed, CONFIG.context_tokens = seeded()
+        self.chat = conversation.fresh(self.chat, seed)
         if not phone:
             self.release()
 

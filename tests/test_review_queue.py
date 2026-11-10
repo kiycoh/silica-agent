@@ -155,3 +155,18 @@ def test_legacy_global_store_adopted_once(tmp_path, monkeypatch):
     assert store.get("realhash") is not None, "real bundle must be adopted"
     assert store.get("junkhash") is None, "fixture pollution must be flushed"
     assert list(legacy.glob("*.json")) == [], "migration is one-shot: source drained"
+
+
+def test_a_sweep_that_raises_is_a_line_and_the_session_goes_on(monkeypatch):
+    """/anneal calls the sweep under its tool, and keeps the tool's tolerance: a
+    failure prints as the error its run gave, where a raise would end the REPL."""
+    from silica.commands import dispatch
+    from silica.router import anneal
+
+    def boom(**_kw):
+        raise RuntimeError("store unreadable")
+
+    monkeypatch.setattr(anneal, "sweep_deferred", boom)
+    out = dispatch("/anneal --limit=2", [])
+    said = [str(o) for objects, _ in out.lines for o in objects]
+    assert said == ["  Annealing 2 bundle(s)…", "  [yellow]RuntimeError: store unreadable[/]"]

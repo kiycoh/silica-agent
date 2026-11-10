@@ -15,18 +15,11 @@ import openai
 from pydantic import BaseModel
 
 from silica.model import llm
-from silica.model.limits import base_url
 from silica.model.llm import LLMResponse, openrouter_routing
 from silica.config import ROLE_FIELDS, ensure_prefix, role_provider
-from silica.provider_table import PROVIDERS
 from silica.metrics import emit, ms_since, number, outcome_of
 
 logger = logging.getLogger(__name__)
-
-# The endpoints in the shape ui/web/settings.py reads them, its last reader:
-# every other one asks limits.base_url or provider_table.
-PROVIDER_PRESETS = {name: {"base_url": base_url(name)} for name in PROVIDERS if base_url(name)}
-
 
 @dataclass(frozen=True)
 class Provider:

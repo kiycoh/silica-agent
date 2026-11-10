@@ -75,6 +75,20 @@ class TestRunNew:
         assert p == runs_dir / run.run_id / "payloads"
         assert p.is_dir()
 
+    def test_a_payload_task_is_written_as_runs_on_disk_carry_it(self, runs_dir):
+        run = _new_run()
+        plain = run.add_payload_task("enrich", {"notes": ["a.md"], "_reason": "old"}, "Batch 1 of 2")
+        asked = run.add_payload_task("dedup", {"pairs": []}, "near-duplicates", needs_confirmation=True)
+        # The bytes a run already on disk carries: the payload's own keys first,
+        # `_reason` in place, `needs_confirmation` only when it is asked for.
+        assert (run.payloads_dir / f"{plain.id}.json").read_text() == (
+            '{\n  "notes": [\n    "a.md"\n  ],\n  "_reason": "Batch 1 of 2"\n}')
+        assert plain.input_ref == str(run.payloads_dir / f"{plain.id}.json")
+        assert plain.payload() == {"notes": ["a.md"], "_reason": "Batch 1 of 2"}
+        assert asked.payload() == {"pairs": [], "_reason": "near-duplicates", "needs_confirmation": True}
+        (run.payloads_dir / f"{asked.id}.json").write_text("{torn")
+        assert asked.payload() == {}
+
     def test_save_persists_progress_mutations(self, runs_dir):
         run = _new_run()
         run.progress.add_task("recon", task_id="recon")

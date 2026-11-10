@@ -205,9 +205,9 @@ class Setting:
     value for), an empty value means unset and the next name answers.
 
     `field` is the SilicaConfig attribute, empty for a LIVE row. `doc` means
-    `.env.example` documents the key, `panel` that Settings has a row for it,
-    `hosted` that silica-hosted's units or docs name it, so it cannot be renamed
-    from this repo alone.
+    `.env.example` documents the key, `hosted` that silica-hosted's units or
+    docs name it, so it cannot be renamed from this repo alone. Whether Settings
+    shows it is the panel's own row (ui/web/settings.py), which reads this one.
     """
     key: str
     field: str = ""
@@ -216,7 +216,6 @@ class Setting:
     aliases: tuple[str, ...] = ()
     blank_unset: bool = False
     doc: bool = False
-    panel: bool = False
     hosted: bool = False
 
     def read(self) -> Any:
@@ -268,7 +267,7 @@ LIVE: dict[str, Setting] = {row.key: row for row in (
     # The key each hosted provider reads, from the table the chain already uses,
     # and the one litellm reads by itself. SILICA_ZOTERO_API_KEY is written by a
     # grant mid-session (claim_env), so a field would keep it empty until restart.
-    *(Setting(row.key_env, panel=True, doc=row.key_env in ("OPENROUTER_API_KEY", "OPENAI_API_KEY"),
+    *(Setting(row.key_env, doc=row.key_env in ("OPENROUTER_API_KEY", "OPENAI_API_KEY"),
               hosted=row.key_env == "OPENROUTER_API_KEY") for row in HOSTED.values()),
     Setting("ANTHROPIC_API_KEY", doc=True),
     Setting("SILICA_ZOTERO_API_KEY"),
@@ -663,17 +662,17 @@ class SilicaConfig:
     # a hosted model whose API key was never mentioned.
     # Examples: "openrouter/anthropic/claude-sonnet-4-20250514", "qwen3-30b"
     model: str = from_env(
-        "SILICA_MODEL", factory=lambda: model_from_env()[0], doc=True, panel=True, hosted=True
+        "SILICA_MODEL", factory=lambda: model_from_env()[0], doc=True, hosted=True
     )
 
     # Provider preset name (derived from model prefix by default, or overridden)
-    _provider: str | None = from_env("SILICA_PROVIDER", None, doc=True, panel=True, hosted=True)
+    _provider: str | None = from_env("SILICA_PROVIDER", None, doc=True, hosted=True)
 
     # Custom OpenAI-compatible endpoint (provider="custom"): base URL + key.
     # Covers any server speaking the OpenAI API without a dedicated preset —
     # vLLM, llama.cpp, LocalAI, Jan, or a hosted vendor we don't preset.
-    provider_base_url: str = from_env("SILICA_PROVIDER_BASE_URL", doc=True, panel=True)
-    provider_api_key: str = from_env("SILICA_PROVIDER_API_KEY", doc=True, panel=True)
+    provider_base_url: str = from_env("SILICA_PROVIDER_BASE_URL", doc=True)
+    provider_api_key: str = from_env("SILICA_PROVIDER_API_KEY", doc=True)
 
     # OpenRouter upstream-provider routing (model/llm.py). Comma-separated
     # provider names (e.g. "DeepInfra,Together") pinned as the routing `order`
@@ -694,7 +693,7 @@ class SilicaConfig:
     # refuses, a model it does not have (model/llm.py, ADR-0063).
     # Comma-separated litellm ids, e.g. "openrouter/deepseek/deepseek-v4-flash,
     # lmstudio/qwen3.5-9b"; empty keeps every call on its own model, as before.
-    fallback_models: str = from_env("SILICA_FALLBACK_MODELS", doc=True, panel=True, hosted=True)
+    fallback_models: str = from_env("SILICA_FALLBACK_MODELS", doc=True, hosted=True)
 
     # Distiller-only upstream-provider pin. Lets the constrained-decoding path
     # (kernel.prep_delegation.run_distiller) route to a different OpenRouter
@@ -734,7 +733,7 @@ class SilicaConfig:
     # --- Sub-agent worker model (leashed sub-agents run on a separate, smaller model) ---
     # The router (agent loop) uses `model`/`provider` above; sub-agents (dedup, refiner)
     # use these worker_* fields so they can run concurrently on a small local model.
-    worker_model: str | None = from_env("SILICA_WORKER_MODEL", None, doc=True, panel=True, hosted=True)
+    worker_model: str | None = from_env("SILICA_WORKER_MODEL", None, doc=True, hosted=True)
     # Which DELEGATE input document-shaped sources get: "outline" (the model
     # reads the source whole and names the ideas, kernel/outline.py) or
     # "keyphrase" (recon + payload windows). Measured 2026-09-02 on two SVM
@@ -786,7 +785,7 @@ class SilicaConfig:
     distill_concurrency: int = from_env("SILICA_DISTILL_CONCURRENCY", 3, int)
 
     # Vault path — used by the fs backend and for context.
-    vault_path: str = from_env("SILICA_VAULT", panel=True, hosted=True)
+    vault_path: str = from_env("SILICA_VAULT", hosted=True)
 
     # Obsidian vault display name (prompt fallback when no vault path is set).
     vault_name: str = from_env("SILICA_VAULT_NAME", doc=True)
@@ -804,7 +803,7 @@ class SilicaConfig:
     # itself — promotion is the only path into the vault. /incognito turns it
     # off for the running session without touching this.
     capture_sessions: bool = from_env(
-        "SILICA_CAPTURE_SESSIONS", False, true_word, doc=True, panel=True, hosted=True
+        "SILICA_CAPTURE_SESSIONS", False, true_word, doc=True, hosted=True
     )
 
     # User memory (ADR-0076): the two files the chat seed shows and only an
@@ -812,7 +811,7 @@ class SilicaConfig:
     # them unless the user asked, so on costs nothing until they do. Off pauses
     # (no snapshot, no write) and keeps the files; the Settings editor and its
     # reset still work, because erasing must not depend on this switch.
-    user_memory: bool = from_env("SILICA_MEMORY", True, true_word, doc=True, panel=True)
+    user_memory: bool = from_env("SILICA_MEMORY", True, true_word, doc=True)
 
     # Episodic memory lane (kernel/recall/episodic.py, ADR-0057): TTL in LIVED
     # days (days the lane captured or delivered a fact) since a chain head was
@@ -843,7 +842,7 @@ class SilicaConfig:
     ws_token: str = from_env("SILICA_WS_TOKEN")
 
     # Inbox folder inside the vault — used to archive and blacklist staging files.
-    inbox_dir: str = from_env("SILICA_INBOX_DIR", "Inbox", doc=True, panel=True)
+    inbox_dir: str = from_env("SILICA_INBOX_DIR", "Inbox", doc=True)
 
     # PDF→Markdown converter (ADR-0011 provider seam):
     # "pdfium" (default, BSD/Apache, in the base install — one ~3 MB wheel, no
@@ -858,7 +857,7 @@ class SilicaConfig:
     # and the doctor's converters row reports whether mineru is on PATH. The
     # pre-2026-08-31 value "pymupdf" is accepted as an alias of the default
     # (convert.resolve_pdf_provider). An unmet provider errors clearly.
-    pdf_provider: str = from_env("SILICA_PDF_PROVIDER", "pdfium", doc=True, panel=True, hosted=True)
+    pdf_provider: str = from_env("SILICA_PDF_PROVIDER", "pdfium", doc=True, hosted=True)
 
     # OCR languages for PDF conversion, comma-separated (split at point of use).
     # Only docling consumes it: mineru 3.x has no latin-script language option
@@ -868,14 +867,14 @@ class SilicaConfig:
     # latin-script languages share one EasyOCR model, so the list is cheap.
     # Language detection can't replace this: for a scanned PDF there is no text
     # to detect from until OCR runs.
-    pdf_ocr_lang: str = from_env("SILICA_PDF_OCR_LANG", "en,it,fr,de,es", doc=True, panel=True)
+    pdf_ocr_lang: str = from_env("SILICA_PDF_OCR_LANG", "en,it,fr,de,es", doc=True)
 
     # Tavily API key: the /web-search backstop when DuckDuckGo challenges us.
     # Empty is fine — DuckDuckGo is the primary lane and needs no key.
-    tavily_api_key: str = from_env("SILICA_TAVILY_API_KEY", aliases=("TAVILY_API_KEY",), doc=True, panel=True)
+    tavily_api_key: str = from_env("SILICA_TAVILY_API_KEY", aliases=("TAVILY_API_KEY",), doc=True)
 
     # Maximum context tokens before the agent warns.
-    max_context_tokens: int = from_env("SILICA_MAX_CONTEXT", 60000, int, doc=True, panel=True, hosted=True)
+    max_context_tokens: int = from_env("SILICA_MAX_CONTEXT", 60000, int, doc=True, hosted=True)
 
     # Tool progress display level (REPL-runtime, cycled with /verbose)
     # off     — total silence, only the final response
@@ -883,14 +882,14 @@ class SilicaConfig:
     # all     — every tool call with an args preview (default)
     # verbose — full args, truncated result, duration
     tool_progress: Literal["off", "new", "all", "verbose"] = from_env(
-        "SILICA_TOOL_PROGRESS", "all", doc=True, panel=True
+        "SILICA_TOOL_PROGRESS", "all", doc=True
     )
 
     # Debug logging to stderr (--verbose / -v CLI flag, not cycled)
     debug_logging: bool = from_env("SILICA_VERBOSE", False, true_word, doc=True)
 
     # Shows the model's reasoning blocks (runtime toggle with /thinking)
-    show_thinking: bool = from_env("SILICA_SHOW_THINKING", True, true_word, doc=True, panel=True)
+    show_thinking: bool = from_env("SILICA_SHOW_THINKING", True, true_word, doc=True)
 
     # Wall-clock backstop we enforce ourselves (> the litellm timeout below, so litellm's
     # own timeout wins if it ever fires). litellm's `timeout` kwarg does NOT fire on a
@@ -928,33 +927,33 @@ class SilicaConfig:
     _pinned: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
     # Startup banner art (True → wordmark, False → plain one-liner)
-    show_banner: bool = from_env("SILICA_SHOW_BANNER", True, true_word, doc=True, panel=True, hosted=True)
+    show_banner: bool = from_env("SILICA_SHOW_BANNER", True, true_word, doc=True, hosted=True)
 
     # Graph viewer: the drifting particles on the GAP and SIMILAR edges (both
     # renderers), and the crystal rig in 3D — flat shading, the two lights, the
     # camera-following fog. Off in either case is the bundle's own default, and
     # off costs nothing: particles alone hold the canvas awake at IDLE_FPS
     # forever, which on a settled graph is the largest standing cost in that view.
-    graph_particles: bool = from_env("SILICA_GRAPH_PARTICLES", True, true_word, panel=True)
-    graph_shading: bool = from_env("SILICA_GRAPH_SHADING", True, true_word, panel=True)
+    graph_particles: bool = from_env("SILICA_GRAPH_PARTICLES", True, true_word)
+    graph_shading: bool = from_env("SILICA_GRAPH_SHADING", True, true_word)
 
     # A sentence the worker model writes about what the vault holds, which
     # silica_vaults hands the agent when it picks among vaults. It was the chat
     # landing's second line until the greeting took the landing (ADR-0048,
     # amendment 2026-10-22). It costs a call, so it can be switched off.
-    vault_brief: bool = from_env("SILICA_VAULT_BRIEF", True, true_word, panel=True, hosted=True)
+    vault_brief: bool = from_env("SILICA_VAULT_BRIEF", True, true_word, hosted=True)
 
     # What the new chat calls you, "Hi <name>." in the web UI's greeting. Asked
     # for rather than derived: the address an account signs in with is not a
     # name, and a name guessed from one greets somebody else. Empty greets no
     # one by name.
-    user_name: str = from_env("SILICA_USER_NAME", "", str.strip, panel=True)
+    user_name: str = from_env("SILICA_USER_NAME", "", str.strip)
 
     # Web UI palette: "auto" follows the OS, "dark" and "light" pin it. Only the
     # browser can answer "auto", so the server ships the preference and a script
     # in <head> resolves it to a concrete data-theme before first paint. The
     # terminal UI has its own palette and does not read this.
-    theme: str = from_env("SILICA_THEME", "auto", str.lower, panel=True)
+    theme: str = from_env("SILICA_THEME", "auto", str.lower)
 
     # Embedding model — used by silica/kernel/recall/embed.py (Phase 3)
     # Default targets a local llama-server (`llama-server -m ... --embedding`) or
@@ -973,7 +972,7 @@ class SilicaConfig:
     # (LM Studio's id) matches no row. Other alternatives: "text-embedding-3-small"
     # (OpenAI), "nomic-embed-text" (Ollama).
     embedding_model: str = from_env(
-        "SILICA_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL, doc=True, panel=True, hosted=True
+        "SILICA_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL, doc=True, hosted=True
     )
 
     # Text prepended to every query / every document before embedding, for
@@ -990,7 +989,7 @@ class SilicaConfig:
     # Base URL for the embeddings endpoint — a local llama-server or LM Studio
     # instance by default.
     embedding_base_url: str = from_env(
-        "SILICA_EMBEDDING_BASE_URL", "http://localhost:1234/v1", doc=True, panel=True, hosted=True
+        "SILICA_EMBEDDING_BASE_URL", "http://localhost:1234/v1", doc=True, hosted=True
     )
     # Where search queries are embedded, when not at embedding_base_url (empty).
     # llama-server queues requests first in, first out, so a query sent during
@@ -1017,10 +1016,10 @@ class SilicaConfig:
     # (agent/rerank_serve.py, ADR-0073), which the wizard points it at. Down,
     # loading or empty, the pass is skipped and the pool's order stands.
     rerank_base_url: str = from_env(
-        "SILICA_RERANK_BASE_URL", f"http://localhost:{RERANK_PORT}/v1", doc=True, panel=True, hosted=True
+        "SILICA_RERANK_BASE_URL", f"http://localhost:{RERANK_PORT}/v1", doc=True, hosted=True
     )
     rerank_model: str = from_env(
-        "SILICA_RERANK_MODEL", "bge-reranker-v2-m3-Q8_0", doc=True, panel=True, hosted=True
+        "SILICA_RERANK_MODEL", "bge-reranker-v2-m3-Q8_0", doc=True, hosted=True
     )
     rerank_api_key: str = from_env("SILICA_RERANK_API_KEY", "lm-studio", doc=True, hosted=True)
     # Seconds one rerank call may take. 5 fits a GPU; a CPU scorer needs more
@@ -1068,7 +1067,7 @@ class SilicaConfig:
     # so a lecture that opens on silence or chatter can come out in the wrong
     # one: a vault that only ever records one language should fix the code.
     stt_lang: str = from_env(
-        "SILICA_STT_LANG", "auto", aliases=("SILICA_ASR_LANG",), doc=True, panel=True, hosted=True
+        "SILICA_STT_LANG", "auto", aliases=("SILICA_ASR_LANG",), doc=True, hosted=True
     )
     stt_api_key: str = from_env("SILICA_STT_API_KEY", "lm-studio", hosted=True)
 
@@ -1095,7 +1094,7 @@ class SilicaConfig:
     # recognition that runs inside the browser, "cloud" allows the vendor's
     # service too. It also decides which voices may read Learn aloud, since
     # Chrome's "Google" voices are the same kind of network service.
-    stt_browser: str = from_env("SILICA_STT_BROWSER", "off", doc=True, panel=True)
+    stt_browser: str = from_env("SILICA_STT_BROWSER", "off", doc=True)
 
     # COLLISION routing thresholds on the cosine of the cosine-best vault note
     # (ADR-0030). Measured 2026-08-23 as a risk-coverage curve (677 human-kept
@@ -1128,7 +1127,7 @@ class SilicaConfig:
     # Language for the co-occurrence graph stemmer + stopwords (kernel/recall/cooccurrence.py).
     # "auto" (default) detects the vault language from its own text at build time
     # and freezes it into the index; set an explicit Snowball language to override.
-    cooccurrence_lang: str = from_env("SILICA_COOCCURRENCE_LANG", "auto", doc=True, panel=True)
+    cooccurrence_lang: str = from_env("SILICA_COOCCURRENCE_LANG", "auto", doc=True)
 
     # BM25 tf term in the co-occurrence ranking leg (docs/specs/cooccur-scoring.md).
     # On by default since 2026-08-23 (ADR-0029). Gate 2026-07-25: +4.02pp recall@10,
@@ -1176,7 +1175,7 @@ class SilicaConfig:
     # "auto" → after each write batch, commit the touched docs/ paths with a
     # structured message. Additive to the undo journal (ADR-0002), never a
     # replacement. Only takes effect when the vault sits inside a git repo.
-    git_commit: Literal["off", "auto"] = from_env("SILICA_GIT_COMMIT", "off", doc=True, panel=True)
+    git_commit: Literal["off", "auto"] = from_env("SILICA_GIT_COMMIT", "off", doc=True)
 
     @property
     def verbose(self) -> bool:

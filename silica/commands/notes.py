@@ -51,7 +51,7 @@ def verify(c: Call) -> Result:
     signer, rest = _quoted_flag(args, "--as")
     name = " ".join(positional(rest))
     if not name or signer == "":
-        out.print('  Usage: /verify <note> [--clear] [--as "<name>"]')
+        out.print(f"  Usage: {c.row.synopsis}")
         return out
     try:
         nc = DRIVER.read_note(name)
@@ -93,7 +93,7 @@ def check(c: Call) -> Result:
 
     name = " ".join(positional(args))
     if not name:
-        out.print("  Usage: /check <note>")
+        out.print(f"  Usage: {c.row.synopsis}")
         return out
     try:
         path = DRIVER.read_note(name).ref.path or name
@@ -312,7 +312,7 @@ def delete(c: Call) -> Result:
     rest = raw_input.strip().split(maxsplit=1)
     ref = unquoted(rest[1]) if len(rest) > 1 else ""
     if not ref:
-        out.print("  Usage: /delete <path>  [dim](the note to delete; /undo brings it back)[/]")
+        out.print(f"  Usage: {c.row.synopsis}  [dim](the note to delete; /undo brings it back)[/]")
         return out
     try:
         nc = DRIVER.read_note(ref)
@@ -377,7 +377,7 @@ def trash(c: Call) -> Result:
         out.print(f"  Deleted for good: {len(items)} note{'s' if len(items) != 1 else ''}.")
         return out
     if verb not in ("restore", "erase") or len(rest) < 3:
-        out.print("  Usage: /trash [restore <path> | erase <path> | empty]")
+        out.print(f"  Usage: {c.row.synopsis}")
         return out
     # Everything after the verb is the path, as for /undo. A path deleted
     # twice is two items; the newest delete is the one meant.

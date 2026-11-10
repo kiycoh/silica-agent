@@ -292,29 +292,27 @@ def test_empty_report_tool_reports_nothing_to_do(monkeypatch):
 def test_cli_curate_dry_run_invokes_tool():
     from unittest.mock import MagicMock, patch
 
-    fake_tool = MagicMock()
-    fake_tool.run.return_value = json.dumps({
+    curate_fn = MagicMock(return_value={
         "status": "dry_run", "total": 1, "counts": {"orphan": 1},
         "items": [{"kind": "orphan", "target": "Lonely", "partner": "", "reason": ""}],
     })
-    with patch.dict("silica.tools.TOOLS", {"silica_curate": fake_tool}, clear=False):
+    with patch("silica.tools.curate.silica_curate", curate_fn):
         handled = run_command.direct("/curate Concepts", [])
     assert handled is True
-    fake_tool.run.assert_called_once_with(apply=False, folder="Concepts")
+    curate_fn.assert_called_once_with(apply=False, folder="Concepts")
 
 
 def test_cli_curate_apply_flag_passed_through():
     from unittest.mock import MagicMock, patch
 
-    fake_tool = MagicMock()
-    fake_tool.run.return_value = json.dumps({
+    curate_fn = MagicMock(return_value={
         "status": "applied", "total": 1, "counts": {"orphan": 1},
         "execution": {"outcome_counts": {"committed": 1, "no_link": 1}},
     })
-    with patch.dict("silica.tools.TOOLS", {"silica_curate": fake_tool}, clear=False):
+    with patch("silica.tools.curate.silica_curate", curate_fn):
         handled = run_command.direct("/curate --apply", [])
     assert handled is True
-    fake_tool.run.assert_called_once_with(apply=True, folder="")
+    curate_fn.assert_called_once_with(apply=True, folder="")
 
 
 def test_cli_curate_apply_prints_real_outcomes_not_planned_counts(monkeypatch):
@@ -323,8 +321,7 @@ def test_cli_curate_apply_prints_real_outcomes_not_planned_counts(monkeypatch):
     from unittest.mock import MagicMock, patch
     from silica.term.console import CONSOLE
 
-    fake_tool = MagicMock()
-    fake_tool.run.return_value = json.dumps({
+    curate_fn = MagicMock(return_value={
         "status": "applied", "total": 1, "counts": {"dedup": 1},
         "execution": {
             "outcome_counts": {"no_merge": 1},
@@ -334,7 +331,7 @@ def test_cli_curate_apply_prints_real_outcomes_not_planned_counts(monkeypatch):
     })
     buf: list[str] = []
     monkeypatch.setattr(CONSOLE, "print", lambda *a, **kw: buf.append(" ".join(str(x) for x in a)))
-    with patch.dict("silica.tools.TOOLS", {"silica_curate": fake_tool}, clear=False):
+    with patch("silica.tools.curate.silica_curate", curate_fn):
         handled = run_command.direct("/curate --apply", [])
     assert handled is True
     printed = "\n".join(buf)

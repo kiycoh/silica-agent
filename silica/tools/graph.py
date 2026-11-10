@@ -671,7 +671,6 @@ def silica_vault_report(
     follow-ups: silica_graph_export for a visual graph, silica_curate straight
     to executable maintenance.>>
     """
-    import orjson
     from pathlib import Path
 
     from silica.config import CONFIG
@@ -795,18 +794,11 @@ def silica_vault_report(
         inputs={"scope": folder or "vault"},
         facts=to_facts(report),
     )
-    payloads_dir = run.payloads_dir
 
     # Seed tasks from auto + propose (propose carries needs_confirmation flag)
     for candidate in plan.auto + plan.propose:
-        task = run.progress.add_task(candidate.capability_name)
-        payload = dict(candidate.payload)
-        payload["_reason"] = candidate.reason
-        if candidate.tier == "propose":
-            payload["needs_confirmation"] = True
-        payload_path = str(payloads_dir / f"{task.id}.json")
-        Path(payload_path).write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
-        task.input_ref = payload_path
+        run.add_payload_task(candidate.capability_name, candidate.payload, candidate.reason,
+                             needs_confirmation=candidate.tier == "propose")
 
     for i, candidate in enumerate(plan.escalate):
         card = IssueCard(

@@ -881,7 +881,7 @@ class TestRunWizard:
 
 class TestEndpointModelIds:
     def test_returns_ids_from_openai_models_payload(self, monkeypatch):
-        import silica.onboarding.wizard as wizard
+        from silica.onboarding import serve
 
         class _Resp:
             @staticmethod
@@ -889,16 +889,16 @@ class TestEndpointModelIds:
                 return {"data": [{"id": "a"}, {"id": "b"}, {"no_id": 1}]}
 
         monkeypatch.setattr("httpx.get", lambda url, headers=None, timeout=0: _Resp())
-        assert wizard.endpoint_model_ids("http://x/v1") == ["a", "b"]
+        assert serve.endpoint_model_ids("http://x/v1") == ["a", "b"]
 
     def test_returns_empty_on_error(self, monkeypatch):
-        import silica.onboarding.wizard as wizard
+        from silica.onboarding import serve
 
         def _raise(url, timeout=0):
             raise OSError("down")
 
         monkeypatch.setattr("httpx.get", _raise)
-        assert wizard.endpoint_model_ids("http://x/v1") == []
+        assert serve.endpoint_model_ids("http://x/v1") == []
 
 
 class TestVramTiers:

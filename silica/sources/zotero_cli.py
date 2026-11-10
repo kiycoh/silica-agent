@@ -4,7 +4,7 @@
 """/zotero: the linked Zotero library as a command (ADR-0055 "Chat and commands")."""
 from __future__ import annotations
 
-from silica.command_table import Call, Result
+from silica.command_table import ROWS, Call, Result
 
 
 def command(c: Call) -> Result:
@@ -74,7 +74,7 @@ def run(tokens: list[str], console) -> None:
             console.print(f"  Removed {res['notes']} note(s) and {res['collections']} collection(s) "
                           "from Zotero.")
         else:
-            console.print("  Usage: /zotero [file|group|unlink|grant] [--apply|--yes]")
+            console.print(f"  Usage: {ROWS['/zotero'].synopsis}")
     except zotero.ZoteroError as exc:
         console.print(f"  [yellow]Zotero: {exc}[/]")
 

@@ -99,11 +99,10 @@ def test_refresh_works_with_embedder_down(vault, monkeypatch):
 
 
 def test_cli_cooccur_command_routes_to_tool():
-    """'/cooccur --force' reaches silica_cooccurrence_refresh with force=True."""
+    """'/cooccur --force' reaches the cooccurrence index's refresh with force=True."""
     from unittest.mock import patch
     import silica.cli  # noqa: F401  registers every tool
     from tests.run_command import direct
-    from silica.tools import TOOLS
 
     received: dict = {}
 
@@ -112,14 +111,8 @@ def test_cli_cooccur_command_routes_to_tool():
         received["force"] = force
         return {"indexed": 3, "total_notes": 3, "read_errors": 0, "index_path": "/tmp/x"}
 
-    tool = TOOLS["silica_cooccurrence_refresh"]
-    orig = tool.fn
-    tool.fn = capture
-    try:
-        with patch("silica.cli.CONSOLE"):
-            result = direct("/cooccur --force", [])
-    finally:
-        tool.fn = orig
+    with patch("silica.kernel.recall.refresh.cooccurrence", capture), patch("silica.cli.CONSOLE"):
+        result = direct("/cooccur --force", [])
 
     assert result is True
     assert received.get("force") is True

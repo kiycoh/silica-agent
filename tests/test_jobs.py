@@ -716,3 +716,44 @@ def test_a_job_hands_convert_its_page_count_and_where_the_note_goes(monkeypatch)
     assert jobs._converted("j1", Path("a.pdf"), "", beside=True) == ["n.md"]
     assert seen == {"target": "a.pdf", "beside": True}
     assert updates[0]["progress"] == {"done": 1, "total": 2}
+
+
+def test_nucleate_it_runs_the_typed_command_with_every_flag_on_the_jobs_notes(client, monkeypatch):
+    """B1 (ui-web re-audit, 2026-11-10): a /nucleate typed with a file to convert
+    became a job that kept --target alone, and its "Nucleate it" answered 400, the
+    note being the vault's and not a chat's. The command now runs on the job's
+    note with every word typed after the file."""
+    from silica.sources import ingest
+
+    tc, _, ran = client
+    asked: dict = {}
+    monkeypatch.setattr(ingest, "nucleate", lambda files, **kw: (asked.update(files=files, **kw), "")[1])
+    _inbox().mkdir(parents=True, exist_ok=True)
+    (_inbox() / "talk.mp3").write_bytes(b"\0" * 16)
+    r = tc.post("/chat", json={"text": "/nucleate Inbox/talk.mp3 --hub=H --profile=P --seen=2026-11-01 "
+                                       "--no-keep-sources --target=Lectures"})
+    assert r.status_code == 202
+    job = r.json()["jobs"][0]
+    assert "flags" not in job  # the job's frames are as they were
+    _drain()
+    notes = _record(job["id"])["notes"]
+    assert tc.post(f"/jobs/{job['id']}/turn", json={"as": "nucleate"}).status_code == 200
+    assert asked["files"] == notes and notes
+    assert {k: asked[k] for k in ("target_dir", "hub", "profile", "seen", "keep_sources")} == {
+        "target_dir": "Lectures", "hub": "H", "profile": "P", "seen": "2026-11-01", "keep_sources": False}
+    assert "text" not in ran  # no agent turn around it
+
+
+def test_nucleate_it_on_a_typed_convert_nucleates_its_notes_without_its_target(client, monkeypatch):
+    """/convert's --target is where the note was written, not where /nucleate files it."""
+    from silica.sources import ingest
+
+    tc, _, _ = client
+    asked: dict = {}
+    monkeypatch.setattr(ingest, "nucleate", lambda files, **kw: (asked.update(files=files, **kw), "")[1])
+    _inbox().mkdir(parents=True, exist_ok=True)
+    (_inbox() / "talk.mp3").write_bytes(b"\0" * 16)
+    job = tc.post("/chat", json={"text": "/convert Inbox/talk.mp3 --target=Lectures"}).json()["jobs"][0]
+    _drain()
+    assert tc.post(f"/jobs/{job['id']}/turn", json={"as": "nucleate"}).status_code == 200
+    assert asked["files"] == _record(job["id"])["notes"] and asked["target_dir"] == ""

@@ -4,51 +4,47 @@
 """/embed, /cooccur, /lexical, /wiki, /graph, /map: what is built from the vault."""
 from __future__ import annotations
 
-import json
-
 from silica.command_table import Call, Result
 from silica.config import CONFIG
 from silica.session.words import positional
 
 
-_REFRESH = {
-    "/embed": ("silica_embed_refresh", ""),
-    "/cooccur": ("silica_cooccurrence_refresh", " (co-occurrence)"),
-    "/lexical": ("silica_lexical_refresh", " (lexical)"),
-}
+_LABELS = {"/embed": "", "/cooccur": " (co-occurrence)", "/lexical": " (lexical)"}
 
 
 def _refresh(c: Call, cmd: str) -> Result:
     """/embed|/cooccur|/lexical [folder] [--force] — rebuild one index.
 
-    One body, three commands: `_REFRESH` maps each to its tool and its label.
+    One body, three commands: each builds its index in `kernel.recall.refresh`.
     """
-    from silica.tools import TOOLS
+    from silica.commands import answered
+    from silica.kernel.recall import refresh
 
     args, out = c.args, c.out
-    tool, label = _REFRESH[cmd]
+    label = _LABELS[cmd]
     folder = ""
     for part in args:
         if part.startswith("--folder="):
             folder = part[len("--folder="):]
         elif not part.startswith("-"):
             folder = part
-    result = TOOLS[tool].run(folder=folder, force="--force" in args)
-    try:
-        parsed = json.loads(result)
-        if "error" in parsed:
-            out.print(f"  [red]Error:[/] {parsed['error']}")
-        else:
-            out.print(
-                f"  Indexed: [bold]{parsed.get('indexed', '?')}[/] / "
-                f"{parsed.get('total_notes', '?')} notes{label}"
-            )
-        if parsed.get("read_errors"):
-            out.print(f"  [yellow]Read errors:[/] {parsed['read_errors']}")
-    except Exception:
-        # A tool's answer that is not the JSON above: said as it came, since a
-        # refresh that ran and cannot be read back is still worth showing.
-        out.print(result)
+    force = "--force" in args
+    if cmd == "/embed":
+        # A note's pictures are read by the chat model, as the tool's refresh has them read.
+        from silica.agent.vision import ask_chat_model
+
+        parsed = answered(refresh.embed, folder, force, ask=ask_chat_model)
+    else:
+        parsed = answered(refresh.cooccurrence if cmd == "/cooccur" else refresh.lexical, folder, force)
+    if "error" in parsed:
+        out.print(f"  [red]Error:[/] {parsed['error']}")
+    else:
+        out.print(
+            f"  Indexed: [bold]{parsed.get('indexed', '?')}[/] / "
+            f"{parsed.get('total_notes', '?')} notes{label}"
+        )
+    if parsed.get("read_errors"):
+        out.print(f"  [yellow]Read errors:[/] {parsed['read_errors']}")
     return out
 
 
@@ -113,29 +109,25 @@ def graph(c: Call) -> Result:
 def mind_map(c: Call) -> Result:
     """/map <note> [--force] — the association field around one note."""
     args, out = c.args, c.out
-    from silica.tools import TOOLS
+    from silica.commands import answered
+    from silica.tools import graph as graph_tools
 
     force = "--force" in args
     note = " ".join(positional(args)).strip()
     if not note:
-        out.print("  Usage: /map <note> [--force]")
+        out.print(f"  Usage: {c.row.synopsis}")
         return out
-    result = TOOLS["silica_mindmap"].run(note_path=note, force=force)
-    try:
-        parsed = json.loads(result)
-        if parsed.get("skipped"):
-            out.print(
-                f"  [yellow]Map already present[/] ({parsed['skipped']}), not "
-                "overwritten. Use [bold]/map <note> --force[/] to regenerate."
-            )
-        elif "error" in parsed:
-            out.print(f"  [red]{parsed['error']}[/]")
-        else:
-            out.print(
-                f"  Map written: [bold]{parsed.get('path', '?')}[/] "
-                f"({parsed.get('nodes', '?')} nodes, {parsed.get('edges', '?')} edges)"
-            )
-    except Exception:
-        # Not the JSON the tool answers with: said as it came.
-        out.print(result)
+    parsed = answered(graph_tools.silica_mindmap, note_path=note, force=force)
+    if parsed.get("skipped"):
+        out.print(
+            f"  [yellow]Map already present[/] ({parsed['skipped']}), not "
+            "overwritten. Use [bold]/map <note> --force[/] to regenerate."
+        )
+    elif "error" in parsed:
+        out.print(f"  [red]{parsed['error']}[/]")
+    else:
+        out.print(
+            f"  Map written: [bold]{parsed.get('path', '?')}[/] "
+            f"({parsed.get('nodes', '?')} nodes, {parsed.get('edges', '?')} edges)"
+        )
     return out

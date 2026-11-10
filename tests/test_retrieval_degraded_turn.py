@@ -198,11 +198,6 @@ def rig(tmp_vault, monkeypatch, no_owner_servers):
         "rerank_api_key": "", "rerank_timeout": 5.0, "memory_vault": vault,
     }.items():
         monkeypatch.setattr(CONFIG, key, value)
-    # silica-core's own embedder reads the environment, which names the owner's
-    # server; its vectors are never built here, but nothing may even try.
-    from silica_core import config as core_config
-
-    monkeypatch.setattr(core_config.CONFIG, "embedding_base_url", "")
     monkeypatch.setattr(silica.driver, "_driver", None)
     embed_mod.clear()
     cooc_mod.clear()

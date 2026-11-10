@@ -49,13 +49,14 @@ def anneal(c: Call) -> Result:
     one leg that calls a model: a bounded repair loop per bundle that still fails.
     """
     args, out = c.args, c.out
-    from silica.tools import TOOLS
+    from silica.commands import answered
+    from silica.router import anneal as annealing
 
     steer = any(p == "--steer" for p in args)
     limit = int_flag(args, "--limit=", 0)
     scope = f"{limit} bundle(s)" if limit else "every bundle"
     out.print(f"  Annealing {scope}{' with escalation' if steer else ''}…")
-    res = json.loads(TOOLS["silica_anneal"].run(steer=steer, limit=limit))
+    res = answered(annealing.sweep_deferred, steer=steer, limit=limit)
     if "error" in res:
         out.print(f"  [yellow]{res['error']}[/]")
         return out
@@ -85,7 +86,8 @@ def anneal(c: Call) -> Result:
 def curate(c: Call) -> Result:
     """/curate [folder] [--apply] — the curation pass over a folder."""
     args, out = c.args, c.out
-    from silica.tools import TOOLS
+    from silica.commands import answered
+    from silica.tools import curate as curation
 
     apply = any(p == "--apply" for p in args)
     folder = " ".join(positional(args))
@@ -94,7 +96,7 @@ def curate(c: Call) -> Result:
         out.print(f"  Curate on [bold]{scope}[/] — applying via the worker seam…")
     else:
         out.print(f"  Curate on [bold]{scope}[/] — dry-run (nothing is written)…")
-    res = json.loads(TOOLS["silica_curate"].run(apply=apply, folder=folder))
+    res = answered(curation.silica_curate, apply=apply, folder=folder)
     if "error" in res:
         out.print(f"  [yellow]{res['error']}[/]")
         return out
@@ -128,14 +130,15 @@ def curate(c: Call) -> Result:
 def aliases(c: Call) -> Result:
     """/aliases [note] — alias coverage, and what is missing."""
     args, out = c.args, c.out
-    from silica.tools import TOOLS
+    from silica.commands import answered
+    from silica.tools import aliases as consolidation
 
     apply = any(p == "--apply" for p in args)
     folder = " ".join(positional(args))
     scope = folder or "(vault)"
     mode = "applying" if apply else "dry-run (nothing is written)"
     out.print(f"  Alias consolidation on [bold]{scope}[/] — {mode}…")
-    res = json.loads(TOOLS["silica_aliases"].run(apply=apply, folder=folder))
+    res = answered(consolidation.silica_aliases, apply=apply, folder=folder)
     if "error" in res:
         out.print(f"  [yellow]{res['error']}[/]")
         return out
@@ -183,8 +186,6 @@ def _seed_batch_ledger(out: Result, cap: str, payloads: list[dict], *, kind: str
     hand back what the agent is asked, with the event that opens the REPL's batch
     panel on it. Shared by /enrich and /dedup — the async, resumable,
     progress-tracked path."""
-    from pathlib import Path
-    import orjson
     from silica.kernel.progress import PlanStep, Run
     from silica.obs.events import BatchRunStartEvent
 
@@ -195,11 +196,7 @@ def _seed_batch_ledger(out: Result, cap: str, payloads: list[dict], *, kind: str
         inputs={"scope": label},
     )
     for i, payload in enumerate(payloads):
-        task = run.progress.add_task(cap)
-        body = {**payload, "_reason": f"Batch {i + 1} of {len(payloads)}"}
-        payload_path = str(run.payloads_dir / f"{task.id}.json")
-        Path(payload_path).write_bytes(orjson.dumps(body, option=orjson.OPT_INDENT_2))
-        task.input_ref = payload_path
+        run.add_payload_task(cap, payload, f"Batch {i + 1} of {len(payloads)}")
     run.save()
     out.batch = BatchRunStartEvent(run_id=run.run_id, kind=kind, label=label, total=len(payloads))
     from silica.obs import narration as _narr_mod

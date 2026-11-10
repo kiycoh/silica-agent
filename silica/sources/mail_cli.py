@@ -13,10 +13,10 @@ import re
 
 from rich.markup import escape
 
-from silica.command_table import Call, Result
+from silica.command_table import ROWS, Call, Result
 
-USAGE = ("  Usage: /mail · /mail import <file.mbox|file.eml> [--label=X] [--me=ADDR] [--all] "
-         "[--limit=N] [--apply]")
+# Its two forms, bare and `import`, read off the row /help shows.
+USAGE = f"  Usage: {ROWS['/mail'].name} · {ROWS['/mail'].name} {ROWS['/mail'].form('import')}"
 
 
 # A flag and its value, quoted or not: `--label="Category Promotions"` is one

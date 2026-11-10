@@ -15,7 +15,6 @@ from silica.kernel.write.ops import Txn
 from silica.router.states import finalize
 from silica.router.orchestrator import InjectorFSM
 from silica.router.phases import InjectorState
-from silica.tools import TOOLS
 from silica.router.run_state import ChunkState
 
 
@@ -473,22 +472,6 @@ class TestT6DirectShortcuts:
             result = direct("/status", [])
         assert result is True
 
-    def _swap_tool_fn(self, tool_name: str, new_fn):
-        """Context manager that temporarily replaces Tool.fn (bypasses __slots__ read-only issue)."""
-        import contextlib
-
-        @contextlib.contextmanager
-        def _ctx():
-            tool = TOOLS[tool_name]
-            orig = tool.fn
-            tool.fn = new_fn
-            try:
-                yield
-            finally:
-                tool.fn = orig
-
-        return _ctx()
-
     def test_find_preserves_case(self):
         """'/find Neural Networks' reaches the search with original casing."""
         received_query = []
@@ -508,16 +491,16 @@ class TestT6DirectShortcuts:
         assert received_query == ["Neural Networks"], f"Case destroyed: got {received_query}"
 
     def test_embed_with_force_flag(self):
-        """'/embed --force' passes force=True to the tool."""
+        """'/embed --force' passes force=True to the embedding index's refresh."""
         received = {}
         from tests.run_command import direct
 
-        def capture_embed(folder: str = "", force: bool = False):
+        def capture_embed(folder: str = "", force: bool = False, *, ask=None):
             received["folder"] = folder
             received["force"] = force
             return {"indexed": 0, "total_notes": 0, "read_errors": 0, "index_path": "/tmp/idx"}
 
-        with self._swap_tool_fn("silica_embed_refresh", capture_embed):
+        with patch("silica.kernel.recall.refresh.embed", capture_embed):
             with patch("silica.cli.CONSOLE"):
                 direct("/embed --force", [])
 

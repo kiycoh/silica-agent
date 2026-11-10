@@ -99,11 +99,10 @@ def test_direct_args_group_a_double_quoted_name_and_leave_apostrophes_and_tags_a
 def test_map_resolves_a_quoted_title_with_spaces(monkeypatch):
     seen = {}
 
-    class _Tool:
-        def run(self, note_path, force=False):
-            seen["note"] = note_path
-            return '{"skipped": true, "path": "maps/x.canvas"}'
+    def mindmap(note_path, force=False):
+        seen["note"] = note_path
+        return {"skipped": "maps/x.canvas", "reason": "exists"}
 
-    monkeypatch.setattr("silica.tools.TOOLS", {"silica_mindmap": _Tool()})
+    monkeypatch.setattr("silica.tools.graph.silica_mindmap", mindmap)
     assert direct('/map "Galileo Galilei"', []) is True
     assert seen["note"] == "Galileo Galilei"

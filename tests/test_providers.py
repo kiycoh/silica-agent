@@ -172,13 +172,15 @@ class TestProviders(unittest.TestCase):
         self.assertIsNone(captured["temperature"])
 
 
-def test_presets_are_a_subset_of_known_prefixes():
-    """Every preset name must be an auto-prefixable provider prefix, else its
-    bare model never gets `provider/` prepended and routing silently breaks."""
-    from silica.model.providers import PROVIDER_PRESETS
+def test_every_provider_with_an_endpoint_is_a_known_prefix():
+    """A provider the Settings panel points at a fixed endpoint must be an
+    auto-prefixable provider prefix, else its bare model never gets `provider/`
+    prepended and routing silently breaks."""
     from silica.config import PROVIDER_PREFIXES
+    from silica.model.limits import base_url
+    from silica.provider_table import PROVIDERS
 
-    assert set(PROVIDER_PRESETS) <= PROVIDER_PREFIXES
+    assert {name for name in PROVIDERS if base_url(name)} <= PROVIDER_PREFIXES
 
 
 def test_a_hosted_row_carries_everything_its_readers_need():

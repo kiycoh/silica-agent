@@ -54,6 +54,25 @@ class Command:
     # typed from habit it still runs.
     aliases: tuple[str, ...] = ()
 
+    @property
+    def synopsis(self) -> str:
+        """The command and its usage, as a handler's usage line says it: written
+        here once, since the handlers' own copies had drifted from what /help
+        and the picker show."""
+        return f"{self.name} {self.usage}".rstrip()
+
+    def form(self, word: str) -> str:
+        """The optional part of `usage` that starts with `word`, its brackets
+        dropped: how a refusal names the one form it was given wrong
+        (`--teach <note>` out of /memorize's usage)."""
+        at = self.usage.index("[" + word)
+        depth = 0
+        for i, ch in enumerate(self.usage[at:], at):
+            depth += {"[": 1, "]": -1}.get(ch, 0)
+            if depth == 0:
+                return self.usage[at + 1:i]
+        raise ValueError(f"{self.name}: unbalanced brackets in its usage")
+
 
 @dataclass
 class Result:
@@ -131,6 +150,7 @@ def unseen(out: Result) -> AbstractContextManager:
 class Call:
     """One line, on its way to a handler."""
 
+    row: Command              # the command's row, whose usage the handler's usage lines say
     args: list[str]           # the words after the command, read the way its row says
     raw: str                  # the line as typed: a query or a path keeps its case
     messages: list[dict]      # the conversation, for what acts on it
@@ -169,7 +189,7 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/nucleate",
         group="workflow",
-        usage="<file...> [--target=DIR] [--hub=H]",
+        usage="<file...> [--target=DIR] [--hub=H] [--profile=P] [--seen=YYYY-MM-DD] [--no-keep-sources]",
         summary="bring files in: notes via Injector FSM, code as skeleton stubs",
         examples=(
             "/nucleate Inbox/note.md --target=Concepts/AI",
@@ -289,7 +309,7 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/quiz",
         group="workflow",
-        usage="[note|folder] [--n=10]",
+        usage='[note|folder] [--n=10] [--focus="passage"]',
         summary="active-recall quiz; graded answers resurface the notes you miss. No target = review queue",
         examples=("/quiz Concepts/ML --n=5", "/quiz"),
         handler="silica.commands.learn:quiz", shlex=True, view="learn",
@@ -374,7 +394,8 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/find",
         group="direct",
-        usage="<query> [--k=N]",
+        usage="<query> [--k=N] [--min-trust=human|grounded|distilled|kept] "
+              "[--lifecycle=active|review|contested|superseded]",
         summary="semantic search",
         handler="silica.commands.reading:find",
     ),

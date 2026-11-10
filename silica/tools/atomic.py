@@ -1489,7 +1489,6 @@ def silica_ledger_next(run_id: Annotated[str, Field(description='Run ID returned
     is exhausted.
     """
     import orjson
-    from pathlib import Path
     from silica.kernel.progress import ProgressLedger
 
     try:
@@ -1506,13 +1505,7 @@ def silica_ledger_next(run_id: Annotated[str, Field(description='Run ID returned
     tasks: list[dict] = []
     budget = LEDGER_DRAIN_BYTES
     for t in ready:
-        payload: dict = {}
-        if t.input_ref:
-            try:
-                payload = orjson.loads(Path(t.input_ref).read_bytes())
-            except Exception:
-                pass
-
+        payload = t.payload()
         entry = {
             "task_id": t.id,
             "capability": t.capability_name,

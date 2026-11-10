@@ -97,19 +97,16 @@ def status(c: Call) -> Result:
                 out.print(f"    [cyan]{sv.kind}[/] {sv.summary} [dim](running)[/]")
             if st.gaps:
                 out.print(f"  [yellow]gaps in the record: {st.gaps}[/]")
-    from silica.tools import TOOLS
+    from silica.commands import answered
+    from silica.tools import runners
 
     run_id = args[0] if (len(args) + 1) > 1 else ""
-    result = TOOLS["silica_ledger_digest"].run(run_id=run_id)
-    try:
-        parsed = json.loads(result)
-        digest = parsed.get("digest", result)
-        # Preformatted plain text: Markdown would reflow every line into one
-        # paragraph, and markup would eat the "[16 checkpoints]" brackets.
-        out.print(str(digest), markup=False, highlight=False)
-    except Exception:
-        # Not the digest's JSON: said as it came, since it is all there is.
-        out.print(result)
+    parsed = answered(runners.silica_ledger_digest, run_id=run_id)
+    # A run that cannot be read is said as the JSON it always was.
+    digest = parsed["digest"] if "digest" in parsed else json.dumps(parsed, ensure_ascii=False)
+    # Preformatted plain text: Markdown would reflow every line into one
+    # paragraph, and markup would eat the "[16 checkpoints]" brackets.
+    out.print(str(digest), markup=False, highlight=False)
     # E(vault) cache line — written by /report (write_report). No cache
     # file → nothing shown; /status never triggers a VaultReport itself.
     try:
@@ -161,10 +158,11 @@ def settings(c: Call) -> Result:
         body = _yaml.safe_dump(data, allow_unicode=True, sort_keys=False).rstrip() \
             if data else "(defaults — no vault.yaml yet)"
         out.print(f"  {body}")
-        out.print(f"  Keys: {', '.join(sorted(_KEYS))} — /settings <key> <value|none>")
+        out.print(f"  Keys: {', '.join(sorted(_KEYS))} — {c.row.name} {c.row.form('')}")
         return out
     if len(args) != 2 or args[0] not in _KEYS:
-        return out.refused(f"usage /settings <key> <value|none>. Keys: {', '.join(sorted(_KEYS))}")
+        # The row's one optional form, which a line with words had to be.
+        return out.refused(f"usage {c.row.name} {c.row.form('')}. Keys: {', '.join(sorted(_KEYS))}")
     key, raw = args
     val = None if raw.lower() in ("none", "null") else (int(raw) if raw.isdigit() else raw)
     node = data

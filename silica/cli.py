@@ -25,14 +25,13 @@ from rich.markup import escape
 
 from silica.term.style import FlatMarkdown
 
-from silica.agent.recall_watch import numbers_of_session
 from silica import __version__
 from silica.command_table import Ask, Result
 from silica.commands import dispatch
 from silica.config import claim_env, CONFIG, GUI_PORT, live_env
-from silica.session import meter, seed
+from silica.session import seed
 from silica.session import turn as session_turn
-from silica.session.conversation import Conversation
+from silica.session.conversation import Conversation, fresh, reopen
 from silica.session.words import positional
 from silica.term.console import CONSOLE
 from silica.ui import logging as ui_logging
@@ -183,7 +182,7 @@ def _command(text: str, messages: list[dict], *, ask: Ask | None = None, rendere
     return result
 
 
-def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
+def _handle_slash_command(cmd: str, conv: Conversation) -> bool | None:
     """Handle a meta slash command. True = handled, False = exit the REPL,
     None = not a recognized command (the caller hands it to the agent)."""
     cmd = cmd.strip().lower()
@@ -225,33 +224,15 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
         sel = parts[1]
         sid = (rows[int(sel) - 1]["id"] if sel.isdigit() and 0 < int(sel) <= len(rows)
                else sel)
-        replayed = _narr.load_session_messages(sid, CONFIG.vault_path or "")
+        try:
+            replayed = reopen(conv, sid, driver="tui", seed=lambda: seed.fresh_messages())
+        except _narr.SessionBusy as e:
+            CONSOLE.print(f"  [bold red]{e}[/]")
+            return True
         if replayed is None:
             CONSOLE.print(f"  no such session: {sel}")
             return True
         row = next((r for r in rows if r["id"] == sid), None)
-        if row and row["store"] == "narration":
-            try:
-                _narr.NARRATOR.resume(sid)
-            except _narr.SessionBusy as e:
-                CONSOLE.print(f"  [bold red]{e}[/]")
-                return True
-        else:
-            # Legacy snapshot: continue it as a NEW narration session seeded
-            # with its turns — emit new, recognise legacy (ticket 05).
-            _narr.NARRATOR.close()
-            _narr.NARRATOR.ensure_session(driver="tui")
-            for m in replayed:
-                _narr.NARRATOR.turn(m)
-        messages[:] = seed.fresh_messages() + replayed
-        # The persona its last turn wore (ADR-0127 point 3), as the GUI's
-        # /session/load puts it back.
-        from silica.kernel import personas
-
-        last: dict = next((m for m in reversed(replayed) if m.get("role") == "user"), {})
-        if (worn := personas.available(CONFIG.vault_path or None).get(str(last.get(personas.TURN_KEY) or ""))):
-            personas.apply(messages, worn)
-        meter.update_context_tokens(messages)
         CONSOLE.print(f"  resumed [bold]{(row or {}).get('title', sid)}[/] "
                       f"({len(replayed)} message(s))")
         return True
@@ -759,22 +740,12 @@ def main():
                                     event="session_clear")
                 CONSOLE.clear()
                 print_home()
-                messages[:] = seed.fresh_messages()
-                conv.collapsed = set()  # indices reset with the history
-                conv.seen_numbers = set()
+                conv = fresh(conv, seed.fresh_messages(), sid=uuid.uuid4().hex[:12])
                 from silica.obs import narration as _narr
                 _narr.NARRATOR.close()          # next user turn opens a fresh sid
-                conv.sid = uuid.uuid4().hex[:12]
                 continue
 
-            result = _handle_slash_command(user_input, messages)
-            if cmd.startswith("/resume"):
-                # From the narration the history came back from. A /resume that
-                # failed left the narrator on this session, whose narration holds
-                # what the live set does.
-                from silica.obs import narration as _narr
-
-                conv.seen_numbers = numbers_of_session(_narr.NARRATOR.sid)
+            result = _handle_slash_command(user_input, conv)
             if result is False:
                 print("  (_  _)。˚")
                 break

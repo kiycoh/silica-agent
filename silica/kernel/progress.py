@@ -190,6 +190,18 @@ class Task:
     content_hash: str | None = None # for idempotent checkpoint resumption (Phase 2)
     error: str | None = None
 
+    def payload(self) -> dict[str, Any]:
+        """What `Run.add_payload_task` wrote for this task, {} when it wrote none."""
+        if not self.input_ref:
+            return {}
+        try:
+            return orjson.loads(Path(self.input_ref).read_bytes())
+        except Exception:
+            # A payload file gone or torn under a run kept on disk: the task is
+            # still served, with nothing to act on, and the drain moves past it
+            # instead of stalling the run on one unreadable file.
+            return {}
+
 
 @dataclass
 class ProgressLedger:
@@ -566,6 +578,19 @@ class Run:
         d = self.run_dir / "payloads"
         d.mkdir(parents=True, exist_ok=True)
         return d
+
+    def add_payload_task(self, capability_name: str, payload: dict[str, Any], reason: str,
+                         needs_confirmation: bool = False) -> Task:
+        """A task that invokes `capability_name` with `payload`, kept at
+        `payloads/<task id>.json` with its `_reason` and, when asked,
+        `needs_confirmation`. One writer for the file `Task.payload` reads: a run
+        on disk resumes through `Run.resume`, so the name and both keys stay."""
+        task = self.progress.add_task(capability_name)
+        body = {**payload, "_reason": reason, **({"needs_confirmation": True} if needs_confirmation else {})}
+        path = self.payloads_dir / f"{task.id}.json"
+        path.write_bytes(orjson.dumps(body, option=orjson.OPT_INDENT_2))
+        task.input_ref = str(path)
+        return task
 
     @classmethod
     def new(

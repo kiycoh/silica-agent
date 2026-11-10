@@ -104,8 +104,7 @@ def endpoint_status() -> list[dict]:
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    from silica.onboarding.serve import ENDPOINTS, is_local, ready
-    from silica.onboarding.wizard import endpoint_model_ids
+    from silica.onboarding.serve import ENDPOINTS, endpoint_model_ids, is_local, ready
 
     urls = base_urls()
 

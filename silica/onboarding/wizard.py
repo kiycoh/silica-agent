@@ -22,6 +22,9 @@ from silica.kernel.base import gitstate, user_env
 from silica.kernel.base.layout import DOC_SCAN_CAP, files_with
 from silica.kernel.base.manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
+# A module attribute and not `serve.endpoint_model_ids` at each call: the wizard's
+# tests stub the probe here, and the Settings panel reads it from serve.
+from silica.onboarding.serve import EMBED_MODELS, RERANK_MODELS, endpoint_model_ids
 from silica.provider_table import HOSTED, PROVIDERS
 from silica.term.banner import print_banner
 from silica.term.console import CONSOLE
@@ -43,14 +46,6 @@ _WORKER_MODELS = {
     ],
     "mistral": ["mistral/mistral-small-latest"],
 }
-
-EMBED_MODELS = [
-    "embeddinggemma-2",  # the config default (ADR-0078); Ollama's name too
-    "text-embedding-qwen3-embedding-0.6b",  # LM Studio's id for the previous default
-    "text-embedding-qwen3-embedding-4b",
-    "nomic-embed-text",
-    "text-embedding-3-small",
-]
 
 # The local chat model Enter accepts: the first tier whose VRAM floor (GiB) the
 # card meets, as (floor, id per runtime, run through the agent loop). The floor
@@ -109,10 +104,6 @@ def local_chat_model(runtime: str, vram: float | None) -> tuple[str, bool]:
     )
     return ids[runtime], tested
 
-# Served /rerank endpoints only (llama.cpp --reranking, Infinity, Jina); the
-# [rerank] extra's own server picks its weights from SILICA_LOCAL_RERANK_MODEL.
-RERANK_MODELS = ["bge-reranker-v2-m3-Q8_0", "bge-reranker-v2-m3"]
-
 _RERANK_KEYS = ("SILICA_RERANK_BASE_URL", "SILICA_RERANK_MODEL", "SILICA_RERANK_API_KEY",
                 "SILICA_RERANK_SERVE_CMD")
 
@@ -154,23 +145,6 @@ def _find_env_example(repo_root: Path | str | None) -> Path | None:
     candidates.append(Path(__file__).resolve().parents[1] / ".env.example")  # silica/ package dir
     candidates.append(Path(__file__).resolve().parents[2] / ".env.example")  # dev checkout root
     return next((c for c in candidates if c.is_file()), None)
-
-
-def endpoint_model_ids(base_url: str, api_key: str = "") -> list[str]:
-    """Model ids advertised by an OpenAI-compatible `/models` endpoint, best-effort
-    ([] on any error). Powers LM Studio autodetect, the local-embeddings
-    suggestion, and the hosted pick-list validation (_live_hosted_models);
-    `api_key` becomes a Bearer header for the hosted endpoints that demand one."""
-    import httpx
-
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    try:
-        data = httpx.get(
-            f"{base_url.rstrip('/')}/models", headers=headers, timeout=3.0
-        ).json()
-        return [m["id"] for m in data.get("data", []) if m.get("id")]
-    except Exception:
-        return []
 
 
 def _live_hosted_models(provider: str, api_key: str, curated: list[str]) -> list[str]:

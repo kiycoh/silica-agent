@@ -117,7 +117,8 @@ def public(rec: dict) -> dict:
     alike: without the vault's path on disk, which on a hosted tenant names
     the host's directories (ADR-0085 point 5), and with whether Retry can
     work, a stopped job whose file is still there."""
-    out = {k: v for k, v in rec.items() if k != "vault"}
+    # `flags` too: the command's words are the offered turn's, and no frame named them.
+    out = {k: v for k, v in rec.items() if k not in ("vault", "flags")}
     src = dict(rec.get("source") or {})
     if Path(src.get("path") or "").is_absolute():
         src["path"] = src.get("name") or ""
@@ -146,7 +147,8 @@ def _is_media(name: str) -> bool:
 
 
 def record(path: str, *, origin: str, text: str = "", session: str | None = None,
-           dest_dir: str = "", drop: str = "", on_end: Callable[[dict], None] | None = None) -> dict:
+           dest_dir: str = "", drop: str = "", on_end: Callable[[dict], None] | None = None,
+           flags: list[str] | None = None) -> dict:
     """Record one conversion of `path` and queue it; return its record.
 
     `path` is what convert() takes: vault-relative, or absolute for a file a
@@ -157,7 +159,8 @@ def record(path: str, *, origin: str, text: str = "", session: str | None = None
     Raises the admission's MediaRefused, whose text is the student's sentence.
 
     `drop` groups the jobs of one chat drop: its question is asked once, when
-    the last of them is done (ADR-0121 point 1).
+    the last of them is done (ADR-0121 point 1). `flags` are the words of the
+    command that recorded it, which the /nucleate it offers carries.
     """
     vault = CONFIG.vault_path or ""
     p = Path(path)
@@ -191,6 +194,7 @@ def record(path: str, *, origin: str, text: str = "", session: str | None = None
             "state": "queued", "created": now, "updated": now, "started": None, "finished": None,
             "attempts": 0, "notes": [], "hidden": [], "error": "", "dismissed": False,
             "drop": drop, "beside": [], "answered": False, "progress": None,
+            **({"flags": flags} if flags is not None else {}),
         }
         _write(rec)
         if on_end is not None:
@@ -560,16 +564,18 @@ def from_command(text: str, session: str | None) -> dict | None:
         parts = shlex.split(text.strip())
     except ValueError:
         return None  # the command's own parser names the unbalanced quote
-    from silica.session.words import positional, str_flag
+    from silica.commands.ingress import read_words
     from silica.kernel.base.formats import DOC_EXTS
     from silica.sources.convert import resolve_input
     from silica.sources import ingest
 
-    args = ingest.rejoin_spaced_paths(parts[1:])
-    files = positional(args)
-    target = str_flag(args, "--target")
+    words = read_words(parts[1:])
+    files, target = words.files, words.target
     if not files:
         return None  # usage, or /nucleate's drain of the write-ahead log
+    # The /nucleate each job offers once it is read, with the words typed after
+    # the files: "Nucleate it" runs the command on the job's notes with them.
+    flags = words.flags if word == "/nucleate" else []
     if word == "/nucleate":
         files = ingest.owed(files)
         if not files:
@@ -590,7 +596,7 @@ def from_command(text: str, session: str | None) -> dict | None:
         try:
             # No `text`: the offered turn reruns a drop's words, and a slash
             # command composed as an instruction would parse as a command.
-            jobs.append(record(str(src), origin="command", session=session, dest_dir=target))
+            jobs.append(record(str(src), origin="command", session=session, dest_dir=target, flags=flags))
         except ValueError as exc:  # admission's refusal, written for the student
             skipped.append({"name": name, "reason": _sentence(exc)})
     return {"jobs": jobs, "skipped": skipped, "command": word}
