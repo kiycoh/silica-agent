@@ -17,9 +17,9 @@ Two functions, stdlib only:
                               difflib.SequenceMatcher.
 
 And the near-title verdict as text, written and read in one place:
-  near_title_flag(...)      — the flag a near title leaves in `review:`;
-  review_flags(review)      — every flag a `review:` value holds;
-  near_title_of(review)     — the first near-title flag's (candidate, path, ratio).
+  near_title_flag(...)      the flag a near title leaves in `review:`;
+  review_flags(review)      every flag a `review:` value holds;
+  near_title_of(review)     the first near-title flag's (candidate, path, ratio).
 
 `templates.slugify` stays what it is — a filename sanitizer, not an identity.
 """
