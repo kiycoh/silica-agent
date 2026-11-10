@@ -22,7 +22,7 @@ from silica.kernel.base.frontmatter import FM_RE_TOLERANT
 from silica.config import CONFIG
 from silica.driver import DRIVER
 from silica.kernel.text.sanitize import sanitize_output
-from silica.kernel.text.title import SHORT_FLAG, near_title_of
+from silica.kernel.text.title import SHORT_FLAG, near_title_of, review_flags
 from silica.kernel.write.validate import validate_ops
 from silica.router.phases import MAX_STEER_ATTEMPTS, REJECTION_RATE_MAX, InjectorState, phase
 from silica.router.run_state import job_origin
@@ -57,6 +57,15 @@ def _doc_date(fsm: "InjectorFSM", idx: int) -> str:
         return m.group(1) if m else ""
     except Exception:
         return ""
+
+
+def _short_flag(reason: str) -> str | None:
+    """The thin-body flag among a review's flags, wherever it stands. A note
+    flagged near-title too carries it second (validate raises the title gate
+    first), and reading only a review that started with it sent that note to
+    the dedup judge alone, which clears the review on a distinct verdict and
+    left the body thin with nothing to say so (re-audit 2026-11-10)."""
+    return next((f for f in review_flags(reason) if f.startswith(SHORT_FLAG)), None)
 
 
 def enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed: bool = False) -> None:
@@ -145,8 +154,8 @@ def enqueue_short_snippet_expands(fsm: "InjectorFSM", rejected_raw: list) -> Non
     for r in rejected_raw:
         if not isinstance(r, dict):
             continue
-        reason = r.get("reason", "") or ""
-        if not reason.startswith(SHORT_FLAG):
+        reason = _short_flag(r.get("reason", "") or "")
+        if reason is None:
             continue
         op = r.get("op", {}) or {}
         try:
@@ -183,7 +192,7 @@ def _steer_retryable(fsm: "InjectorFSM", rejected_raw: list, idx: int) -> list:
         if not isinstance(r, dict):
             continue
         reason = r.get("reason", "") or ""
-        if near_title_of(reason) or reason.startswith(SHORT_FLAG):
+        if near_title_of(reason) or _short_flag(reason):
             continue
         op = r.get("op") if isinstance(r.get("op"), dict) else None
         if not op or not op.get("heading"):
