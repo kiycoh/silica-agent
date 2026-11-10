@@ -183,8 +183,6 @@ def _seed_batch_ledger(out: Result, cap: str, payloads: list[dict], *, kind: str
     hand back what the agent is asked, with the event that opens the REPL's batch
     panel on it. Shared by /enrich and /dedup — the async, resumable,
     progress-tracked path."""
-    from pathlib import Path
-    import orjson
     from silica.kernel.progress import PlanStep, Run
     from silica.obs.events import BatchRunStartEvent
 
@@ -195,11 +193,7 @@ def _seed_batch_ledger(out: Result, cap: str, payloads: list[dict], *, kind: str
         inputs={"scope": label},
     )
     for i, payload in enumerate(payloads):
-        task = run.progress.add_task(cap)
-        body = {**payload, "_reason": f"Batch {i + 1} of {len(payloads)}"}
-        payload_path = str(run.payloads_dir / f"{task.id}.json")
-        Path(payload_path).write_bytes(orjson.dumps(body, option=orjson.OPT_INDENT_2))
-        task.input_ref = payload_path
+        run.add_payload_task(cap, payload, f"Batch {i + 1} of {len(payloads)}")
     run.save()
     out.batch = BatchRunStartEvent(run_id=run.run_id, kind=kind, label=label, total=len(payloads))
     from silica.obs import narration as _narr_mod
