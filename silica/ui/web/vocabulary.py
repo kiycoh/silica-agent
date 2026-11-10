@@ -17,13 +17,13 @@ import json
 from typing import Any
 
 from silica.kernel import user_memory
-from silica.kernel.base.formats import IMAGE_MIME, WEB_IMAGE_EXTS
+from silica.kernel.base.formats import IMAGE_MIME, SHOWN_IMAGE_EXTS, WEB_IMAGE_EXTS
 from silica.kernel.check import ORDER
 from silica.kernel.learn import grade, items, mastery, objectives, pick, quiz, reasons, reference, session, sources
 from silica.kernel.report import note_context
 from silica.sources.discover import story
 from silica.tools import TOOLS, note_keys
-from silica.ui.web import discover_routes, failures, jobs, stt_routes
+from silica.ui.web import discover_routes, failures, jobs, library_routes, stt_routes
 from silica.view_table import VIEWS
 
 
@@ -66,9 +66,12 @@ def table() -> dict[str, Any]:
         "notes": {"unwritten": note_context.UNWRITTEN},
         "mic": {"max_ms": stt_routes.MIC_MAX_MS, "explain_max_ms": stt_routes.MIC_EXPLAIN_MAX_MS},
         # The two differ on purpose: what the chat model is sent, and what a note
-        # may hold (formats.WEB_IMAGE_EXTS, the hosted images).
+        # may hold (formats.WEB_IMAGE_EXTS, the hosted images). Then two lists of
+        # extensions: what an embed draws as a picture, and what /file opens as one.
         "formats": {"chat_images": list(dict.fromkeys(IMAGE_MIME.values())),
-                    "note_images": list(dict.fromkeys(IMAGE_MIME[e] for e in WEB_IMAGE_EXTS))},
+                    "note_images": list(dict.fromkeys(IMAGE_MIME[e] for e in WEB_IMAGE_EXTS)),
+                    "shown_images": list(SHOWN_IMAGE_EXTS),
+                    "file_pictures": list(library_routes.FILE_PICTURES)},
     }
 
 

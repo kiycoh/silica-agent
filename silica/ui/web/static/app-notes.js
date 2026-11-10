@@ -1328,7 +1328,8 @@ async function openFile(path, state, act) {
 window.openFile = openFile;
 
 const fileUrl = (path, extra = "") => "/file?path=" + encodeURIComponent(path) + extra;
-const FILE_PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+// What /file opens inline as a picture, so the drawer draws one where the file is one.
+const FILE_PICTURE = extRe(VOCAB.formats.file_pictures);
 
 // What Silica holds of the file, in the strip's words; an unread file says
 // why, by its kind, since that is what OCR or a conversion would change.

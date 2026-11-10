@@ -963,7 +963,7 @@ function mdLite(src) {
   // `![[figure.png|500]]` -> the <img> the server's _embed_img emits: a figure
   // copied from a note beside the sentence it supports is what ADR-0082 asks the
   // model for, and a tool-split turn keeps this render until reload.
-  const IMG = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
+  const IMG = extRe(VOCAB.formats.shown_images);
   const unesc = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
   const wiki = (t, hold) =>
     t.replace(/(!?)\[\[([^\]|\n]+?)(?:\|([^\]\n]+?))?\]\]/g, (_m, bang, target, alias) => {

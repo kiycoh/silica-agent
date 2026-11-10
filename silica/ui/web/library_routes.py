@@ -21,8 +21,10 @@ router = APIRouter()
 
 # What the drawer shows of a file no note names: a PDF in the browser's viewer
 # and a picture as itself. Not SVG, which is a document that runs (see
-# render.ASSET_HEADERS): it goes as a download.
-_FILE_OPENS = (*render.RAW_OPENS, *(e for e in SHOWN_IMAGE_EXTS if e != ".svg"))
+# render.ASSET_HEADERS): it goes as a download. The drawer reads the pictures
+# off VOCAB, so the `<img>` it draws is one this route answers inline.
+FILE_PICTURES = tuple(e for e in SHOWN_IMAGE_EXTS if e != ".svg")
+_FILE_OPENS = (*render.RAW_OPENS, *FILE_PICTURES)
 
 
 def _vault_file(path: str) -> Path:

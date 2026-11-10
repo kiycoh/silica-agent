@@ -34,6 +34,10 @@ const escapeAttr = (s) => escapeHtml(s).replace(/"/g, "&quot;");
 const noExt = (p) => String(p || "").replace(/\.md$/, "");
 const noteStem = (p) => noExt(p).split("/").pop();
 
+// A list of formats.py's extensions, as VOCAB.formats carries it, as the pattern a
+// file name ends in. Unescaped: the table's extensions are letters and digits.
+const extRe = (exts) => new RegExp(`\\.(${exts.map((e) => e.slice(1)).join("|")})$`, "i");
+
 // What opens a link while it is being typed, in the composer and in the editor.
 const LINK_OPENING = /(\[\[)([^\][\n|#]{0,64})$/;
 

@@ -147,13 +147,16 @@ def test_the_rails_classes_are_ones_the_page_styles_or_reads():
 
 
 def test_an_embed_in_a_streaming_answer_draws_what_the_page_can_draw():
-    """mdLite's list is its own, the renderer's mirror, and pinned here because the
-    stream cannot wait for a read of the table."""
+    """W2: mdLite's pictures and the drawer's are read off the table, where each regex
+    held its own list by hand and the drawer's had already fallen behind once."""
     from silica.kernel.base.formats import SHOWN_IMAGE_EXTS
+    from silica.ui.web.library_routes import _FILE_OPENS
 
-    m = re.search(r"const IMG = /\\\.\((.*?)\)\$/i", _js("app-chat.js"))
-    said = {x for bit in m[1].split("|") for x in ([bit.replace("e?", ""), bit.replace("e?", "e")] if "e?" in bit else [bit])}
-    assert {f".{x}" for x in said} == set(SHOWN_IMAGE_EXTS)
+    assert "const IMG = extRe(VOCAB.formats.shown_images);" in _js("app-chat.js")
+    assert "const FILE_PICTURE = extRe(VOCAB.formats.file_pictures);" in _js("app-notes.js")
+    formats = vocabulary.table()["formats"]
+    assert formats["shown_images"] == list(SHOWN_IMAGE_EXTS)
+    assert set(formats["file_pictures"]) == set(_FILE_OPENS) - {".pdf"}
 
 
 def test_every_command_the_composer_menu_offers_is_one_the_chat_runs(tmp_vault):
