@@ -31,8 +31,7 @@ def find(c: Call) -> Result:
     life = str_flag(args, "--lifecycle").strip().lower()
     query = " ".join(positional(args))
     if not query:
-        out.print("  Usage: /find <query> [--k=N] [--min-trust=human|grounded|distilled|kept] "
-                  "[--lifecycle=active|review|contested|superseded]")
+        out.print(f"  Usage: {c.row.synopsis}")
         return out
     from silica.kernel.recall.search import facade_search
 
@@ -99,11 +98,12 @@ def path(c: Call) -> Result:
     try:
         toks = shlex.split(raw_input.strip())[1:]  # honours quoted titles with spaces
     except ValueError:
+        # Not the row's usage: after an unbalanced quote, the form that quotes them.
         out.print('  Unbalanced quotes. Usage: /path "<note A>" "<note B>"')
         return out
     endpoints = positional(toks)
     if len(endpoints) != 2:
-        out.print("  Usage: /path <noteA> <noteB>")
+        out.print(f"  Usage: {c.row.synopsis}")
         return out
     resolve = note_resolver()
     src, dst = resolve(endpoints[0]), resolve(endpoints[1])

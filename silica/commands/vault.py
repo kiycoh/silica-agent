@@ -158,10 +158,11 @@ def settings(c: Call) -> Result:
         body = _yaml.safe_dump(data, allow_unicode=True, sort_keys=False).rstrip() \
             if data else "(defaults — no vault.yaml yet)"
         out.print(f"  {body}")
-        out.print(f"  Keys: {', '.join(sorted(_KEYS))} — /settings <key> <value|none>")
+        out.print(f"  Keys: {', '.join(sorted(_KEYS))} — {c.row.name} {c.row.form('')}")
         return out
     if len(args) != 2 or args[0] not in _KEYS:
-        return out.refused(f"usage /settings <key> <value|none>. Keys: {', '.join(sorted(_KEYS))}")
+        # The row's one optional form, which a line with words had to be.
+        return out.refused(f"usage {c.row.name} {c.row.form('')}. Keys: {', '.join(sorted(_KEYS))}")
     key, raw = args
     val = None if raw.lower() in ("none", "null") else (int(raw) if raw.isdigit() else raw)
     node = data

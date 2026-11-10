@@ -115,7 +115,7 @@ def mind_map(c: Call) -> Result:
     force = "--force" in args
     note = " ".join(positional(args)).strip()
     if not note:
-        out.print("  Usage: /map <note> [--force]")
+        out.print(f"  Usage: {c.row.synopsis}")
         return out
     parsed = answered(graph_tools.silica_mindmap, note_path=note, force=force)
     if parsed.get("skipped"):

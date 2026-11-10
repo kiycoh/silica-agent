@@ -75,7 +75,7 @@ def dispatch(text: str, messages: list[dict], *, ask: Ask | None = None,
     words = direct_args(text.strip())
     row = ROWS.get(words[0].lower()) if words else None
     if row is not None and row.handler and not row.shlex:
-        return _run(row, Call(words[1:], text, messages, out, ask, progress))
+        return _run(row, Call(row, words[1:], text, messages, out, ask, progress))
     if not text.strip().startswith("/"):
         return None  # plain prose can have stray quotes and apostrophes: no shlex
     row = ROWS.get(command_word(text))
@@ -85,7 +85,7 @@ def dispatch(text: str, messages: list[dict], *, ask: Ask | None = None,
         args = shlex.split(text.strip())[1:]  # honours quoted paths with spaces
     except ValueError:
         return out.refused("unbalanced quotes in command. Wrap paths with spaces in \"...\".")
-    return _run(row, Call(args, text, messages, out, ask, progress))
+    return _run(row, Call(row, args, text, messages, out, ask, progress))
 
 
 def expand_skill(text: str, out: Result) -> Result | None:

@@ -15,12 +15,12 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Callable
 
-from silica.command_table import Call, Result
+from silica.command_table import ROWS, Call, Result
 
 if TYPE_CHECKING:
     from silica.connectors.mcp_block import McpBlock
 
-USAGE = "usage: /connect [list|add <json>|secure <key>|login <key>|logout <key>|remove <key>|reload]"
+USAGE = f"usage: {ROWS['/connect'].synopsis}"
 
 
 def _block() -> McpBlock:
