@@ -54,6 +54,20 @@ def _engine() -> Iterator[None]:
         raise Refused(_STATUS[exc.why], failures.worded(str(exc), exc.__cause__), exc.code) from None
 
 
+@contextmanager
+def _plan_said() -> Iterator[None]:
+    """A plan the form cannot make, at 400 (N3). plans.py says its own "no" as a
+    ValueError, and write_note's as a RuntimeError, in words for the person; any
+    other failure's text nobody wrote, so explain() says it and the log keeps it."""
+    try:
+        yield
+    except (ValueError, RuntimeError) as exc:
+        raise Refused(400, exc)
+    except Exception as exc:
+        logger.warning("learn: a plan failed: %s", exc)
+        raise Refused(400, failures.explain(exc)["error"]) from None
+
+
 # ---------------------------------------------------------------- readings
 
 def _also_in(path: str, scopes: dict[str, dict]) -> list[dict]:
@@ -589,10 +603,8 @@ def write_plan(payload: dict):
     chosen = obj.normalize(payload.get("objectives"))
     lines = payload.get("reference")
     if isinstance(lines, str) and lines.strip():
-        try:
+        with _plan_said():
             scope, target, restrict = _with_reference(scope, target, restrict, lines)
-        except Exception as exc:
-            raise Refused(400, exc)
     if scope not in plans.SCOPES:
         raise HTTPException(400, f"scope must be one of {plans.SCOPES}")
     # ADR-0131: a key left out keeps what the plan says, or what Silica reads
@@ -608,10 +620,8 @@ def write_plan(payload: dict):
         matched=plans.parse_matched(payload.get("matched")) if "matched" in payload else None,
         reach=str(payload.get("reach") or "relational"))
     if payload.get("preview") or payload.get("cards_only"):
-        try:
+        with _plan_said():
             res = plans.resolve(spec)
-        except Exception as exc:
-            raise Refused(400, exc)
         if payload.get("cards_only"):
             proposed = obj.propose(res["tree"], chosen)
             for c in proposed:
@@ -626,26 +636,20 @@ def write_plan(payload: dict):
     cards = payload.get("cards")
     cards = cards if isinstance(cards, list) else None
     if cards is None and payload.get("templates"):
-        try:
+        with _plan_said():
             # read without `matched`, as this path always has, so Save words the cards it worded
             cards = obj.propose(plans.resolve(replace(spec, matched=None))["tree"], chosen, model=False)
-        except Exception as exc:
-            raise Refused(400, exc)
     spec = replace(spec, cards=cards)
     if payload.get("path"):
         plan = plans.find_plan(str(payload["path"]))
         if plan is None:
             raise HTTPException(404, "no such plan")
-        try:
+        with _plan_said():
             return plans.edit_plan(plan["path"], replace(spec, name=name or plan["name"]))
-        except Exception as exc:
-            raise Refused(400, exc)
     if not name:
         raise HTTPException(400, "a plan needs a name")
-    try:
+    with _plan_said():
         return plans.write_plan(replace(spec, objectives=chosen if "objectives" in payload else None))
-    except Exception as exc:
-        raise Refused(400, exc)
 
 
 def _declared(payload: dict) -> dict[str, str] | None:
