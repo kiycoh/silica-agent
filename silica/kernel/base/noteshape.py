@@ -91,7 +91,7 @@ NOT_MEMBERS = (WORKSPACE, PLAN, SYLLABUS)
 NATIVE_TYPES = (PLAN, EVENT, READING)
 
 # A lesson spine's `section:`. Named here and not by the outline lane, because
-# that lane reaches the agent layer and the graph report reads this word
+# that lane reaches the model stack and the graph report reads this word
 # (import contract P2/DKB).
 SPINE_SECTION = "(outline)"
 

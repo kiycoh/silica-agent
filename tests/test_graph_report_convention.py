@@ -1,8 +1,8 @@
 """Convention test for silica/kernel/report/graph_report/.
 
 kernel/graph_report/ is covered by the import-linter contract "graph
-structure is deterministic — structural modules never import agent
-(P2/DKB)" (pyproject.toml): structural modules there must never import
+structure is deterministic: structural modules never reach a model (P2/DKB)"
+(pyproject.toml): structural modules there must never import silica.model or
 silica.agent. That contract's source_modules is the authoritative list of
 which graph_report modules are structural.
 
@@ -26,14 +26,13 @@ GRAPH_REPORT_DIR = REPO_ROOT / "silica" / "kernel" / "report" / "graph_report"
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 
 CONTRACT_NAME = (
-    "graph structure is deterministic — structural modules never import agent (P2/DKB)"
+    "graph structure is deterministic: structural modules never reach a model (P2/DKB)"
 )
 
 # Modules present in kernel/graph_report/ but deliberately NOT in the
 # contract's source_modules, each with a written rationale (mirrors the
 # pyproject.toml comment for this same contract):
 EXEMPT = {
-    "embed_signals",  # embedding overlay via get_embedder — legitimate, per pyproject comment
     "__init__",        # facade re-export, not a structural module itself
 }
 

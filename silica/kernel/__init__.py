@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""L1 Kernel — pure mechanical functions, zero LLM.
+"""L1 Kernel: the vault's mechanics, as functions on Driver outputs.
 
-From SILICA.md §3 L1:
-  Pure functions on Driver outputs. Testable in isolation with golden tests.
-  'Mechanical work must be executed by scripts.'
+From SILICA.md §3 L1, 'mechanical work must be executed by scripts': graph
+structure is built without a model (the P2/DKB import contract). The lanes
+that write or judge (distill, dedup, Learn's grading) do call one, through
+silica.model below them.
 """
 from __future__ import annotations
 

@@ -14,7 +14,7 @@ encodes the same text and none re-embeds what another just did.
 Only `read_missing` calls the model, and only bulk /embed calls it: the sweep
 runs on the query path, where 2 s an image is not an option.
 The model call is handed in (`ask`), never imported: `_note_text` reaches this
-module from the graph structure modules, which stay free of the agent (P2/DKB).
+module from the graph structure modules, which stay free of the model stack (P2/DKB).
 """
 from __future__ import annotations
 
@@ -193,7 +193,7 @@ def read_image(path: Path, language: str, *, ask: Callable[[list[dict]], str],
 
     `ask` sends the messages to a vision model and returns its text
     (`ask_chat_model` in silica/agent/vision.py); it is passed in because the
-    graph structure modules that reach this one never import the agent (P2/DKB).
+    graph structure modules that reach this one never import the model stack (P2/DKB).
     Raises whatever `ask` raises: the caller decides whether a refused call
     means "no vision here" (stop) or "this image" (skip). A PDF's page is
     not read here: convert.py transcribes it as markdown (`PAGE_PROMPT`)."""
