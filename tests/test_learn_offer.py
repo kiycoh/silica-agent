@@ -371,9 +371,15 @@ def test_learn_s_plan_reaches_the_turn_that_needs_it(monkeypatch):
     """A study-plan request gets the calendar Learn computes; a question on
     what the slides leave out gets the topics no deck mentions; anything else
     gets nothing."""
+    from datetime import date, timedelta
+
     from silica.kernel.learn import plans as pl
 
-    plan = {"path": "Plans/Esame.md", "name": "Esame", "by": "2026-11-10", "target": "Scheda", "scope": "steps",
+    # Two weeks out from the day the suite runs: a fixed date became the day of
+    # the exam on 2026-11-10, a plan with no days left has no calendar to give,
+    # and the test failed with nothing broken.
+    by = (date.today() + timedelta(days=14)).isoformat()
+    plan = {"path": "Plans/Esame.md", "name": "Esame", "by": by, "target": "Scheda", "scope": "steps",
             "steps": [{"text": "Basi: [[A]]", "notes": ["A"]}]}
     monkeypatch.setattr(pl, "read_plan", lambda path: plan)
     monkeypatch.setattr(sources, "lecture_gaps", lambda p: (["dropout", "multi-task"], 32))
