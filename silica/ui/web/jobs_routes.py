@@ -4,6 +4,8 @@
 """The Jobs panel's routes (ADR-0099) and the turns a read file offers (ADR-0121)."""
 from __future__ import annotations
 
+import shlex
+
 from fastapi import APIRouter, HTTPException
 
 from silica.config import CONFIG
@@ -65,7 +67,8 @@ def offered_turn(job_id: str, payload: dict | None = None):
 
     `as` is what the turn does: "ask" reruns the words typed with the drop,
     "summarize" and "quiz" compose their request, "nucleate" copies the files
-    into the Inbox and nucleates the copies. `{"ask": true}` is the older
+    into the Inbox and nucleates the copies, or runs the /nucleate a typed
+    command offered on its notes. `{"ask": true}` is the older
     spelling of "ask". A drop is answered once: a second ask, from another tab,
     is refused, which is what keeps two tabs from answering it twice."""
     body = payload or {}
@@ -89,6 +92,13 @@ def offered_turn(job_id: str, payload: dict | None = None):
         if kind == "ask" and not (rec.get("text") or "").strip():
             kind = "summarize"
         notes, files, words = jobs._answer(group)
+        if kind == "nucleate" and rec.get("origin") == "command":
+            # A typed /convert or /nucleate: its notes are the vault's already,
+            # not a chat's to copy, and the command runs on them with the words
+            # typed after its files, which no agent turn could carry (the
+            # injector tool takes no --profile and no --seen).
+            line = shlex.join(["/nucleate", *notes, *(rec.get("flags") or [])])
+            return sse.turn_response(slot, turn.Ask(line))
         words, said = drop_turn.offered_ask(kind, words, ", ".join(f["name"] for f in files))
         if kind == "nucleate":
             # Copied into the Inbox first (ADR-0121 point 5): the injector reads
