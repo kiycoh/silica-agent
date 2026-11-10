@@ -19,8 +19,7 @@ async function loadVault() {
   try {
     const r = await fetch("/messages");
     setVaultPath(r.headers.get("X-Silica-Vault") || "");
-    setCtxTokens(r.headers.get("X-Silica-Context-Tokens"), r.headers.get("X-Silica-Max-Context-Tokens"),
-                 jsonHeader(r, "X-Silica-Context-Parts"), r.headers.get("X-Silica-Compact-At"));
+    setCtxTokens(jsonHeader(r, "X-Silica-Context"));
     const msgs = await r.json();
     // A question sent while this reply was on its way is newer than the reply,
     // and redrawing from it wiped that question and its streaming answer: the
