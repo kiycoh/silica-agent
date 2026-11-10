@@ -26,7 +26,7 @@ from silica.kernel.learn import items, pace, reasons, reference, session, store
 from silica.kernel.learn.reference import RESTRICT_SEP
 from silica.kernel.learn.schedule import DUE_R
 from silica.kernel.text.render import mathml
-from silica.ui.web import render
+from silica.ui.web import failures, render
 from silica.ui.web.failures import Refused
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,14 @@ def _engine() -> Iterator[None]:
     try:
         yield
     except session.Refused as exc:
-        raise Refused(_STATUS[exc.why], exc, exc.code)
+        if exc.__cause__ is None:
+            raise Refused(_STATUS[exc.why], exc, exc.code)
+        # The engine's words over a failure it did not write (B3): a provider's
+        # text, which can carry a fragment of the platform's key, so the reader
+        # gets explain()'s sentence, the engine's words where the table has none,
+        # and the text goes to the log, the operator's.
+        logger.warning("learn: %s: %s", exc, exc.__cause__)
+        raise Refused(_STATUS[exc.why], failures.worded(str(exc), exc.__cause__), exc.code) from None
 
 
 # ---------------------------------------------------------------- readings
@@ -804,7 +811,6 @@ def _reading_shown(plan: str, step: int) -> dict:
     The raw text goes: a provider's can hold a fragment of the key (ADR-0085 point 5),
     and the job's reached the reader as a toast of litellm's words."""
     from silica.kernel.learn import reading
-    from silica.ui.web import failures
 
     st = reading.state(plan, step)
     for c in st["cards"]:

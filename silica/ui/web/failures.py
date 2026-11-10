@@ -166,6 +166,14 @@ def said(words: str) -> dict[str, str]:
     return {"error": words, "detail": "" if hosted() else words}
 
 
+def worded(words: str, exc: BaseException) -> str:
+    """The sentence for a failure a surface names in its own words ("the model did
+    not answer"): explain()'s, or the words where the table has none, since
+    FALLBACK speaks of a chat's turn. Never the failure's text, which is detail."""
+    said = explain(exc)["error"]
+    return words if said == FALLBACK else said
+
+
 def explain(exc: BaseException | str) -> dict[str, str]:
     """`{"error": <sentence>, "detail": <raw>}` for a response body or a
     stream frame. `error` is what the person reads; `detail` is what the

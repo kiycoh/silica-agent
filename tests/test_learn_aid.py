@@ -145,3 +145,35 @@ def test_a_hold_too_small_to_read_says_no_milestone():
     assert _momentum({"S": 2.0}, {"S": 4.5}, False) == "Estimated hold ~4 days, was ~2."
     assert _momentum(None, {"S": 0.2}, True) == "First hold on this note: estimated under a day."
     assert _momentum(None, {"S": 2.3}, True) == "First hold on this note: estimated ~2 days."
+
+
+def test_a_model_failure_under_the_aid_reaches_the_reader_as_a_sentence_and_never_as_its_text(
+        client, tmp_path, monkeypatch):
+    """B3: a provider's text can carry a fragment of the platform's key (failures.explain),
+    and the aid put it in `error` and `detail`, hosted too. The engine keeps its words where
+    the table has none, and a spent allowance reads as the limit's sentence."""
+    from silica.model.usage_limits import UsageLimited
+
+    c, _ = client
+    monkeypatch.setattr(offer, "_log_path", lambda: tmp_path / "offers.jsonl")
+    _miss_twice()
+    s, it, _r = _third_miss(c)
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+
+    def leaky(*_a, **_k):
+        raise RuntimeError("OpenrouterException - bad request for sk-or-v1-0123456789abcdef")
+
+    monkeypatch.setattr(offer, "learn_aid", leaky)
+    out = c.post("/learn/aid", json={"id": s["id"], "i": it["i"]})
+    assert out.status_code == 502
+    assert out.json() == {"error": "the model did not answer", "detail": "the model did not answer"}
+
+    def spent(*_a, **_k):
+        raise UsageLimited("week", "2026-11-16T00:00:00+00:00")
+
+    monkeypatch.setattr(offer, "learn_aid", spent)
+    out = c.post("/learn/aid", json={"id": s["id"], "i": it["i"]})
+    assert out.status_code == 502
+    assert out.json()["error"] == "You have used this week's allowance. It resets on Monday at 00:00 UTC."
+    c.post("/learn/close", json={"id": s["id"]})  # the slot is the process's, and the next file's test asks for it

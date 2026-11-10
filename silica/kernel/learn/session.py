@@ -735,7 +735,7 @@ def aid(sid: str, i: Any, html_of: Callable[[str, str], str]) -> dict:
             with _metered(s):
                 text = offer.learn_aid(it, esc["why"], v.get("production", ""), esc.get("prereq"))
         except Exception as exc:
-            raise Refused(NO_MODEL, f"the model did not answer: {exc}")
+            raise Refused(NO_MODEL, "the model did not answer") from exc
         if not text:
             raise Refused(NO_MODEL, "the model wrote nothing")
         offer.log_aid_opened(it["path"], s["id"])
