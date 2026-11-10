@@ -85,13 +85,14 @@ def pick_books(library: Path, n: int, rng: random.Random) -> list[Path]:
 def engine(root: Path, dense: bool):
     """The engine over `root`, its dense leg on or off; the vector cache is
     keyed by the file's stamp alone, so it is dropped between roots."""
+    from evals._shared import adopt_bench_vault
     from silica.config import CONFIG
     from silica.kernel.recall.engine import engine as recall_engine
     from silica.tools import atomic  # noqa: F401  hands the engine its PDF reader
     from silica_core import embeddings
     from silica_core.config import CONFIG as CORE
 
-    CONFIG.vault_path = str(root)
+    adopt_bench_vault(root)
     core = recall_engine()
     embeddings._CACHE = None
     CORE.embedding_base_url = CONFIG.embedding_base_url if dense else ""
@@ -115,6 +116,7 @@ def convert_books(books: list[Path], m_root: Path) -> dict[str, list[str]]:
     """Each book into markdown through PDFium, no page sent to a model: the
     pages without text and the formula pages stay as the text layer has them,
     which is what L_P and H_P search too."""
+    from evals._shared import adopt_bench_vault
     from silica.config import CONFIG
     from silica.sources import convert as conv
 
@@ -123,9 +125,9 @@ def convert_books(books: list[Path], m_root: Path) -> dict[str, list[str]]:
         data.update(readings={}, read=[], math_read=[], unread=list(data.get("no_text", [])))
 
     conv._read_pages = no_reading
-    CONFIG.vault_path = str(m_root)
-    CONFIG.pdf_provider = "pdfium"
     (m_root / "src").mkdir(parents=True, exist_ok=True)
+    adopt_bench_vault(m_root)
+    CONFIG.pdf_provider = "pdfium"
     out: dict[str, list[str]] = {}
     for pdf in books:
         link = m_root / "src" / pdf.name

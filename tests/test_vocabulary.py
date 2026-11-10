@@ -87,6 +87,12 @@ def test_every_check_state_a_script_compares_is_one_the_check_writes():
     read = set(re.findall(r'\.state === "([^"]+)"', _js("app-notes.js", "app-editor.js")))
     read -= {"done", "recording", "busy"}  # a job's and the mic's, in the same scripts
     read -= {"vault"}  # the page's own: what a web check marks a block the vault backs
+    # a vault file's state (ADR-0129, amended 2026-11-08) and the page vectors'
+    # build, held to the modules that write them
+    files = {"read", "unread", "unindexed"}
+    assert all(f'"{s}"' in _py("sources/library.py") for s in files)
+    assert 'state="failed"' in _py("ui/web/vectors.py")
+    read -= files | {"failed"}
     assert read
     src = "".join(p.read_text(encoding="utf-8") for p in (WEB.parents[2] / "kernel/check").glob("*.py"))
     assert not {s for s in read if f'"{s}"' not in src}
