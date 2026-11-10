@@ -211,7 +211,7 @@ def run_one(arm: str, case: str, model: str, max_usd: float, out_json: Path) -> 
     from evals.probe_study_plan_replay import Ctx, score_v2
     from silica.agent import loop as _loop
     from silica.obs import narration as _narr
-    from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
+    from silica.agent.constraints import chat_constraints
     from silica.model.llm import _cached_tokens
     from silica.agent.loop import run_agent
     from silica.session.seed import seed_messages
@@ -275,8 +275,7 @@ def run_one(arm: str, case: str, model: str, max_usd: float, out_json: Path) -> 
             _narr.NARRATOR.turn(messages[-1])
             t0 = time.time()
             answer = run_agent(messages, model=model, cancel_token=cancel, temperature=temp,
-                               constraints=AgentConstraints(tools=chat_tools(messages), interactive=True,
-                                                            deferred=chat_deferred(messages)))
+                               constraints=chat_constraints(messages))
             aborted = cancel.is_set()
             hits = facts_hit("" if aborted else answer, turn["facts"])
             v2 = score_v2({"answer": "" if aborted else answer, "aborted": aborted, "tool_calls": []}, ctx)

@@ -5,19 +5,22 @@
 
 Here and not under tools/ because the FSM runs it in its own `finally`, and the
 router does not import the tool implementations. silica.tools.pipeline holds
-the three tools that expose it. Every landing goes through `_land_recovered`,
-whichever way in.
+the two tools that expose it; the steer loop's own tool is REPAIR_TOOL, below.
+Every landing goes through `_land_recovered`, whichever way in.
 """
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import Field
 
 from silica.config import live_env
 from silica.agent.sentinels import is_sentinel
 from silica.driver import DRIVER
 from silica.kernel.write.ops import BulkResult, Op, OpType
 from silica.model.providers import resolve_role
+from silica.tools import make_tool
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +294,27 @@ def sweep_deferred(steer: bool = False, limit: int = 0) -> dict[str, Any]:
     }
 
 
+def submit_repaired_ops(content_hash: Annotated[str, Field(description='Hash of the deferred bundle being repaired (given in the repair task)')], ops: Annotated[list[dict], Field(description='Corrected ops in the standard op schema. Bodies are plain strings: real line breaks, single backslashes.')]) -> dict[str, Any]:
+    """Validate and write repaired ops for a deferred bundle. Ops that pass the
+    validator are written to the vault immediately and leave the bundle; ops
+    that fail come back under "rejected" with the exact validator reason.
+    Correct the rejected ops and resubmit them; never resubmit an op listed
+    under "written" or "renamed" (renamed = written, but under a heading no
+    parked op carries, so the original stays deferred).
+    """
+    return repair_bundle(content_hash, ops)
+
+
+# The steer loop's tool, handed to its run_agent as `registry` and never put in
+# TOOLS: no chat turn or command may call it, and registered above the router it
+# left a process that never ran catalog.load() a loop with no tool, which
+# reported no_fix in silence. Its name, description and schema are prompt bytes
+# for the escalation model. collapse stays "lazy" (the default) on purpose: the
+# verdict IS the feedback, and an eager stub would erase the rejection reasons
+# from the very history the steer loop iterates on.
+REPAIR_TOOL = make_tool(submit_repaired_ops, cls="composed", ingress=False)
+
+
 def _steer_bundle(content_hash: str) -> dict[str, Any]:
     """A bounded repair loop over a bundle's still-failing ops.
 
@@ -372,7 +396,7 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
             [{"role": "user", "content": prompt}],
             model=resolve_role("escalation")[0],
             constraints=AgentConstraints(
-                tools=("submit_repaired_ops",),
+                tools=(REPAIR_TOOL.name,), registry={REPAIR_TOOL.name: REPAIR_TOOL},
                 # One iteration = one LLM call, and a run that hits the cap
                 # pays one extra tool-less landing call, so 4 caps the spend
                 # at 5 calls per bundle (vs 1 for the old one-shot) — and only

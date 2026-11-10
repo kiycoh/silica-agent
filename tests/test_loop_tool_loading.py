@@ -89,6 +89,20 @@ def test_chat_tools_keeps_what_an_earlier_turn_loaded():
     assert "silica_orphans" not in chat_deferred(history)
 
 
+def test_the_chat_turns_constraints_are_the_cut_its_evals_built_by_hand():
+    """session/turn.py and six evals ran on these; the evals' copies never got
+    `withhold`, so they are held to the plain cut and the withheld one both."""
+    import silica.cli  # noqa: F401  registers the whole core
+    from silica.agent.constraints import chat_constraints, chat_deferred, chat_tools
+
+    history = [{"role": "user", "content": "hi"}]
+    assert chat_constraints(history) == AgentConstraints(
+        tools=chat_tools(history), interactive=True, deferred=chat_deferred(history))
+    cut = chat_constraints(history, withhold=("silica_rework",), max_iterations=8)
+    assert "silica_rework" not in cut.tools and cut.max_iterations == 8
+    assert cut.tools == tuple(n for n in chat_tools(history) if n != "silica_rework")
+
+
 def test_a_ledger_task_loads_the_tool_it_names(monkeypatch):
     """prompt-rules probe, 2026-09-28: the ledger handed `silica_backlink`, a
     loadable tool, and on llama.cpp the grammar only admits offered names, so

@@ -117,7 +117,7 @@ def one(opts: argparse.Namespace) -> None:
     fresh directories."""
     from silica.agent import loop
     from silica.obs import narration as narr
-    from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
+    from silica.agent.constraints import chat_constraints
     from silica.session.seed import seed_messages
     from silica.config import CONFIG
 
@@ -147,9 +147,7 @@ def one(opts: argparse.Namespace) -> None:
     error = None
     try:
         answer = loop.run_agent(messages, CONFIG.model, cancel_token=threading.Event(),
-                                constraints=AgentConstraints(tools=chat_tools(messages),
-                                                             deferred=chat_deferred(messages),
-                                                             interactive=True))
+                                constraints=chat_constraints(messages))
     except Exception as e:  # a provider failure is a result of the case, not a crash of the run
         answer, error = "", f"{type(e).__name__}: {e}"[:300]
     finally:

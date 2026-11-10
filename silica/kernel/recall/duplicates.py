@@ -2,7 +2,8 @@
 # Copyright (C) 2026 Alessandro Carosia
 
 """Near-duplicate notes: the cosine and title scan over the embedding index, and
-the dedup work items a list of pairs becomes.
+the dedup work items a list of pairs becomes, pair by pair for /dedup and
+family by family for /curate.
 
 Below the tools because /dedup seeds its ledger from the same scan the tool runs,
 and the golden probe holds both as the production decision.
@@ -109,32 +110,69 @@ def scan_pairs(folder: str = "") -> tuple[list[dict], str | None]:
     return pairs, None
 
 
+def _read(path: str) -> str | None:
+    """The note's body, None when it cannot be read: what an unreadable side
+    means is each command's own call."""
+    try:
+        return DRIVER.read_note(path).content or ""
+    except Exception:
+        return None
+
+
+def _stale_levels() -> dict[str, str]:
+    """note path -> change level of the stale code-doc notes, from the read-only
+    peek, so it never pays the walk. Read once per batch of pairs: each read is
+    a `git rev-parse` and a JSON load."""
+    try:
+        from silica.kernel.code import codedocs
+
+        return codedocs.peek(CONFIG.vault_path)
+    except Exception:
+        return {}  # the guard is an aid; the pairs are judged without it
+
+
+def _loser_text(path: str, body: str, stale: dict[str, str]) -> str:
+    """`body` as the judge reads it, from /dedup and /curate alike: a stale
+    code-doc note's starts with one line (spec-stale-triggers §4), because this
+    read bypasses the read gate's banner, and the same pair reached the judge
+    with the line from one command and without it from the other. Annotate
+    only: the model decides, nothing blocks. An empty note gets no line: a
+    prefix with nothing under it is noise, not a warning."""
+    from silica.kernel.code.codedocs import peek_level
+
+    lvl = peek_level(stale, path) if body else None
+    return f"[stale] {lvl}: verify against the source before reusing claims\n\n{body}" if lvl else body
+
+
+def _split(a: str, b: str, body_a: str, body_b: str) -> tuple[str, str, str]:
+    """(merge target, loser, the loser's body). The more reliable note is the
+    merge target; the other is the source of new info. Reliability first,
+    length only to break a tie within a tier, where `b` wins."""
+    if merge_rank(body_b) >= merge_rank(body_a):
+        return b, a, body_a
+    return a, b, body_b
+
+
 def pairs_to_items(pairs: list[dict]) -> list[WorkItem]:
-    """Build dedup WorkItems from {source, target, score} dicts — the single
-    place bodies are read and the larger/smaller split is decided. Optional
-    full_score/title_score telemetry is propagated into context when present.
+    """Build /dedup's WorkItems from {source, target, score} dicts, one per pair.
+    Optional full_score/title_score telemetry is propagated into context when
+    present.
     """
     items: list[WorkItem] = []
+    stale = _stale_levels()
     for pair in pairs:
         source = pair.get("source")
         target = pair.get("target")
         score = pair.get("score", 0.0)
         if not source or not target:
             continue
-        try:
-            body_src = DRIVER.read_note(source).content or ""
-            body_tgt = DRIVER.read_note(target).content or ""
-        except Exception:
+        body_src, body_tgt = _read(source), _read(target)
+        if body_src is None or body_tgt is None:
             continue  # a pair with an unreadable side cannot be judged: left for the next run
 
-        # The more reliable note is the merge target; the other is the source of
-        # new info. Reliability first, length only to break a tie within a tier.
-        if merge_rank(body_tgt) >= merge_rank(body_src):
-            larger, smaller, smaller_body = target, source, body_src
-        else:
-            larger, smaller, smaller_body = source, target, body_tgt
-
-        job = DedupJob.between_notes(loser=smaller, winner=larger, loser_body=smaller_body, score=score)
+        larger, smaller, smaller_body = _split(source, target, body_src, body_tgt)
+        job = DedupJob.between_notes(loser=smaller, winner=larger, loser_body=_loser_text(smaller, smaller_body, stale),
+                                     score=score)
         reason = f"dedup score={score:.3f}"
         if "full_score" in pair and "title_score" in pair:
             job.full_score = pair["full_score"]
@@ -143,3 +181,89 @@ def pairs_to_items(pairs: list[dict]) -> list[WorkItem]:
 
         items.append(WorkItem(kind="dedup", target_path=larger, context=job, reason=reason))
     return items
+
+
+def families_to_items(pairs: list[dict]) -> list[WorkItem]:
+    """Build /curate's WorkItems from {source, target, score, reason} dicts,
+    collapsing duplicate *families*.
+
+    Pairwise dedup leaves one survivor per local top-1 hub: a family {A,B,C,D,E}
+    whose top-1 edges are A→B, C→B, D→E, F→E collapses to TWO notes, not one.
+    So confirmed pairs (score ≥ τ_high) are union-found into connected components
+    and each component funnels into its single largest note.
+
+    Transitive closure is applied ONLY to confirmed pairs — chaining borderline
+    (< τ_high) links would merge distant notes — so borderline pairs stay per-pair.
+    Safety: every item still passes the ternary judge, and curate items carry no
+    `target_dir`, so a "distinct" verdict is a no-op. Union-find proposes the
+    merge target; the judge disposes. A false union costs a judge call, never a bad
+    merge.
+    """
+    tau_high = CONFIG.sim_threshold_high
+    stale = _stale_levels()
+
+    _body_cache: dict[str, str] = {}
+
+    def body(p: str) -> str:
+        # An unreadable note reads as empty here, as /curate always took it:
+        # the judge's own read of the merge target skips it. Raw, never with
+        # the stale line: ahead of the frontmatter it made an agent note read
+        # as a person's and win the merge.
+        if p not in _body_cache:
+            _body_cache[p] = _read(p) or ""
+        return _body_cache[p]
+
+    stem = lambda p: p.removesuffix(".md").rsplit("/", 1)[-1]  # noqa: E731
+
+    # Connected components over confirmed pairs only (nx over a hand-rolled
+    # union-find — same result, one well-known call).
+    import networkx as nx
+
+    graph = nx.Graph()
+    node_score: dict[str, float] = {}
+    for pair in pairs:
+        if pair["score"] >= tau_high:
+            graph.add_edge(pair["source"], pair["target"])
+            for n in (pair["source"], pair["target"]):
+                node_score[n] = max(node_score.get(n, 0.0), pair["score"])
+
+    components = [set(c) for c in nx.connected_components(graph)]
+    # node -> component-id, so the borderline pass below can ask "same component?"
+    comp_of: dict[str, int] = {n: i for i, c in enumerate(components) for n in c}
+
+    items: list[WorkItem] = []
+    # 1. Each confirmed component → collapse every member into its largest note.
+    for members in components:
+        canonical = max(members, key=lambda p: merge_rank(body(p)))
+        for m in members:
+            if m == canonical:
+                continue
+            sc = node_score.get(m, tau_high)
+            items.append(WorkItem(
+                kind="dedup",
+                target_path=canonical,
+                context=DedupJob.between_notes(loser=m, winner=canonical, loser_body=_loser_text(m, body(m), stale),
+                                               score=sc),
+                reason=f"curate dedup family → {stem(canonical)} (score={sc:.3f})",
+            ))
+
+    # 2. Borderline pairs — per-pair behaviour (more reliable note is target),
+    #    skipping any pair already absorbed by a shared confirmed component.
+    for pair in pairs:
+        if pair["score"] >= tau_high:
+            continue
+        source, target = pair["source"], pair["target"]
+        if comp_of.get(source, -1) == comp_of.get(target, -2):
+            continue
+        larger, smaller, smaller_body = _split(source, target, body(source), body(target))
+        items.append(WorkItem(
+            kind="dedup",
+            target_path=larger,
+            context=DedupJob.between_notes(loser=smaller, winner=larger,
+                                           loser_body=_loser_text(smaller, smaller_body, stale), score=pair["score"]),
+            reason=pair.get("reason") or f"curate dedup score={pair['score']:.3f}",
+        ))
+    # Family members share target_path=canonical by construction → one judge
+    # call per family instead of one per member.
+    from silica.kernel.workqueue import batch_dedup_items
+    return batch_dedup_items(items)

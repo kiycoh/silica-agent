@@ -268,7 +268,7 @@ def _prefetch_reads(tool_calls: list, allowed: dict[str, Tool], cancel_token: An
         return {}
     pool = _cf.ThreadPoolExecutor(max_workers=min(len(names), _READ_WORKERS),
                                   thread_name_prefix="silica-read")
-    read = RunContext.here(narrated=True).spawn(_run_read)
+    read = RunContext.here().spawn(_run_read)
     futures = {id(tc): pool.submit(read, allowed[tc.name], tc, cancel_token) for tc in tool_calls}
     pool.shutdown(wait=False)  # the threads end with their call; nothing waits on the pool
     return futures
@@ -306,10 +306,9 @@ def run_agent(
         }
     else:
         # Non-ambient authority: the main agent's default toolset excludes
-        # sensitive tools (ADR-0009 / ADR-0015) and pipeline internals the FSM
-        # drives programmatically. Both are reachable only when a caller names
-        # them in AgentConstraints.tools.
-        allowed = {n: t for n, t in TOOLS.items() if not t.sensitive and not t.internal}
+        # sensitive tools (ADR-0009 / ADR-0015), reachable only when a caller
+        # names them in AgentConstraints.tools.
+        allowed = {n: t for n, t in TOOLS.items() if not t.sensitive}
 
     # Permitted, not offered (ADR-0050): a tool joins `allowed` and `schemas`
     # when silica_load_tools names it or the model calls it directly. Only
@@ -443,7 +442,7 @@ def run_agent(
             return call_llm(effective_model, messages, **k)
 
         return run_with_deadline(
-            RunContext.here(narrated=True).spawn(_llm_worker), None, catch=BaseException, abandon=_abandon,
+            RunContext.here().spawn(_llm_worker), None, catch=BaseException, abandon=_abandon,
             stop=cancel_token if cancel_token is not None else threading.Event(), on_stop=_Stopped)
 
     def _reask_without_reasoning(reply, kwargs: dict):

@@ -30,7 +30,7 @@ from silica.sources import web_research as wr
 def test_web_turn_exposes_exactly_the_three_web_tools():
     """The consent turn is the only chat path to web_search/web_fetch/remember,
     and it must not carry the vault toolset along with them."""
-    from silica.agent.constraints import web_turn_constraints
+    web_turn_constraints = wr.web_turn_constraints
     from silica.agent.loop import run_agent
 
     captured = {}
@@ -52,11 +52,6 @@ def test_web_turn_exposes_exactly_the_three_web_tools():
     names = {t["function"]["name"] for t in (captured["tools"] or [])}
     assert names == {"web_search", "web_fetch", "remember", "find_in_page"}
 
-
-def test_web_turn_iteration_cap_matches_web_research():
-    from silica.agent.constraints import web_turn_constraints
-
-    assert web_turn_constraints().max_iterations == wr.DEFAULT_MAX_SEARCHES
 
 
 # --- 2. dispatch ------------------------------------------------------------
@@ -367,7 +362,7 @@ def test_the_chat_toolset_carries_the_door_not_the_tools_behind_it():
 def test_web_answer_runs_the_consented_sub_loop_and_cites_its_trace(monkeypatch):
     """One question in, cited prose out — and the sub-loop it spends is the web
     lane's own constrained turn, not the caller's toolset."""
-    from silica.agent.constraints import web_answer_constraints
+    web_answer_constraints = wr.web_answer_constraints
 
     monkeypatch.setattr(wr, "_LAST_WEB_TURN", None)
     monkeypatch.setattr(wr, "_seed", lambda question, watch: [])  # offline

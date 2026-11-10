@@ -100,6 +100,52 @@ _HTTP_TIMEOUT = 30
 # lane line. Raise it when a lane can carry it.
 DEFAULT_MAX_SEARCHES = 48
 
+# What /web and /web-search run on; /web-search adds `plan` when it steers.
+_WEB_TOOLS = ("web_search", "web_fetch", "remember", "find_in_page")
+
+
+def web_turn_constraints() -> AgentConstraints:
+    """`/web` — the consented web turn: the four web tools and nothing else.
+    (`remember` banks a verbatim quote from a fetched page and `find_in_page`
+    greps one; both touch only per-turn module state here, never the vault.)
+
+    The cap is /web-search's DEFAULT_MAX_SEARCHES, even though this lane is
+    interactive and that one is batch: the cap is a ceiling, not a target, so a
+    /web question that converges in four steps costs four either way. Split the
+    two the day a /web turn is seen spending a ceiling it had no reason to spend.
+    """
+    return AgentConstraints(tools=_WEB_TOOLS, max_iterations=DEFAULT_MAX_SEARCHES)
+
+
+def web_answer_constraints() -> AgentConstraints:
+    """`silica_web_answer` — the chat's own door to the web, which the user
+    waits through mid-turn.
+
+    No `remember`: see web_answer_instruction.
+
+    8 and not /web's 48: the chat door is where /web's ceiling was spent for
+    no reason. A live V4 Flash smoke test on 2026-10-21 ran one question to 132
+    calls and 12 minutes with no answer, the chat calling this door four times.
+    On the latency bench of 2026-10-22 the lane answered four questions of five
+    in 1 to 3 calls; the fifth spent all 12 of a first cap on ten searches
+    against challenged lanes, and the steps past the eighth bought nothing. A
+    question that needs more is research, and /web-search writes it up as a note.
+
+    Thinking stays on. Off (OpenRouter `reasoning: {enabled: false}`) V4 Flash
+    0731 on DeepInfra wrote its draft into the answer, an English "Let me
+    answer." and the answer again, in 3 of 10 bench answers against 0 of 10 with
+    it on (2026-10-22).
+
+    Streams, so a `final` answer can paint into the reply while it is written;
+    whether it does is the calling loop's decision (loop.py).
+    """
+    return AgentConstraints(
+        tools=("web_search", "web_fetch", "find_in_page"),
+        max_iterations=8,
+        stream=True,
+    )
+
+
 _RESEARCH_SYSTEM_PROMPT = """You are a focused web-research agent. Given a \
 concept, research it on the web and write a findings note.
 
@@ -710,11 +756,7 @@ def web_research(
         model=CONFIG.model,
         tool_progress_callback=_record,
         constraints=AgentConstraints(
-            tools=(
-                ("web_search", "web_fetch", "remember", "find_in_page", "plan")
-                if _STEERING
-                else ("web_search", "web_fetch", "remember", "find_in_page")
-            ),
+            tools=(*_WEB_TOOLS, "plan") if _STEERING else _WEB_TOOLS,
             max_iterations=max_searches,
         ),
     )
@@ -1040,8 +1082,6 @@ def silica_web_answer(
     opened: pass that block through as it comes, never rewrite it and never name
     a source it does not list. `/keep` saves the answer as an Inbox note.
     """
-    from silica.agent.constraints import web_answer_constraints
-
     # A sub-loop, not the four web tools handed to the chat: a fetched page is
     # attacker-controlled text, and in here the only tools it can reach are the
     # web ones (ADR-0009 non-ambient authority). The chat loop, which does hold

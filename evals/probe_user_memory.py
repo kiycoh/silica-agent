@@ -96,7 +96,7 @@ def _expand(turn: str) -> dict:
 def run_case(name: str, model: str, pristine: Path) -> dict:
     from evals.probe_prompt_ab import _stub_egress
     from silica.obs import narration as _narr
-    from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
+    from silica.agent.constraints import chat_constraints
     from silica.agent.loop import run_agent
     from silica.session.seed import seed_messages
     from silica.kernel import user_memory as um
@@ -120,9 +120,7 @@ def run_case(name: str, model: str, pristine: Path) -> dict:
             messages.append(_expand(turn))
             _narr.NARRATOR.turn(messages[-1])
             answer = run_agent(messages, model=model, cancel_token=cancel,
-                               constraints=AgentConstraints(
-                                   tools=chat_tools(messages), interactive=True,
-                                   deferred=chat_deferred(messages)))
+                               constraints=chat_constraints(messages))
             calls, results = [], {}
             for m in messages[start:]:
                 for tc in m.get("tool_calls") or ():

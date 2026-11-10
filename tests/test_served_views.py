@@ -161,11 +161,11 @@ SHARED_TOOLS = {
     "silica_look", "silica_mindmap", "silica_move", "silica_orphans", "silica_outline",
     "silica_patch_note", "silica_props", "silica_query_table", "silica_read",
     "silica_read_note", "silica_recall", "silica_related", "silica_remember",
-    "silica_restore", "silica_rework", "silica_run_injector", "silica_run_organizer",
+    "silica_rework", "silica_run_injector", "silica_run_organizer",
     "silica_search", "silica_search_context", "silica_semantic_search", "silica_session_search",
-    "silica_snapshot", "silica_tables", "silica_timeline", "silica_unresolved",
+    "silica_tables", "silica_timeline", "silica_unresolved",
     "silica_vault_report", "silica_vaults", "silica_web_answer", "silica_write_note",
-    "submit_repaired_ops", "web_fetch", "web_search",
+    "web_fetch", "web_search",
 }
 SHARED_COMMANDS = {
     "/aliases", "/anneal", "/changes", "/check", "/clear", "/connect", "/contested", "/convert",

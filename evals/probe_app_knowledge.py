@@ -124,7 +124,7 @@ def run_one(arm: str, out_json: Path, cap: int) -> None:
     import silica.cli  # noqa: F401  registers the tools
     from silica.session.seed import seed_messages
     from silica.agent import loop as _loop
-    from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
+    from silica.agent.constraints import chat_constraints
     from silica.agent.loop import run_agent
     from silica.tools import TOOLS
 
@@ -163,8 +163,7 @@ def run_one(arm: str, out_json: Path, cap: int) -> None:
         t0 = time.time()
         try:
             answer = run_agent(messages, model=model, cancel_token=cancel,
-                               constraints=AgentConstraints(tools=chat_tools(messages), interactive=True,
-                                                            deferred=chat_deferred(messages)))
+                               constraints=chat_constraints(messages))
             error = ""
         except Exception as exc:  # a failed question is recorded and graded as missing, not fatal to the run
             answer, error = "", f"{type(exc).__name__}: {exc}"

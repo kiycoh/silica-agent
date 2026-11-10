@@ -874,6 +874,10 @@ def run_one(arm: str, case: str, model: str, max_prompt_tokens: int, out_json: P
     from silica.agent import loop as _loop
     from silica.obs import narration as _narr
     from silica.agent.constraints import AgentConstraints, chat_tools
+    try:  # the turn's own constraints, on a tree that has them (2026-11-10)
+        from silica.agent.constraints import chat_constraints
+    except ImportError:
+        chat_constraints = None
     try:  # the same probe drives a tree from before the chat core (ADR-0050)
         from silica.agent.constraints import chat_deferred
     except ImportError:
@@ -918,7 +922,7 @@ def run_one(arm: str, case: str, model: str, max_prompt_tokens: int, out_json: P
             spent_before = dict(spent)
             t0 = time.time()
             answer = run_agent(messages, model=model, cancel_token=cancel,
-                               constraints=AgentConstraints(
+                               constraints=chat_constraints(messages) if chat_constraints else AgentConstraints(
                                    tools=chat_tools(messages), interactive=True,
                                    **({"deferred": chat_deferred(messages)} if chat_deferred else {})))
             aborted = cancel.is_set()

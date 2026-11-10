@@ -659,7 +659,7 @@ def test_collision_high_similarity_routes_to_patch():
 
 def test_collision_dedup_item_carries_the_run_id():
     """COLLISION's workers file their notes under the FSM's run id. Without it
-    `_item_provenance` yields "" and the ledger row falls back to the undo
+    `provenance()` yields "" and the ledger row falls back to the undo
     journal's id, a keyspace the dangling-link sweep never reads."""
     from silica.kernel.workqueue import WorkQueue
 

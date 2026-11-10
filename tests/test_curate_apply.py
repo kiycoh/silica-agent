@@ -18,6 +18,7 @@ from tests import run_command
 import json
 
 import silica.tools.curate as curate
+from silica.kernel.recall import duplicates
 from silica.kernel.report.curator import CurationItem, CurationPlan
 from silica.kernel.report.graph_report import VaultReport
 from silica.kernel.base.layout import DEFAULT_LOG_FILENAME
@@ -31,7 +32,7 @@ def test_dedup_workitems_collapses_confirmed_family_to_largest(monkeypatch):
     """A confirmed duplicate FAMILY (A-B-C chain) collapses to its single largest
     note, not one survivor per local top-1 hub. Borderline pairs stay per-pair."""
     bodies = {"A": "a" * 10, "B": "b" * 100, "C": "c" * 50, "D": "d" * 30, "E": "e" * 20}
-    monkeypatch.setattr(curate, "_read_body", lambda p: bodies.get(p, ""))
+    monkeypatch.setattr(duplicates, "_read", lambda p: bodies.get(p, ""))
     monkeypatch.setattr("silica.config.CONFIG.sim_threshold_high", 0.85, raising=False)
 
     plan = _plan(
@@ -80,7 +81,7 @@ def test_apply_enqueues_correct_workitem_kinds(monkeypatch, tmp_path):
     cap = _Capture()
     monkeypatch.setattr(curate, "run_subagent_batch", cap)
     monkeypatch.setattr(curate.related, "link_candidates", lambda p, k=5: [{"name": "N", "path": "N.md"}])
-    monkeypatch.setattr(curate, "_read_body", lambda p: "body of " + p)
+    monkeypatch.setattr(duplicates, "_read", lambda p: "body of " + p)
     autolinked = {}
 
     def _fake_autolink(srcs):
@@ -114,7 +115,7 @@ def test_apply_enqueues_correct_workitem_kinds(monkeypatch, tmp_path):
 def test_apply_appends_one_journal_line_idempotent_per_run(monkeypatch, tmp_path):
     monkeypatch.setattr(curate, "run_subagent_batch", _Capture())
     monkeypatch.setattr(curate.related, "link_candidates", lambda p, k=5: [])
-    monkeypatch.setattr(curate, "_read_body", lambda p: "body")
+    monkeypatch.setattr(duplicates, "_read", lambda p: "body")
     monkeypatch.setattr(curate, "_run_autolink", lambda srcs: {})
 
     plan = _plan(
@@ -146,7 +147,7 @@ def test_apply_journal_reports_real_outcomes_not_planned_counts(monkeypatch, tmp
         }
 
     monkeypatch.setattr(curate, "run_subagent_batch", _fake_batch)
-    monkeypatch.setattr(curate, "_read_body", lambda p: "body")
+    monkeypatch.setattr(duplicates, "_read", lambda p: "body")
     monkeypatch.setattr(curate, "_run_autolink", lambda srcs: {})
 
     plan = _plan(CurationItem(kind="dedup", target="A", partner="B", score=0.7))

@@ -33,7 +33,7 @@ def _patch_op(path: str, snippet: str = "body") -> Op:
 # ---------------------------------------------------------------------------
 
 def test_skipped_restore_does_not_report_reverted(tmp_vault, monkeypatch):
-    """silica_restore skips a restore_version with prior_content=None (build_txn
+    """The rollback (gate.apply_inverses) skips a restore_version with prior_content=None (build_txn
     could read neither the note nor its mirror seed) with only a warning — it
     never lands in errors. reverted=True there claims the note was left
     untouched while the lint-rejected body is still on disk."""

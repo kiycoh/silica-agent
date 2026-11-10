@@ -427,6 +427,28 @@ def provider_of(model: str) -> str:
     return prefix if slash and prefix in PROVIDER_PREFIXES else "lmstudio"
 
 
+# The config fields behind each model role: (model, provider). Here and not in
+# model.providers so that SilicaConfig, which restores a bare id's prefix from
+# them, and resolve_role, which runs the role on them, read one pairing: each
+# kept its own, the vision fallback included.
+ROLE_FIELDS = {
+    "worker": ("worker_model", "worker_provider"),
+    "judge": ("judge_model", "judge_provider"),
+    "escalation": ("distill_escalation_model", "distill_escalation_provider"),
+    "vision": ("vision_model", "vision_provider"),
+}
+
+
+def role_provider(config: Any, role: str) -> str:
+    """The provider set for `role`, "" for none. Vision alone inherits the
+    chat's: hosted, a vision model is one variable (config.vision_model), and
+    it must not need a second."""
+    provider = getattr(config, ROLE_FIELDS[role][1]) or ""
+    if role == "vision":
+        return provider or config.provider or ""
+    return provider
+
+
 # Hosted providers in fallback order: (API key env var, model ids best first),
 # the view of provider_table that the no-model chain and the Settings panel read.
 HOSTED_PROVIDERS: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -1167,11 +1189,8 @@ class SilicaConfig:
     def __post_init__(self):
         self._pinned = {row.key: row.read() for row in _embedder_rows().values() if row.key in os.environ}
         self.model = ensure_prefix(self.model, self._provider)
-        self.worker_model = ensure_prefix(self.worker_model, self.worker_provider)
-        self.judge_model = ensure_prefix(self.judge_model, self.judge_provider)
-        self.vision_model = ensure_prefix(self.vision_model, self.vision_provider or self.provider)
-        self.distill_escalation_model = ensure_prefix(
-            self.distill_escalation_model, self._distill_escalation_provider)
+        for role, (model_field, _provider_field) in ROLE_FIELDS.items():
+            setattr(self, model_field, ensure_prefix(getattr(self, model_field), role_provider(self, role)))
 
 
 def _embedder_rows() -> dict[str, Setting]:

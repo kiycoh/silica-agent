@@ -124,9 +124,9 @@ class Reads(NamedTuple):
 class Tool:
     """Metadata and executor for a single registered tool."""
 
-    __slots__ = ("fn", "name", "description", "params_model", "cls", "collapse", "sensitive", "internal",
+    __slots__ = ("fn", "name", "description", "params_model", "cls", "collapse", "sensitive",
                  "ingress", "mutates", "reads", "parallel_safe", "once_per_block", "note_args", "label",
-                 "found_nothing", "loads", "history_view", "reply_flag", "shrink")
+                 "found_nothing", "found", "loads", "history_view", "reply_flag", "shrink")
 
     def __init__(
         self,
@@ -137,7 +137,6 @@ class Tool:
         cls: str,
         collapse: str = "lazy",
         sensitive: bool = False,
-        internal: bool = False,
         *,
         ingress: bool | None = None,
         mutates: str = "",
@@ -147,6 +146,7 @@ class Tool:
         note_args: tuple[str, ...] = (),
         label: tuple[str, str | None] | None = None,
         found_nothing: str = "",
+        found: str = "",
         loads: Callable[[dict, Any], Iterable[Any]] | None = None,
         history_view: Callable[[str, set[str]], str] | None = None,
         reply_flag: str = "",
@@ -162,11 +162,6 @@ class Tool:
         # on this so a sensitive tool can never leak into the main agent by
         # mere registration. New sensitive tools are covered automatically.
         self.sensitive = sensitive
-        # Tools no chat turn is offered (the repair loop's submit_repaired_ops,
-        # snapshot, restore): registered for dispatch but hidden from the main
-        # agent's default toolset — same filter seam as `sensitive`. Still
-        # reachable when named in AgentConstraints.tools.
-        self.internal = internal
         # Does a result carry text from outside the user's own words and notes?
         # The taint gate (ADR-0090) reads it. None is "never said", which a
         # test refuses for a registered tool: a tool that brought a page in and
@@ -192,6 +187,10 @@ class Tool:
         self.label = label
         # The result key that is empty when a vault search matched nothing.
         self.found_nothing = found_nothing
+        # The result key listing the notes a vault search found, best first:
+        # paths or `{path}` items. Not found_nothing's key, which for a body
+        # search is a count.
+        self.found = found
         # (args, result) -> tool names this call brings in: the loop offers each
         # one it may. Only ever a successful call's.
         self.loads = loads
@@ -312,12 +311,31 @@ def model_from_signature(fn: Callable) -> type[BaseModel]:
     return create_model(f"{fn.__name__}Args", **fields)
 
 
+def make_tool(
+    fn: Callable,
+    params_model: type[BaseModel] | None = None,
+    cls: str = "atomic",
+    collapse: str = "lazy",
+    sensitive: bool = False,
+    *,
+    ingress: bool,
+    **facts: Any,
+) -> Tool:
+    """`fn` as a Tool, named after it and described by its docstring, without
+    registering it: what @tool registers, and what a loop that holds its own
+    tools hands run_agent as AgentConstraints.registry."""
+    # cleandoc, not strip: a docstring's continuation lines carry the source
+    # indentation, and every "\n    " is its own token in a description sent
+    # on every request.
+    return Tool(fn, fn.__name__, inspect.cleandoc(fn.__doc__ or ""), params_model or model_from_signature(fn), cls,
+                collapse=collapse, sensitive=sensitive, ingress=ingress, **facts)
+
+
 def tool(
     params_model: type[BaseModel] | None = None,
     cls: str = "atomic",
     collapse: str = "lazy",
     sensitive: bool = False,
-    internal: bool = False,
     *,
     ingress: bool,
     **facts: Any,
@@ -337,18 +355,8 @@ def tool(
     """
 
     def decorator(fn: Callable) -> Callable:
-        tool_name = fn.__name__
-        # cleandoc, not strip: a docstring's continuation lines carry the source
-        # indentation, and every "\n    " is its own token in a description sent
-        # on every request.
-        tool_desc = inspect.cleandoc(fn.__doc__ or "")
-        model = params_model or model_from_signature(fn)
-        TOOLS[tool_name] = Tool(
-            fn, tool_name, tool_desc, model, cls,
-            collapse=collapse, sensitive=sensitive,
-            internal=internal, ingress=ingress, **facts,
-        )
-        logger.debug("Registered tool: %s (class=%s, collapse=%s)", tool_name, cls, collapse)
+        TOOLS[fn.__name__] = make_tool(fn, params_model, cls, collapse, sensitive, ingress=ingress, **facts)
+        logger.debug("Registered tool: %s (class=%s, collapse=%s)", fn.__name__, cls, collapse)
         return fn
 
     return decorator

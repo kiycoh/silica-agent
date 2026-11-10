@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from silica.agent import turn_notes
-from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools, web_turn_constraints
+from silica.agent.constraints import AgentConstraints, chat_constraints
 from silica.agent.loop import run_agent
 from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
 from silica.agent.sentinels import EMPTY_COMPLETION
@@ -27,7 +27,7 @@ from silica.obs.events import LLMStreamEvent, ToolErrorEvent, ToolStartEvent
 from silica.session import meter, offers
 from silica.session.conversation import Conversation
 from silica.session.words import command_word, first_word
-from silica.sources.web_research import WebTurn
+from silica.sources.web_research import WebTurn, web_turn_constraints
 
 logger = logging.getLogger(__name__)
 
@@ -206,16 +206,11 @@ def watched(t: Turn, renderer, surface: str = "gui") -> None:
 
 
 def constraints(t: Turn, withhold=(), max_iterations: int | None = None) -> AgentConstraints:
-    """The chat_tools cut, the same on every chat surface: the tool block is the
-    biggest per-iteration cost. interactive=True keeps the live stream and keeps
-    the turn off the worker-slot cap, which is what the cut silently cost when it
-    was first wired in. Slash directives carry origin="cli", so excluded tools a
-    command names are summoned back."""
+    """The /web lane's for a /web turn, else the chat turn's, the same on every
+    chat surface."""
     if t.web:
         return web_turn_constraints()
-    messages = t.conv.messages
-    return AgentConstraints(tools=tuple(n for n in chat_tools(messages) if n not in withhold),
-                            deferred=chat_deferred(messages), interactive=True, max_iterations=max_iterations)
+    return chat_constraints(t.conv.messages, withhold, max_iterations)
 
 
 # --- the model ----------------------------------------------------------------

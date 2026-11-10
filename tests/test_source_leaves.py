@@ -217,11 +217,9 @@ def test_undo_removes_leaf_and_block(tmp_vault):
     fsm = _fsm([_entry("src.md", "write", "Concepts/A")], keep_sources=True)
     finalize._write_source_leaf(fsm, "Inbox/src.md")
 
-    from silica.tools.wrapped import silica_restore
+    from silica.kernel.write import gate
 
-    res = silica_restore(
-        txn_id="t0", inverses=[inv.model_dump() for _, inv, _ in fsm.run_inverses]
-    )
+    res = gate.apply_inverses("t0", [inv.model_dump() for _, inv, _ in fsm.run_inverses])
     assert res.get("success")
     assert not _vault_file("sources/src.md").exists()
     assert _vault_file("Concepts/A.md").read_text(encoding="utf-8") == prior_note

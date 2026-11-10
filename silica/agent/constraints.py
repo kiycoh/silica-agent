@@ -82,57 +82,6 @@ _CHAT_EXCLUDED = frozenset({
 })
 
 
-def web_turn_constraints() -> AgentConstraints:
-    """`/web` — the consented web turn: the four web tools and nothing else.
-    (`remember` banks a verbatim quote from a fetched page and `find_in_page`
-    greps one; both touch only per-turn module state in
-    silica/sources/web_research.py, never the vault.)
-
-    48 is the twin of `DEFAULT_MAX_SEARCHES` in silica/sources/web_research.py,
-    which carries the reasoning for the number. Duplicated rather than imported:
-    the import direction is sources -> agent, so this module must not read that
-    one; test_web_turn_iteration_cap_matches_web_research holds them equal.
-
-    Held equal even though this lane is interactive and that one is batch: the
-    cap is a ceiling, not a target, so a /web question that converges in four
-    steps costs four either way. Split the two the day a /web turn is seen
-    spending a ceiling it had no reason to spend.
-    """
-    return AgentConstraints(
-        tools=("web_search", "web_fetch", "remember", "find_in_page"),
-        max_iterations=48,
-    )
-
-
-def web_answer_constraints() -> AgentConstraints:
-    """`silica_web_answer` — the chat's own door to the web, which the user
-    waits through mid-turn.
-
-    No `remember`: see web_answer_instruction in silica/sources/web_research.py.
-
-    8 and not /web's 48: the chat door is where /web's ceiling was spent for
-    no reason. A live V4 Flash smoke test on 2026-10-21 ran one question to 132
-    calls and 12 minutes with no answer, the chat calling this door four times.
-    On the latency bench of 2026-10-22 the lane answered four questions of five
-    in 1 to 3 calls; the fifth spent all 12 of a first cap on ten searches
-    against challenged lanes, and the steps past the eighth bought nothing. A
-    question that needs more is research, and /web-search writes it up as a note.
-
-    Thinking stays on. Off (OpenRouter `reasoning: {enabled: false}`) V4 Flash
-    0731 on DeepInfra wrote its draft into the answer, an English "Let me
-    answer." and the answer again, in 3 of 10 bench answers against 0 of 10 with
-    it on (2026-10-22).
-
-    Streams, so a `final` answer can paint into the reply while it is written;
-    whether it does is the calling loop's decision (loop.py).
-    """
-    return AgentConstraints(
-        tools=("web_search", "web_fetch", "find_in_page"),
-        max_iterations=8,
-        stream=True,
-    )
-
-
 # The chat core (ADR-0050): the tools a chat turn is offered before it asks for
 # any, in this order. Chosen from use, not taste: GUI and TUI sessions through
 # 2026-09-28 made 445 calls over 22 distinct tools. The core keeps the ones
@@ -214,8 +163,9 @@ DEMO_WITHHELD = frozenset({
 })
 
 # ADR-0139 point 5: a demo question runs at most the 8 iterations the web door
-# is held to (web_answer_constraints). They are iterations, not calls: one still
-# calling tools at the 8th gets a landing call with the tools removed, and any
+# is held to (web_answer_constraints in silica/sources/web_research.py). They are
+# iterations, not calls: one still calling tools at the 8th gets a landing call
+# with the tools removed, and any
 # reply that answers in its reasoning alone is asked once more (loop.py), so a
 # capped question spends at least 9 calls and at most 18. Three spend 27 or
 # more where the ADR's arithmetic says 24 (review 2026-10-31).
@@ -234,7 +184,7 @@ def _eligible() -> dict:
     from silica.config import demo, withheld
 
     gone = withheld("tools") | (DEMO_WITHHELD if demo() else frozenset())
-    return {n: t for n, t in TOOLS.items() if not t.sensitive and not t.internal and n not in gone}
+    return {n: t for n, t in TOOLS.items() if not t.sensitive and n not in gone}
 
 
 def loadable() -> tuple[str, ...]:
@@ -324,6 +274,19 @@ def chat_tools(messages: "list[dict] | None" = None) -> tuple[str, ...]:
         if n in eligible and n not in offered:
             offered.append(n)
     return tuple(offered)
+
+
+def chat_constraints(messages: "list[dict] | None", withhold=(), max_iterations: int | None = None) -> AgentConstraints:
+    """What a chat turn runs on, built once for every surface and for the evals
+    that measure one: a cut they rebuilt by hand never got `withhold`.
+
+    The chat_tools cut, because the tool block is the biggest per-iteration
+    cost. interactive=True keeps the live stream and keeps the turn off the
+    worker-slot cap, which is what the cut silently cost when it was first wired
+    in. Slash directives carry origin="cli", so excluded tools a command names
+    are summoned back."""
+    return AgentConstraints(tools=tuple(n for n in chat_tools(messages) if n not in withhold),
+                            deferred=chat_deferred(messages), interactive=True, max_iterations=max_iterations)
 
 
 def chat_deferred(messages: "list[dict] | None" = None) -> tuple[str, ...]:
