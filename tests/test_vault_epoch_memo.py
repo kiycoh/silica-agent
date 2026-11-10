@@ -78,6 +78,22 @@ class TestTheReportMemo:
         assert second is not first
         assert any("C" in n for n in second.pagerank_map)
 
+    def test_no_graph_is_the_empty_report_and_is_not_kept(self, bound_vault, monkeypatch):
+        """A driver that fails answers the empty report, and the next call in the
+        same epoch asks again rather than replaying it."""
+        from silica.kernel.graph import graph_export
+        from silica.kernel.report.graph_report.compute import compute_report
+
+        real = graph_export.build_graph_data
+
+        def down(folder=""):
+            raise RuntimeError("driver down")
+
+        monkeypatch.setattr(graph_export, "build_graph_data", down)
+        assert not compute_report(analytics=True).pagerank_map
+        monkeypatch.setattr(graph_export, "build_graph_data", real)
+        assert compute_report(analytics=True).pagerank_map
+
     def test_override_seams_bypass_the_memo(self, bound_vault):
         from silica.kernel.report.graph_report.compute import compute_report
 
