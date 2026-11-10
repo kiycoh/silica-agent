@@ -90,7 +90,7 @@ def _too_big() -> ValueError:
 
 
 def _pack(conf: dict, vault: Path, out) -> None:
-    """The zip a Publish sends, written into `out` (the receiver is publish.receive): `wiki.json`,
+    """The zip a Publish sends, written into `out` (the receiver is `receive`, below): `wiki.json`,
     then the notes the check before Publish lets out as written in the vault, under
     `notes/<path in the folder>`, then `assets/<name>` for each image of theirs it lets out. Never
     a page: the account builds those (ADR-0157 point 10). A remote image is sent nothing; the

@@ -429,7 +429,7 @@ async def public_receive(request: Request):
     try:
         folder, out = await asyncio.to_thread(_receive, data, link)
     except linked_publish.FolderTaken as exc:
-        raise HTTPException(409, str(exc))
+        raise Refused(409, exc)
     except ValueError as exc:
         raise Refused(400, exc)
     except OSError as exc:
