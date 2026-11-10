@@ -39,9 +39,12 @@ def reopen(chat: Conversation, sid: str, *, driver: str, seed: Callable[[], list
     None when no store holds it. Raises `SessionBusy` when another process
     narrates it.
 
-    A narration session this vault lists goes on in place; a legacy snapshot,
-    or one another vault or incognito holds, goes on as a new session seeded
-    with its turns (emit new, recognise legacy: ticket 05). The narration
+    A narration session goes on in place, listed or not: the page reopens a
+    chat by the id in its address, and a drop's chat has no turn yet and an
+    incognito one is never listed, so a fork would give a drop's jobs a sid
+    they no longer name, or put an incognito chat on the record. A legacy
+    snapshot goes on as a new session seeded with its turns (emit new,
+    recognise legacy: ticket 05). The narration
     records turns and never the seed, so `seed()` goes in front, and nothing is
     collapsed yet. `scope` writes what the surface keeps beside it from the last
     user message (the browser's workspace line) before the persona's, since
@@ -58,7 +61,7 @@ def reopen(chat: Conversation, sid: str, *, driver: str, seed: Callable[[], list
     replayed = narration.load_session_messages(sid, vault)
     if replayed is None:
         return None
-    if narration.listed(sid, vault):
+    if (narration.narration_dir() / f"{sid}.jsonl").exists():
         narration.NARRATOR.resume(sid)  # appending continues the same account
         chat.sid = sid
     else:

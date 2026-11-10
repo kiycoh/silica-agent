@@ -167,6 +167,26 @@ def test_gui_turn_roundtrip_replay_and_endpoints(narrator, monkeypatch, tmp_path
     assert SESSION.chat.messages[-1]["content"] == "Reply"
 
 
+def test_a_chat_reopened_by_its_address_keeps_its_session_listed_or_not(narrator, monkeypatch):
+    """The page reloads a chat by the id in its address (#chat/<sid>): a drop's
+    chat has no user turn yet and is not listed, and another vault's is not
+    either. Both go on in place, as the browser always had it: a fork would
+    hand a drop's jobs a session they no longer name."""
+    from fastapi.testclient import TestClient
+    from silica.obs import narration
+    from silica.ui.web import server, session
+    from silica.ui.web.session import SESSION
+
+    narrator.close()
+    SESSION.reset()
+    dropped = session.open_session()  # what a drop does before its first turn
+    assert dropped and narration.list_sessions("/v/demo") == []
+    SESSION.reset()
+    tc = TestClient(server.app)
+    assert tc.post("/session/load", json={"id": dropped}).status_code == 200
+    assert SESSION.chat.sid == dropped
+
+
 def test_gui_stop_narrates_cancel(narrator, monkeypatch):
     import threading
     from fastapi.testclient import TestClient
