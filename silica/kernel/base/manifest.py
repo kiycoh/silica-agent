@@ -590,11 +590,19 @@ def mirrors() -> bool:
     return active_write_dir() == SAFE_WRITE_DIR
 
 
-def original_of(path: str) -> str | None:
+def original_of(path: str, *, exact: bool = False) -> str | None:
     """The vault path a mirror copy stands for: `silica/Projects/x.md` is
     `Projects/x.md`, the mirror folder itself is "", and a path outside it is
     None. A mapping only, whatever the mode: ask `mirrors()` first. Membership is
-    `within`'s, case-insensitive, as the write boundary tests it."""
+    `within`'s, case-insensitive, as the write boundary tests it.
+
+    `exact` is the literal `silica/` prefix, the rule of the two readers that
+    count notes by their stored paths (/find's shadow dedupe and a workspace's
+    members). They never folded case, and folding it would read a person's own
+    `Silica/` folder as the mirror there, so the difference stays, named here."""
+    if exact:
+        prefix = SAFE_WRITE_DIR + "/"
+        return path[len(prefix):] if (path or "").startswith(prefix) else None
     if not within(path, SAFE_WRITE_DIR):
         return None
     return (path or "").replace("\\", "/").strip("/")[len(SAFE_WRITE_DIR) + 1:]

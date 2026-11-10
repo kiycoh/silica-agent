@@ -61,7 +61,7 @@ def _mirror_copies(paths) -> set[str]:
     if not mirrors():
         return set()
     have = set(paths)
-    return {p for p in have if original_of(p) in have}
+    return {p for p in have if original_of(p, exact=True) in have}
 
 
 def read_workspace(path: str, text: str | None = None) -> dict:

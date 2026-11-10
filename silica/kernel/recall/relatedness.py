@@ -538,7 +538,7 @@ def dedupe_mirror_shadows(results: list[RelatedNote]) -> list[RelatedNote]:
     mirrored = {
         original.removesuffix(".md").casefold()
         for r in results
-        if r.origin == "vault" and (original := original_of(r.path)) is not None
+        if r.origin == "vault" and (original := original_of(r.path, exact=True)) is not None
     }
     if not mirrored:
         return results
@@ -546,7 +546,7 @@ def dedupe_mirror_shadows(results: list[RelatedNote]) -> list[RelatedNote]:
         r for r in results
         if not (
             r.origin == "vault"
-            and original_of(r.path) is None
+            and original_of(r.path, exact=True) is None
             and r.path.removesuffix(".md").casefold() in mirrored
         )
     ]

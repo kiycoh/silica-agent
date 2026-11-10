@@ -56,6 +56,37 @@ def test_members_are_the_union_of_the_three_lines_plus_one_hop_over_sources(vaul
     assert m["Concepts/Residuals.md"] == [{"kind": "derived", "via": "Lecture 05 regression"}]
 
 
+def _mirror_mode(vault_root: Path, write_dir: str) -> None:
+    from silica.kernel.base.manifest import reset_manifest_cache
+
+    (vault_root / "vault.yaml").write_text(f"write_dir: {write_dir}\n", encoding="utf-8")
+    reset_manifest_cache()
+
+
+def test_a_mirror_copy_is_not_a_member_its_original_is(vault):
+    """ADR-0109 point 1: in mirror mode `silica/X` is X's pending update, one
+    note, so the count holds it once."""
+    from silica.config import CONFIG
+
+    vault.note("silica/Courses/Statistics/Bayes theorem.md", "---\ncourse: statistics\n---\n# Bayes\n")
+    _mirror_mode(Path(CONFIG.vault_path), "silica")
+    m = wsk.members(wsk.find_workspace("Statistics exam"))
+    assert "Courses/Statistics/Bayes theorem.md" in m
+    assert "silica/Courses/Statistics/Bayes theorem.md" not in m
+
+
+def test_a_silica_folder_outside_mirror_mode_is_the_person_s_own(vault):
+    """The copy rule asks the mode: in a vault that writes elsewhere, `silica/`
+    is a folder of the person's, and its notes are members like any other. The
+    rule tested the prefix alone until 2026-11-10."""
+    from silica.config import CONFIG
+
+    vault.note("silica/Courses/Statistics/Bayes theorem.md", "---\ncourse: statistics\n---\n# Bayes\n")
+    _mirror_mode(Path(CONFIG.vault_path), "docs/silica")
+    m = wsk.members(wsk.find_workspace("Statistics exam"))
+    assert "silica/Courses/Statistics/Bayes theorem.md" in m
+
+
 def test_a_plan_or_a_workspace_note_is_never_a_member(vault):
     m = wsk.members(wsk.find_workspace("Statistics exam"))
     assert "Plans/Exam plan.md" not in m           # matches where:, but a plan is the card
