@@ -49,13 +49,14 @@ def anneal(c: Call) -> Result:
     one leg that calls a model: a bounded repair loop per bundle that still fails.
     """
     args, out = c.args, c.out
-    from silica.tools import TOOLS
+    from silica.commands import answered
+    from silica.router import anneal as annealing
 
     steer = any(p == "--steer" for p in args)
     limit = int_flag(args, "--limit=", 0)
     scope = f"{limit} bundle(s)" if limit else "every bundle"
     out.print(f"  Annealing {scope}{' with escalation' if steer else ''}…")
-    res = json.loads(TOOLS["silica_anneal"].run(steer=steer, limit=limit))
+    res = answered(annealing.sweep_deferred, steer=steer, limit=limit)
     if "error" in res:
         out.print(f"  [yellow]{res['error']}[/]")
         return out
@@ -85,7 +86,8 @@ def anneal(c: Call) -> Result:
 def curate(c: Call) -> Result:
     """/curate [folder] [--apply] — the curation pass over a folder."""
     args, out = c.args, c.out
-    from silica.tools import TOOLS
+    from silica.commands import answered
+    from silica.tools import curate as curation
 
     apply = any(p == "--apply" for p in args)
     folder = " ".join(positional(args))
@@ -94,7 +96,7 @@ def curate(c: Call) -> Result:
         out.print(f"  Curate on [bold]{scope}[/] — applying via the worker seam…")
     else:
         out.print(f"  Curate on [bold]{scope}[/] — dry-run (nothing is written)…")
-    res = json.loads(TOOLS["silica_curate"].run(apply=apply, folder=folder))
+    res = answered(curation.silica_curate, apply=apply, folder=folder)
     if "error" in res:
         out.print(f"  [yellow]{res['error']}[/]")
         return out
@@ -128,14 +130,15 @@ def curate(c: Call) -> Result:
 def aliases(c: Call) -> Result:
     """/aliases [note] — alias coverage, and what is missing."""
     args, out = c.args, c.out
-    from silica.tools import TOOLS
+    from silica.commands import answered
+    from silica.tools import aliases as consolidation
 
     apply = any(p == "--apply" for p in args)
     folder = " ".join(positional(args))
     scope = folder or "(vault)"
     mode = "applying" if apply else "dry-run (nothing is written)"
     out.print(f"  Alias consolidation on [bold]{scope}[/] — {mode}…")
-    res = json.loads(TOOLS["silica_aliases"].run(apply=apply, folder=folder))
+    res = answered(consolidation.silica_aliases, apply=apply, folder=folder)
     if "error" in res:
         out.print(f"  [yellow]{res['error']}[/]")
         return out

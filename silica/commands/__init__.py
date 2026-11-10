@@ -19,9 +19,11 @@ apart: the REPL runs it, the browser the web turn.
 from __future__ import annotations
 
 import importlib
+import logging
 import shlex
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from typing import Any
 
 from silica.command_table import ROWS, Ask, Call, Command, Result, unseen
 from silica.config import CONFIG
@@ -31,6 +33,23 @@ from silica.session.words import command_word, direct_args
 # vault are RuntimeErrors, a dropped bridge an OSError, a file that is no text a
 # UnicodeDecodeError. A handler says these and goes on; anything else is a fault.
 UNREADABLE = (RuntimeError, OSError, ValueError)
+
+logger = logging.getLogger(__name__)
+
+
+def answered(fn: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """`fn`'s answer, or `{"error": "Type: message"}` when it raises.
+
+    A command calls the function under a tool, not the tool: the tool's answer is
+    JSON for the model, found by its registry name, and parsing it back is what
+    let a renamed tool fail only at the line that runs it. The tool's one
+    tolerance is kept, in the words its `run` gave: a failure is a line the
+    session prints and goes on from, where a raise would end the REPL."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        logger.exception("%s failed: %s", getattr(fn, "__name__", fn), e)
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 def _run(row: Command, call: Call) -> Result:

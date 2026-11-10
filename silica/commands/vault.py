@@ -97,19 +97,16 @@ def status(c: Call) -> Result:
                 out.print(f"    [cyan]{sv.kind}[/] {sv.summary} [dim](running)[/]")
             if st.gaps:
                 out.print(f"  [yellow]gaps in the record: {st.gaps}[/]")
-    from silica.tools import TOOLS
+    from silica.commands import answered
+    from silica.tools import runners
 
     run_id = args[0] if (len(args) + 1) > 1 else ""
-    result = TOOLS["silica_ledger_digest"].run(run_id=run_id)
-    try:
-        parsed = json.loads(result)
-        digest = parsed.get("digest", result)
-        # Preformatted plain text: Markdown would reflow every line into one
-        # paragraph, and markup would eat the "[16 checkpoints]" brackets.
-        out.print(str(digest), markup=False, highlight=False)
-    except Exception:
-        # Not the digest's JSON: said as it came, since it is all there is.
-        out.print(result)
+    parsed = answered(runners.silica_ledger_digest, run_id=run_id)
+    # A run that cannot be read is said as the JSON it always was.
+    digest = parsed["digest"] if "digest" in parsed else json.dumps(parsed, ensure_ascii=False)
+    # Preformatted plain text: Markdown would reflow every line into one
+    # paragraph, and markup would eat the "[16 checkpoints]" brackets.
+    out.print(str(digest), markup=False, highlight=False)
     # E(vault) cache line — written by /report (write_report). No cache
     # file → nothing shown; /status never triggers a VaultReport itself.
     try:

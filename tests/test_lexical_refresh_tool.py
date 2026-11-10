@@ -127,11 +127,10 @@ def test_scoped_force_preserves_out_of_folder_entries(vault):
 
 
 def test_cli_lexical_command_routes_to_tool():
-    """'/lexical --force' reaches silica_lexical_refresh with force=True."""
+    """'/lexical --force' reaches the lexical index's refresh with force=True."""
     from unittest.mock import patch
     import silica.cli  # noqa: F401  registers every tool
     from tests.run_command import direct
-    from silica.tools import TOOLS
 
     received: dict = {}
 
@@ -140,14 +139,8 @@ def test_cli_lexical_command_routes_to_tool():
         received["force"] = force
         return {"indexed": 3, "total_notes": 3, "read_errors": 0, "index_path": "/tmp/x"}
 
-    tool = TOOLS["silica_lexical_refresh"]
-    orig = tool.fn
-    tool.fn = capture
-    try:
-        with patch("silica.cli.CONSOLE"):
-            result = direct("/lexical --force", [])
-    finally:
-        tool.fn = orig
+    with patch("silica.kernel.recall.refresh.lexical", capture), patch("silica.cli.CONSOLE"):
+        result = direct("/lexical --force", [])
 
     assert result is True
     assert received.get("force") is True
