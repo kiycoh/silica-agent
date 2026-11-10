@@ -13,7 +13,6 @@ from fastapi import APIRouter, HTTPException, Request
 from silica.config import CONFIG
 from silica.onboarding import settings_ops
 from silica.session import meter
-from silica.kernel.write import session_changes
 from silica.ui.web import session
 from silica.ui.web.session import SESSION
 
@@ -167,8 +166,6 @@ def _apply_vault_switch(path: str) -> dict:
     switched = adopt_vault(path)
     if switched.error:
         return {"ok": False, "error": switched.error}
-    # The Changes list describes paths in the vault we just left.
-    session_changes.clear()
     # Live only, never persisted: a SILICA_VAULT line in the .env is ignored at
     # boot (config.load_user_env), the next launch curates the folder it starts
     # in. The resolved absolute path is what the caches were just rebuilt for.

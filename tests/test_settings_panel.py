@@ -245,6 +245,23 @@ def test_vault_switch_is_live_only_and_never_persists(client, env_file, tmp_path
     assert not env_file.exists() or "SILICA_VAULT" not in env_file.read_text()
 
 
+def test_a_vault_switch_keeps_the_changes_of_the_vault_it_leaves(client, env_file, tmp_path):
+    """The ledger is keyed by vault so a switch needs nothing from it; clearing it on
+    a switch emptied A's Changes list after A, then B, then A, which /vault in the
+    REPL never did."""
+    from silica.kernel.write import session_changes
+    from silica.ui.web import settings_routes
+
+    first = CONFIG.vault_path
+    session_changes.touched("Kept.md", "before")
+    other = tmp_path / "other-vault"
+    other.mkdir()
+    assert settings_routes._apply_vault_switch(str(other))["ok"]
+    assert session_changes.snapshot() == {}
+    assert settings_routes._apply_vault_switch(first)["ok"]
+    assert list(session_changes.snapshot()) == ["Kept.md"]
+
+
 def test_vault_origin_is_never_the_file():
     assert st._origin(st.VAULT_KEY, {st.VAULT_KEY}) == "derived"
 
