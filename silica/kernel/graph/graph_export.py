@@ -232,7 +232,9 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
         edge_idx += 1
 
     ghost_nodes: dict[str, dict] = {}
-    for src_raw, tgt_raw in unresolved_links:
+    # Sorted: the driver hands a set, and hash order made the /graph document,
+    # and its ETag, differ between processes on an unchanged vault.
+    for src_raw, tgt_raw in sorted(unresolved_links):
         src = src_raw.replace("\\", "/")
         if src not in node_ids:
             continue

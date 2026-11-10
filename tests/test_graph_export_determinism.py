@@ -66,3 +66,25 @@ def test_ghost_nodes_stay_out():
     G = edge_graph(nodes, [{"from": "a.md", "to": "__unresolved__x", "type": "EXTRACTED"}])
     assert list(G.nodes()) == ["a.md", "b.md"]
     assert G.number_of_edges() == 0
+
+
+def test_unresolved_edges_keep_one_order_whatever_the_snapshot_hands_over(tmp_vault, monkeypatch):
+    """The driver hands its unresolved links over as a set, so the AMBIGUOUS edges
+    and their ghosts came out in hash order: the /graph document, and so its
+    ETag, differed between two processes on an unchanged vault (2026-11-10)."""
+    from silica.driver import get_driver
+    from silica.kernel.graph.graph_export import build_graph_data
+
+    for i in range(6):
+        tmp_vault.note(f"N{i}.md", f"# N{i}\n\n[[Missing{5 - i}]] [[Gone{i}]]\n")
+    driver = get_driver()
+    real = driver.graph_data
+
+    def reversed_links():
+        notes, links, graph = real()
+        return notes, sorted(links, reverse=True), graph
+
+    monkeypatch.setattr(driver, "graph_data", reversed_links)
+    _nodes, edges = build_graph_data()
+    pairs = [(e["from"], e["to"]) for e in edges if e["type"] == "AMBIGUOUS"]
+    assert len(pairs) == 12 and pairs == sorted(pairs)
