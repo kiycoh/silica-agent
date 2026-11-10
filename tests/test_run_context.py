@@ -44,6 +44,36 @@ def test_a_helper_carries_everything_ambient():
     assert seen["requests"] == ("the question",) and seen["meter"] is counter and seen["undo"] == "u1"
 
 
+def test_a_helper_carries_narrations_run_and_parent():
+    """Every caller's helper, not only the loop's: orphan's judges, the rework's
+    blocks and a nucleate's prefetched distillers sat at the root before."""
+    run, parent = narr.set_run("r1"), narr.set_parent("run-r1")
+    try:
+        seen = _on_a_thread(RunContext.here().spawn(_ambient))
+    finally:
+        narr._parent_var.reset(parent)
+        narr.reset_run(run)
+    assert (seen["run"], seen["parent"]) == ("r1", "run-r1")
+
+
+def test_a_prefetched_distiller_sits_under_the_run_span():
+    """The FSM thread attaches no chunk or phase span (phase beats are plain
+    beats under `run-<id>` in a stored five-file nucleate), so the parent at
+    submit is the run's span, never the chunk before."""
+    from silica.router.prefetch import DistillPrefetcher
+
+    pf = DistillPrefetcher(max_workers=1)
+    run, parent = narr.set_run("r1"), narr.set_parent("run-r1")
+    try:
+        pf.submit(0, _ambient)
+        seen = pf.pop(0).result(timeout=10)
+    finally:
+        narr._parent_var.reset(parent)
+        narr.reset_run(run)
+        pf.shutdown()
+    assert (seen["run"], seen["parent"]) == ("r1", "run-r1")
+
+
 def test_a_workers_context_holds_the_run_and_nothing_of_the_turn():
     """A worker's read is not the turn's: it must not be narrowed to the turn's
     workspace, spend a read-scope decision or taint the turn's memory gate."""

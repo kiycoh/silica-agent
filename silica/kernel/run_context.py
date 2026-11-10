@@ -34,10 +34,12 @@ class RunContext:
         self._run, self._parent, self._undo = run, parent, undo
 
     @classmethod
-    def here(cls, narrated: bool = False) -> RunContext:
-        """Everything ambient where this is called. `narrated` carries narration's
-        place too; without it the thread's beats sit at the root."""
-        return cls(contextvars.copy_context(), *((_narr.current_run(), _narr.current_parent()) if narrated else (None, None)))
+    def here(cls) -> RunContext:
+        """Everything ambient where this is called, narration's run and parent
+        included: a helper's beats are the caller's, so they nest where its own
+        would. Opt-in once (30c0087), and four of six callers never opted, so a
+        nucleate's prefetched calls and orphan's judges left their run."""
+        return cls(contextvars.copy_context(), _narr.current_run(), _narr.current_parent())
 
     @classmethod
     def of_run(cls, run: str | None = None, parent: str | None = None, undo: str | None = None) -> RunContext:
