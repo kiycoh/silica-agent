@@ -97,7 +97,7 @@ class TestDrain:
     def test_transcript_is_staged_for_the_fsm_and_the_envelope_retired(
         self, vault, stub_coordinator
     ):
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
         from silica.kernel.base.home import inbox_dir_for
 
         v = str(vault)
@@ -116,7 +116,7 @@ class TestDrain:
 
     def test_the_staged_text_is_the_rendered_conversation(self, vault, monkeypatch):
         """What the FSM reads must be the transcript, at the staged path."""
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
 
         seen = {}
 
@@ -148,7 +148,7 @@ class TestDrain:
         file went: passing "done" here once hid that the drain looked in `done/`
         while the archive is `Done/`.
         """
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
 
         class _Archiving:
             def __init__(self, **kw):
@@ -191,7 +191,7 @@ class TestDrain:
         self, vault, stub_coordinator
     ):
         """Zero conversation turns is success, not failure."""
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
         from silica.kernel.base.home import inbox_dir_for
 
         v = str(vault)
@@ -207,7 +207,7 @@ class TestDrain:
         self, vault, monkeypatch
     ):
         """The privacy invariant does not depend on the run finishing."""
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
 
         class _Boom:
             def __init__(self, **kw):
@@ -245,7 +245,7 @@ class TestDrain:
     def test_the_envelope_is_retired_only_on_the_fsm_verdict(
         self, vault, monkeypatch, result, retired
     ):
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
 
         class _Fixed:
             def __init__(self, **kw):
@@ -296,7 +296,7 @@ class TestEpisodicRouting:
     def test_a_session_becomes_facts_and_never_a_note(
         self, vault, store, distiller, monkeypatch
     ):
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
         from silica.kernel.recall.episodic import EpisodicStore
         from silica.kernel.base.home import inbox_dir_for
 
@@ -322,7 +322,7 @@ class TestEpisodicRouting:
         self, vault, store, distiller, monkeypatch
     ):
         """Provenance for the /graph overlay: which vault, which notes (spec §11)."""
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
         from silica.kernel.recall.episodic import EpisodicStore
         from silica.kernel.base.home import vault_digest
 
@@ -348,7 +348,7 @@ class TestEpisodicRouting:
         chain ever reaches min_days and the promotion queue is empty by
         construction. The note path gets this section through build_substrate;
         this lane calls the distiller directly and has to pass it itself."""
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
         from silica.kernel.recall.episodic import EpisodicStore
 
         import silica.router.coordinator as coord_mod
@@ -370,7 +370,7 @@ class TestEpisodicRouting:
         see test above) — structure_only tells run_distiller to use the
         body-less schema and skip the body pass, so those tokens are never
         generated in the first place."""
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
 
         import silica.router.coordinator as coord_mod
         monkeypatch.setattr(coord_mod, "Coordinator", None)
@@ -383,7 +383,7 @@ class TestEpisodicRouting:
 
     def test_a_session_worth_no_facts_is_still_done(self, vault, store, monkeypatch):
         """Nothing worth remembering is success, not failure."""
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
         from silica.kernel.base.home import inbox_dir_for
 
         import silica.kernel.prep_delegation as prep
@@ -400,7 +400,7 @@ class TestEpisodicRouting:
     def test_a_distiller_failure_leaves_the_session_pending(
         self, vault, store, monkeypatch
     ):
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
 
         import silica.kernel.prep_delegation as prep
         monkeypatch.setattr(prep, "run_distiller",

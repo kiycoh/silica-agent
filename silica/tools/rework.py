@@ -21,7 +21,7 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
-from silica.agent.run_context import RunContext
+from silica.kernel.run_context import RunContext
 from silica.kernel.base.syntax import NAME_UNSAFE_RE
 from silica.tools import tool
 

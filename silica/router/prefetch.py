@@ -15,7 +15,7 @@ import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable
 
-from silica.agent.run_context import RunContext
+from silica.kernel.run_context import RunContext
 
 logger = logging.getLogger(__name__)
 

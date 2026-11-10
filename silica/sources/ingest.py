@@ -615,7 +615,7 @@ def drain_wal(console) -> str:
     A batch at a time (`collect`'s cap), so a 500-conversation import backlog
     becomes deliberate, resumable runs instead of one LLM bill.
     """
-    import silica.capture as capture
+    from silica.sources import capture
 
     vault = CONFIG.vault_path.strip()
     if not vault:

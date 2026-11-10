@@ -25,7 +25,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from silica.agent.run_context import RunContext
+from silica.kernel.run_context import RunContext
 from silica.kernel.write.gate import commit_ops
 from silica.model.decide import decide
 from silica.kernel.base.frontmatter import FM_RE_TOLERANT

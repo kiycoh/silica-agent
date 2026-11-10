@@ -776,7 +776,7 @@ class SilicaConfig:
     # behavior is bit-identical to single-vault.
     memory_vault: str = from_env("SILICA_MEMORY_VAULT")
 
-    # Capture of Silica's OWN sessions (capture.py), default off: opting in
+    # Capture of Silica's OWN sessions (sources/capture.py), default off: opting in
     # deposits each conversation in the WAL, from which /nucleate distills
     # facts into the episodic store. Machine memory never becomes a note by
     # itself — promotion is the only path into the vault. /incognito turns it

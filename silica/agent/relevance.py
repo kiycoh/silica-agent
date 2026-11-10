@@ -23,7 +23,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from silica.agent.compaction import read_stub, relevance_candidates
-from silica.agent.run_context import RunContext
+from silica.kernel.run_context import RunContext
 from silica.model.decide import decide
 
 logger = logging.getLogger(__name__)

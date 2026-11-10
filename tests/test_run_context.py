@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The one way a run's ambient state crosses a thread (agent/run_context.py)."""
+"""The one way a run's ambient state crosses a thread (kernel/run_context.py)."""
 from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from silica.agent import read_scope
-from silica.agent.run_context import RunContext
+from silica.kernel.run_context import RunContext
 from silica.kernel.write import gate
 from silica.model import llm
 from silica.obs import narration as narr

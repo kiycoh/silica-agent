@@ -155,7 +155,7 @@ def test_multi_word_keyword_still_matches_as_a_phrase():
 def test_import_activates_the_vault_before_reading_it(tmp_path, monkeypatch):
     """Subcommand dispatch runs before main()'s setup: without an explicit
     activation the envelopes land in whatever vault the config file names."""
-    import silica.capture as capture_mod
+    from silica.sources import capture as capture_mod
     from silica import cli
     from silica.config import CONFIG
 

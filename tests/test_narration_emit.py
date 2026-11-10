@@ -47,7 +47,7 @@ def test_call_llm_failure_closes_the_span_failed(narrator, monkeypatch):
 
 
 def test_consume_wraps_items_in_attributed_subagent_spans(narrator):
-    from silica.agent.run_context import RunContext
+    from silica.kernel.run_context import RunContext
     from silica.agent.subagent import consume
     from silica.kernel.workqueue import WorkItem, WorkQueue
 

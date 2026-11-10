@@ -260,7 +260,7 @@ def capture_own_session() -> None:
     `capture_session` is opt-in and fail-open in itself — a capture bug can
     never break the GUI from here. An incognito chat is never flushed.
     """
-    from silica.capture import capture_session
+    from silica.sources.capture import capture_session
     from silica.kernel import user_memory
 
     if user_memory.incognito():

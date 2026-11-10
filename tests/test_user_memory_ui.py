@@ -149,7 +149,7 @@ def test_tui_incognito_also_stops_capture_and_clears_with_a_new_process(on, monk
          patch("silica.cli.CONSOLE"), patch("silica.cli.print_home"), \
          patch("silica.ui.logging.setup_logging"), patch("silica.session.meter.update_context_tokens"), \
          patch("silica.ui.bootstrap.ensure_local_servers"), patch("silica.ui.bootstrap.announce_code_lane"), \
-         patch("silica.ui.bootstrap.open_vault"), patch("silica.capture.capture_session", captured), \
+         patch("silica.ui.bootstrap.open_vault"), patch("silica.sources.capture.capture_session", captured), \
          patch("sys.argv", ["silica"]):
         from silica.cli import main
         main()
@@ -193,7 +193,7 @@ def test_gui_incognito_is_per_chat(client, monkeypatch):
     assert "Giulia" in _memory_msgs(SESSION.chat.messages)[0]["content"]
 
     flushed = MagicMock()
-    monkeypatch.setattr("silica.capture.capture_session", flushed)
+    monkeypatch.setattr("silica.sources.capture.capture_session", flushed)
     done = _sse(tc.post("/chat", json={"text": "/incognito"}))[-1]
     assert done["type"] == "done" and "incognito" in done["answer"]
     assert um.incognito()

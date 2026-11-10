@@ -20,7 +20,7 @@ from silica.kernel.text.sanitize import strip_degenerate_runs
 
 Turn = tuple[str, str, str]  # role, text, iso timestamp
 
-# The words of an envelope, written by `silica/capture.py` and read here and by the
+# The words of an envelope, written by `silica/sources/capture.py` and read here and by the
 # drain: `format` picks the parser, and `source` tells Silica's own sessions, which
 # never take the note path, from a vendor's.
 FORMAT_CLAUDE_CODE = "claude-code-jsonl"

@@ -21,7 +21,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from silica.agent.run_context import RunContext
+from silica.kernel.run_context import RunContext
 from silica.config import CONFIG
 
 logger = logging.getLogger(__name__)

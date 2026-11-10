@@ -49,7 +49,7 @@ from silica.agent.compaction import (
 from silica.model.limits import ROUGH_CHARS_PER_TOKEN, TEXT_CHARS_PER_TOKEN
 from silica.agent import memory_gate, read_scope
 from silica.agent.relevance import compact_by_relevance
-from silica.agent.run_context import RunContext
+from silica.kernel.run_context import RunContext
 from silica.agent.sentinels import CANCELLED, EMPTY_COMPLETION, MAX_ITERATIONS, is_sentinel
 from silica.config import CONFIG
 from silica.model.concurrency import worker_slot

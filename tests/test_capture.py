@@ -20,7 +20,7 @@ def wal(tmp_path, monkeypatch):
 class TestEnvelope:
     def test_envelope_is_private_and_leaves_no_temp_file(self, wal):
         """Private conversation data: owner-only, and no half-written residue."""
-        from silica.capture import write_envelope
+        from silica.sources.capture import write_envelope
         from silica.kernel.base.home import inbox_dir_for
 
         write_envelope(str(wal), "claude-code-abc-end.json", _envelope())
@@ -44,7 +44,7 @@ def _envelope(session_id="s1", event="session_end", payload="x",
 class TestDrainSelection:
     def test_session_end_supersedes_the_precompacts_of_its_session(self, wal):
         """The end-of-session transcript is cumulative: it contains them."""
-        from silica.capture import collect, write_envelope
+        from silica.sources.capture import collect, write_envelope
         from silica.kernel.base.home import inbox_dir_for
 
         v = str(wal)
@@ -60,7 +60,7 @@ class TestDrainSelection:
         assert (processed / "claude-code-s1-precompact-20260801T090000Z.json").is_file()
 
     def test_latest_precompact_wins_when_the_session_has_no_end(self, wal):
-        from silica.capture import collect, write_envelope
+        from silica.sources.capture import collect, write_envelope
         from silica.kernel.base.home import inbox_dir_for
 
         v = str(wal)
@@ -75,7 +75,7 @@ class TestDrainSelection:
         assert len(list((inbox_dir_for(v) / "processed").glob("*.json"))) == 2
 
     def test_other_sessions_are_untouched_by_the_supersede_rule(self, wal):
-        from silica.capture import collect, write_envelope
+        from silica.sources.capture import collect, write_envelope
 
         v = str(wal)
         write_envelope(v, "claude-code-s1-end.json", _envelope("s1"))
@@ -91,7 +91,7 @@ class TestDrainSelection:
 
     def test_a_session_clear_is_not_superseded_by_that_session_end(self, wal):
         """`/clear` destroys the conversation: the end transcript lacks it."""
-        from silica.capture import collect, write_envelope
+        from silica.sources.capture import collect, write_envelope
 
         v = str(wal)
         write_envelope(v, "silica-s1-clear-20260801T090000Z.json",
@@ -107,7 +107,7 @@ class TestDrainSelection:
 
     def test_each_clear_of_a_session_is_its_own_conversation(self, wal):
         """Two `/clear`s are two conversations, so neither subsumes the other."""
-        from silica.capture import collect, write_envelope
+        from silica.sources.capture import collect, write_envelope
 
         v = str(wal)
         for stamp in ("20260801T090000Z", "20260801T100000Z"):
@@ -120,7 +120,7 @@ class TestDrainSelection:
 
     def test_drain_is_capped_and_reports_what_is_left(self, wal):
         """A 500-conversation backlog drains in resumable batches, not one bill."""
-        from silica.capture import collect, write_envelope
+        from silica.sources.capture import collect, write_envelope
 
         v = str(wal)
         for i in range(13):
@@ -154,7 +154,7 @@ class TestOwnSessions:
         monkeypatch.setattr(CONFIG, "capture_sessions", True)
 
     def test_the_end_of_a_session_writes_a_silica_envelope(self, wal):
-        from silica.capture import capture_session
+        from silica.sources.capture import capture_session
         from silica.kernel.base.home import inbox_dir_for
 
         capture_session(_history(), session_id="s1", driver="tui")
@@ -171,7 +171,7 @@ class TestOwnSessions:
 
     def test_only_the_conversation_is_captured(self, wal):
         """Tool noise and system scaffolding are dropped at the source."""
-        from silica.capture import capture_session
+        from silica.sources.capture import capture_session
         from silica.kernel.base.home import inbox_dir_for
 
         history = _history() + [
@@ -189,7 +189,7 @@ class TestOwnSessions:
 
     def test_a_clear_gets_its_own_timestamped_envelope(self, wal):
         """A session ends once but can be cleared many times."""
-        from silica.capture import capture_session
+        from silica.sources.capture import capture_session
 
         path = capture_session(_history(), session_id="s1", driver="tui",
                                event="session_clear")
@@ -200,7 +200,7 @@ class TestOwnSessions:
 
     def test_a_session_that_said_nothing_is_not_captured(self, wal):
         """A greeting is not a conversation: the drain would pay to learn that."""
-        from silica.capture import capture_session
+        from silica.sources.capture import capture_session
 
         assert capture_session(
             [{"role": "user", "content": "hi"},
@@ -209,7 +209,7 @@ class TestOwnSessions:
         ) is None
 
     def test_nothing_is_captured_while_the_knob_is_off(self, wal, monkeypatch):
-        from silica.capture import capture_session
+        from silica.sources.capture import capture_session
         from silica.config import CONFIG
         from silica.kernel.base.home import inbox_dir_for
 
@@ -226,7 +226,7 @@ class TestHousekeeping:
         import os
         import time
 
-        from silica.capture import housekeep, mark_processed, write_envelope
+        from silica.sources.capture import housekeep, mark_processed, write_envelope
         from silica.kernel.base.home import inbox_dir_for
 
         v = str(wal)

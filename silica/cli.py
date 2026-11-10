@@ -426,7 +426,7 @@ def _import(args: list[str]) -> int:
     # inbox (inbox_dir_for keys by vault digest) where /nucleate never
     # drains them.
     bootstrap("vault")
-    import silica.capture as capture_mod
+    from silica.sources import capture as capture_mod
     target = next(iter(positional(args)), "")
     vault = CONFIG.vault_path.strip()
     if not target or not vault:
@@ -674,7 +674,7 @@ def main():
     # and a deterministic name would have one overwrite the other's envelope.
     # capture_session is opt-in and fail-open in itself, so both call sites
     # below are the bare call — no wrapper, nothing to guard.
-    from silica.capture import capture_session
+    from silica.sources.capture import capture_session
     conv = Conversation(messages=seed.fresh_messages(), sid=uuid.uuid4().hex[:12])
     messages = conv.messages
 

@@ -48,7 +48,7 @@ def _digest(value):
 
 class TestChatgptExport:
     def test_bare_conversations_json_becomes_one_envelope_per_chat(self, tmp_path, wal):
-        from silica.capture import run_import
+        from silica.sources.capture import run_import
         from silica.kernel.base.home import inbox_dir_for
 
         export = tmp_path / "conversations.json"
@@ -71,7 +71,7 @@ class TestChatgptExport:
 
     def test_tiny_conversations_are_skipped(self, tmp_path, wal):
         """A one-line "hi" costs an LLM call to learn it said nothing."""
-        from silica.capture import run_import
+        from silica.sources.capture import run_import
         from silica.kernel.base.home import inbox_dir_for
 
         one_message = _chatgpt_conversation("short")
@@ -102,7 +102,7 @@ class TestExportArchive:
     def test_a_zipped_export_is_read_without_unpacking_it_by_hand(self, tmp_path, wal):
         import zipfile
 
-        from silica.capture import run_import
+        from silica.sources.capture import run_import
         from silica.kernel.base.home import inbox_dir_for
 
         archive = tmp_path / "export.zip"
@@ -117,7 +117,7 @@ class TestExportArchive:
 
 class TestLocalClaudeCodeTranscripts:
     def test_a_directory_of_transcripts_is_imported_by_session_id(self, tmp_path, wal):
-        from silica.capture import run_import
+        from silica.sources.capture import run_import
         from silica.kernel.base.home import inbox_dir_for
 
         projects = tmp_path / "projects"
@@ -140,7 +140,7 @@ class TestLocalClaudeCodeTranscripts:
 
     def test_a_live_captured_session_is_not_imported_again(self, tmp_path, wal):
         """Retroactive import reuses the live envelope name, so the hook wins."""
-        from silica.capture import run_import, write_envelope
+        from silica.sources.capture import run_import, write_envelope
         from silica.kernel.base.home import inbox_dir_for
 
         write_envelope(str(wal), "claude-code-sess-1-end.json",
@@ -190,7 +190,7 @@ class TestImportSubcommand:
 
 class TestIdempotency:
     def test_importing_the_same_export_twice_creates_nothing_new(self, tmp_path, wal):
-        from silica.capture import run_import
+        from silica.sources.capture import run_import
         from silica.kernel.base.home import inbox_dir_for
 
         export = tmp_path / "conversations.json"
@@ -205,7 +205,7 @@ class TestIdempotency:
         tombstone still means 'this one already went through'."""
         import os
 
-        from silica.capture import mark_processed, run_import
+        from silica.sources.capture import mark_processed, run_import
         from silica.kernel.base.home import inbox_dir_for
 
         export = tmp_path / "conversations.json"
@@ -220,7 +220,7 @@ class TestIdempotency:
 
 class TestClaudeAiExport:
     def test_the_same_file_name_is_disambiguated_by_schema(self, tmp_path, wal):
-        from silica.capture import run_import
+        from silica.sources.capture import run_import
         from silica.kernel.base.home import inbox_dir_for
 
         export = tmp_path / "conversations.json"
