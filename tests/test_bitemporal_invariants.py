@@ -231,7 +231,7 @@ def test_the_whole_arc_never_deletes_a_claim(tmp_vault):
 def test_revert_undoes_a_supersede_write(tmp_vault):
     """Why supersede is an `overwrite` with base_content and not a new OpType:
     the existing journal covers it, so `/revert` restores the pre-write body."""
-    from silica.kernel.write.gate import dedup_supersede_bounds
+    from silica.capabilities._base import dedup_supersede_bounds
     from silica.kernel.write.gate import _current_undo_run, commit_ops
     from silica.kernel.write.contested import mark_superseded_by
     from silica.kernel.write.ops import Op, OpType

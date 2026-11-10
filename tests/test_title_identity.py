@@ -225,3 +225,19 @@ def test_write_gate_lets_unrelated_titles_through(tmp_vault):
     assert rejected == []
     kept = [o for o in validated if o.heading == "Machine Learning"]
     assert len(kept) == 1 and kept[0].op.value == "write"
+
+
+def test_a_review_reads_back_every_flag_the_gate_wrote():
+    """One grammar for the soft verdicts: what near_title_flag writes,
+    near_title_of reads, and a joined review splits into its flags with a
+    near-title flag kept whole when the title it quotes holds the separator."""
+    from silica.kernel.text.title import SHORT_FLAG, near_title_flag, near_title_of, review_flags
+
+    assert near_title_of(near_title_flag("A", "X/A.md")) == ("A", "X/A.md", None)
+    assert near_title_of(near_title_flag("A", "X/A.md", 0.8149)) == ("A", "X/A.md", 0.81)
+    review = near_title_flag("Tipi; dati", "X/Tipi; dati.md", 0.85) + "; " + f"{SHORT_FLAG} (50 < 275 chars)"
+    assert review_flags(review) == [near_title_flag("Tipi; dati", "X/Tipi; dati.md", 0.85),
+                                    f"{SHORT_FLAG} (50 < 275 chars)"]
+    assert near_title_of(review) == ("Tipi; dati", "X/Tipi; dati.md", 0.85)
+    assert near_title_of(f"{SHORT_FLAG} (50 < 275 chars)") is None
+    assert review_flags("") == []

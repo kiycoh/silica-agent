@@ -14,8 +14,9 @@ from silica.driver import DRIVER
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.templates import slugify
 from silica.kernel.base.manifest import within
-from silica.kernel.base.manifest import SAFE_WRITE_DIR
+from silica.kernel.base.manifest import SAFE_WRITE_DIR, mirrors, original_of
 from silica.kernel.base.markdown import extract_links
+from silica.kernel.text.title import REVIEW_SEP, SHORT_FLAG, near_title_flag
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,7 @@ def _flag(op: Op, reason: str) -> None:
     Two soft gates can fire on one op; both stay readable in the one key
     (`"; "`-joined) so the note names everything that was suspicious about it.
     """
-    op.review = f"{op.review}; {reason}" if op.review else reason
+    op.review = f"{op.review}{REVIEW_SEP}{reason}" if op.review else reason
 
 
 @dataclass
@@ -463,8 +464,7 @@ def _coerce_types(ops: list[Op], *, index: PayloadIndex, has_payloads: bool,
                 # judge settles it exactly as for band 2 below.
                 from silica.kernel.write.contested import follow_superseded
                 cand_path = follow_superseded(match[1] if match[1].endswith(".md") else f"{match[1]}.md")
-                _flag(op, f"near_title candidate='{os.path.splitext(os.path.basename(cand_path))[0]}' "
-                          f"path='{cand_path}'")
+                _flag(op, near_title_flag(os.path.splitext(os.path.basename(cand_path))[0], cand_path))
                 match = None
             if match is not None:
                 logger.info(
@@ -812,8 +812,7 @@ def _invented_folder(rel_path: str, vault_root: str) -> str:
     Presence check only — whether the reason is a *good* one is the prompt's
     job, not an LLM adjudication this seam has to stay deterministic without.
     """
-    under = (rel_path or "").replace("\\", "/").strip("/").split("/", 1)
-    parent = os.path.dirname(under[1]) if len(under) == 2 else ""
+    parent = os.path.dirname(original_of(rel_path) or "")
     if not parent or not vault_root:
         return ""
     if os.path.isdir(os.path.join(vault_root, parent)):
@@ -847,9 +846,9 @@ def _justified_folders(ops: list[Op], *, mirror: bool, target_dir: str, vault_ro
         # improvised UNDER it is still the model's invention.
         landing = (target_dir or "").replace("\\", "/").strip("/")
         if landing and not os.path.isabs(target_dir or ""):
-            head, _, tail = landing.partition("/")
-            if head.lower() == SAFE_WRITE_DIR:
-                landing = tail  # the user typed the mirror path themselves
+            typed = original_of(landing)
+            if typed is not None:
+                landing = typed  # the user typed the mirror path themselves
             if landing:
                 justified_folders.add(landing.lower())
         for op in ops:
@@ -1023,8 +1022,7 @@ def _validate_write(op: Op, batch: _Batch) -> Rejection | _Skip | None:
             if winner != cand_path:
                 cand_path = winner
                 cand_title = os.path.splitext(os.path.basename(winner))[0]
-        _flag(op, f"near_title candidate='{cand_title}' path='{cand_path}' "
-                  f"ratio={ratio:.2f}")
+        _flag(op, near_title_flag(cand_title, cand_path, ratio))
 
     body_len = len(_content_only(op.snippet or "", claim_first=bool(getattr(op, "section", None))))
     if body_len == 0 and batch.has_payloads:
@@ -1057,7 +1055,7 @@ def _validate_write(op: Op, batch: _Batch) -> Rejection | _Skip | None:
         return Rejection(
             op=op,
             reason=(
-                f"snippet too short ({body_len} < {_min_snippet} chars) "
+                f"{SHORT_FLAG} ({body_len} < {_min_snippet} chars) "
                 f"— would write a placeholder note, deferred for retry"
             ),
         )
@@ -1066,7 +1064,7 @@ def _validate_write(op: Op, batch: _Batch) -> Rejection | _Skip | None:
         # the expand worker re-authors it in place (expand.py); before,
         # the same op sat in the deferred store where deterministic
         # re-validation could never clear it.
-        _flag(op, f"snippet too short ({body_len} < {_min_snippet} chars)")
+        _flag(op, f"{SHORT_FLAG} ({body_len} < {_min_snippet} chars)")
 
     # Shape gate: a long-enough body can still be an announcement of the
     # section instead of the section. Skipped under extractive enforce
@@ -1315,7 +1313,7 @@ def validate_operations(
     # inside it is a claim that the vault has no folder for this note. The rebase
     # below repairs a FORGOTTEN prefix for free, but an INVENTED subtree is
     # indistinguishable from a correct one — hence the check further down.
-    mirror = write_root == SAFE_WRITE_DIR
+    mirror = mirrors()
     vault_root = (CONFIG.vault_path or "").strip()
 
     # The run's landing folder follows the ops into the boundary. Without this

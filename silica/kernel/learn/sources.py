@@ -1078,7 +1078,7 @@ def _gap_candidates(tree: list[dict], notes: dict) -> None:
 
         from silica.model.providers import get_embedder_or_none
         from silica.config import CONFIG
-        from silica.kernel.recall.embed import _note_title_text, get_store
+        from silica.kernel.recall.embed import note_title_text, get_store
 
         store = get_store()
         embedder = get_embedder_or_none(CONFIG, "plan topics", level="info") if len(store) else None
@@ -1093,7 +1093,7 @@ def _gap_candidates(tree: list[dict], notes: dict) -> None:
             try:
                 keys = {p.removesuffix(".md"): p for p in leaves}
                 folder = Counter(p.rsplit("/", 1)[0] for p in keys if "/" in p).most_common(1)
-                vec = _embed([_note_title_text(t, folder=folder[0][0] if folder else "")], embedder)[0]
+                vec = _embed([note_title_text(t, folder=folder[0][0] if folder else "")], embedder)[0]
                 outside = {p for p in store.paths() if p not in keys}
                 ranked = [keys[h["path"]] for h in store.title_cosine_top_k(vec, k=CANDIDATES, exclude=outside)
                           if h["path"] in keys]
@@ -1387,7 +1387,7 @@ def _by_title_vector(topics: list[str], allowed: set[str]) -> dict[str, str]:
 
         from silica.model.providers import get_embedder_or_none
         from silica.config import CONFIG
-        from silica.kernel.recall.embed import _note_title_text, get_store
+        from silica.kernel.recall.embed import note_title_text, get_store
 
         store = get_store()
         embedder = get_embedder_or_none(CONFIG, "plan topics", level="info") if len(store) else None
@@ -1396,7 +1396,7 @@ def _by_title_vector(topics: list[str], allowed: set[str]) -> dict[str, str]:
         keys = {p.removesuffix(".md"): p for p in allowed}
         outside = {p for p in store.paths() if p not in keys}
         folder = Counter(p.rsplit("/", 1)[0] for p in keys if "/" in p).most_common(1)
-        texts = [_note_title_text(t, folder=folder[0][0] if folder else "") for t in topics]
+        texts = [note_title_text(t, folder=folder[0][0] if folder else "") for t in topics]
         out: dict[str, str] = {}
         for t, vec in zip(topics, _embed(texts, embedder)):
             hit = store.title_cosine_top_k(vec, k=1, exclude=outside)
@@ -1490,7 +1490,7 @@ def _dense_rows(topics: list[str], row_notes: set[str]) -> dict[str, dict[str, t
 
         from silica.model.providers import get_embedder_or_none
         from silica.config import CONFIG
-        from silica.kernel.recall.embed import _note_title_text, get_store
+        from silica.kernel.recall.embed import note_title_text, get_store
 
         store = get_store()
         embedder = get_embedder_or_none(CONFIG, "plan topics", level="info") if len(store) else None
@@ -1499,7 +1499,7 @@ def _dense_rows(topics: list[str], row_notes: set[str]) -> dict[str, dict[str, t
         keys = {p.removesuffix(".md"): p for p in row_notes}
         outside = {p for p in store.paths() if p not in keys}
         folder = Counter(p.rsplit("/", 1)[0] for p in keys if "/" in p).most_common(1)
-        texts = [_note_title_text(t, folder=folder[0][0] if folder else "") for t in topics]
+        texts = [note_title_text(t, folder=folder[0][0] if folder else "") for t in topics]
         scored = []
         for t, vec in zip(topics, _embed(texts, embedder)):
             for hit in store.title_cosine_top_k(vec, k=ROW_TOP_K, exclude=outside):

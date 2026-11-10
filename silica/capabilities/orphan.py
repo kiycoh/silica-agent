@@ -29,7 +29,7 @@ from silica.kernel.run_context import RunContext
 from silica.kernel.write.gate import commit_ops
 from silica.model.decide import decide
 from silica.kernel.base.frontmatter import FM_RE_TOLERANT
-from silica.kernel.write.gate import orphan_bounds
+from silica.capabilities._base import orphan_bounds
 from silica.kernel.base.manifest import active_write_dir, within
 from silica.kernel.base.syntax import WIKILINK_SHOWN_RE
 from silica.kernel.write.ops import Op, OpType

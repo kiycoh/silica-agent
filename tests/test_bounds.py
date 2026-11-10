@@ -1,5 +1,6 @@
-"""Tests for CapabilityBounds (silica/kernel/write/gate.py)."""
-from silica.kernel.write.gate import (
+"""Tests for CapabilityBounds (silica/kernel/write/gate.py) and the workers'
+envelopes over it (silica/capabilities/_base.py)."""
+from silica.capabilities._base import (
     dedup_bounds,
     enrich_bounds,
     orphan_bounds,

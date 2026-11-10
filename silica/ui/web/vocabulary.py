@@ -19,7 +19,7 @@ from typing import Any
 from silica.kernel import user_memory
 from silica.kernel.base.formats import IMAGE_MIME, WEB_IMAGE_EXTS
 from silica.kernel.check import ORDER
-from silica.kernel.learn import grade, items, mastery, objectives, pick, quiz, reasons, reference, session, sources
+from silica.kernel.learn import grade, items, mastery, objectives, pace, pick, quiz, reasons, reference, session, sources
 from silica.kernel.report import note_context
 from silica.sources.discover import story
 from silica.tools import TOOLS, note_keys
@@ -53,7 +53,7 @@ def table() -> dict[str, Any]:
             "parts": reference.PART_LABEL,
             "separator": reference.RESTRICT_SEP,
             "session": pick.DEFAULT_N,
-            "session_max": pick.SESSION_MAX,
+            "session_max": pace.SESSION_MAX,
             "minutes_per_question": items.MINUTES_PER_QUESTION,
             "teach_turns": grade.TEACH_TURNS,
             "session_gone": session.Gone.code,

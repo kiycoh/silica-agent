@@ -78,7 +78,7 @@ class Legs:
 def _embed_complete(es, key: str, *, title: bool) -> list[tuple[str, float]] | None:
     """Every other note scored by cosine on one vector field, best first.
 
-    Same abstention as the facade's `_rank_embeddings_from_vec`: no vector, or
+    Same abstention as the facade's `rank_embeddings_from_vec`: no vector, or
     a flat-zero ranking, means the leg says nothing.
     """
     from silica.kernel.recall.relatedness import _NOISE_FLOOR
@@ -94,9 +94,9 @@ def _embed_complete(es, key: str, *, title: bool) -> list[tuple[str, float]] | N
 
 
 def _cooc_complete(store, key: str) -> list[tuple[str, float]] | None:
-    from silica.kernel.recall.relatedness import _cooccur_ranking
+    from silica.kernel.recall.relatedness import cooccur_ranking
 
-    return _cooccur_ranking(store, key, k=len(store), exclude={key}, scope=None)
+    return cooccur_ranking(store, key, k=len(store), exclude={key}, scope=None)
 
 
 def _legs(es, store, endpoints: list[str]) -> dict[str, Legs]:

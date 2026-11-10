@@ -35,6 +35,7 @@ from silica.kernel.base import frontmatter
 from silica.kernel.base.noteshape import SPINE_SECTION, is_spine
 from silica.kernel.base.syntax import HEADING_RE, section_end
 from silica.kernel.text.media import strip_images
+from silica.kernel.text.title import near_title_flag
 
 logger = logging.getLogger(__name__)
 
@@ -538,7 +539,7 @@ def outline_ops(outline: Outline, *, target: str, hub: str | None, source_basena
                 related.append(e["to"])
                 continue
             if e["relation"] == "same_as":
-                review = f"near_title candidate='{e['to']}' path='{existing[e['to']]}' ratio=1.00"
+                review = near_title_flag(e["to"], existing[e["to"]], 1.0)
                 continue
             lines.append(f"- {RELATION_LABEL[e['relation']]} [[{e['to']}]] ({spine_title} -> earlier): {e['why']}")
             related.append(e["to"])
@@ -593,7 +594,7 @@ def flag_cosine_near_titles(ops: list[dict], *, tau: float, embedder=None, store
     loser to mark. Fail-open: no embedder, no store, no flag. Returns the
     number of ops flagged.
     """
-    from silica.kernel.recall.embed import _note_text
+    from silica.kernel.recall.embed import note_text
     from silica.kernel.base.layout import is_inbox_path
 
     todo = [o for o in ops if o.get("op") == "write" and o.get("section") != SPINE_SECTION
@@ -609,7 +610,7 @@ def flag_cosine_near_titles(ops: list[dict], *, tau: float, embedder=None, store
             store = store or get_store()
             if embedder is None or len(store) == 0:
                 return 0
-        vecs = embedder.embed([_note_text(o["title"], o["snippet"]) for o in todo])
+        vecs = embedder.embed([note_text(o["title"], o["snippet"]) for o in todo])
     except Exception as exc:  # noqa: BLE001
         # A dead embedder costs this lane its cosine door, never the lecture:
         # the title band and same_as still run, as they did before the door.
@@ -633,7 +634,7 @@ def flag_cosine_near_titles(ops: list[dict], *, tau: float, embedder=None, store
             if path.removesuffix(".md") == o["path"].removesuffix(".md") \
                     or is_inbox_path(path) or hidden(path):
                 continue
-            o["review"] = f"near_title candidate='{h['name']}' path='{path}' ratio={score:.2f}"
+            o["review"] = near_title_flag(h["name"], path, score)
             flagged += 1
             break
     return flagged

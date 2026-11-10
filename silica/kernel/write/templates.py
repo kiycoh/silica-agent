@@ -956,6 +956,9 @@ _RELATED_TRACE_RE = re.compile(
     r"^> \[!info\] Related: \[\[([^\]]+)\]\] "
     r"\(judged distinct(?:: (.*))?\)\s*$"
 )
+_RELATED_UNJUDGED_RE = re.compile(
+    r"^> \[!info\] Related: \[\[[^\]]+\]\] \(flagged as similar; no verdict recorded\)\s*$"
+)
 _RELATED_TRACE_RATIONALE_CHARS = 200
 # A rationale about the exchange instead of the two concepts ("The user's
 # input is a detailed exposition of...", "The response should distill...")
@@ -998,6 +1001,13 @@ def parse_related_traces(body: str) -> list[tuple[str, str]]:
         if m:
             out.append((m.group(1), m.group(2) or ""))
     return out
+
+
+def related_lines(body: str) -> list[str]:
+    """Every relation line a dedup verdict left in *body*, judged or unjudged,
+    as written: what a rewrite of the note must carry over."""
+    return [line for line in (body or "").splitlines()
+            if _RELATED_TRACE_RE.match(line) or _RELATED_UNJUDGED_RE.match(line)]
 
 
 def has_related_trace(body: str, candidate: str) -> bool:

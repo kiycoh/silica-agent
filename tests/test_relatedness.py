@@ -143,7 +143,7 @@ def test_embed_ranking_handles_md_suffixed_query(tmp_path):
 # Co-occurrence leg + abstention
 # ---------------------------------------------------------------------------
 
-from silica.kernel.recall.relatedness import _cooccur_ranking
+from silica.kernel.recall.relatedness import cooccur_ranking
 
 
 def _cooc_store(tmp_path) -> CooccurStore:
@@ -156,7 +156,7 @@ def _cooc_store(tmp_path) -> CooccurStore:
 
 def test_cooccur_ranking_ranks_notes_sharing_concepts(tmp_path):
     st = _cooc_store(tmp_path)
-    ranking = _cooccur_ranking(st, "A", k=5, exclude=set(), scope=None)
+    ranking = cooccur_ranking(st, "A", k=5, exclude=set(), scope=None)
     assert ranking is not None
     paths = [p for p, _w in ranking]
     assert paths[0] == "B"      # shares two concepts with A
@@ -165,7 +165,7 @@ def test_cooccur_ranking_ranks_notes_sharing_concepts(tmp_path):
 
 def test_cooccur_ranking_excludes_query_and_exclude_set(tmp_path):
     st = _cooc_store(tmp_path)
-    ranking = _cooccur_ranking(st, "A", k=5, exclude={"B"}, scope=None)
+    ranking = cooccur_ranking(st, "A", k=5, exclude={"B"}, scope=None)
     paths = [p for p, _w in ranking or []]
     assert "A" not in paths     # never returns the query itself
     assert "B" not in paths     # honours the exclude set
@@ -173,7 +173,7 @@ def test_cooccur_ranking_excludes_query_and_exclude_set(tmp_path):
 
 def test_cooccur_ranking_abstains_when_query_absent(tmp_path):
     st = _cooc_store(tmp_path)
-    assert _cooccur_ranking(st, "UNKNOWN", k=5, exclude=set(), scope=None) is None
+    assert cooccur_ranking(st, "UNKNOWN", k=5, exclude=set(), scope=None) is None
 
 
 def test_cooccur_gate_probe_receives_coverage_and_flatness(tmp_path, monkeypatch):
@@ -184,7 +184,7 @@ def test_cooccur_gate_probe_receives_coverage_and_flatness(tmp_path, monkeypatch
     st = _cooc_store(tmp_path)
     seen = []
     monkeypatch.setattr(relatedness, "COOCCUR_GATE_PROBE", seen.append)
-    ranking = _cooccur_ranking(st, "A", k=5, exclude=set(), scope=None)
+    ranking = cooccur_ranking(st, "A", k=5, exclude=set(), scope=None)
     assert ranking is not None
     sig = seen[0]
     # top hit B matches beta+gamma but not alpha -> partial IDF-mass coverage
@@ -200,7 +200,7 @@ def test_cooccur_gate_abstains_below_threshold(tmp_path, monkeypatch):
 
     st = _cooc_store(tmp_path)
     monkeypatch.setattr(relatedness, "_COOCCUR_MIN_CONFIDENCE", 0.99)
-    assert _cooccur_ranking(st, "A", k=5, exclude=set(), scope=None) is None
+    assert cooccur_ranking(st, "A", k=5, exclude=set(), scope=None) is None
 
 
 def test_cooccur_ranking_idf_beats_hub_over_rare_match(tmp_path):
@@ -213,7 +213,7 @@ def test_cooccur_ranking_idf_beats_hub_over_rare_match(tmp_path):
     st.upsert_note("HUB1", build_contribution("HUB1", "hub hub hub"))    # only the ubiquitous hub
     st.upsert_note("HUB2", build_contribution("HUB2", "hub filler"))     # keeps 'hub' near-ubiquitous
 
-    ranking = _cooccur_ranking(st, "Q", k=5, exclude=set(), scope=None)
+    ranking = cooccur_ranking(st, "Q", k=5, exclude=set(), scope=None)
     paths = [p for p, _w in ranking or []]
     assert paths and paths[0] == "TWIN"   # rare shared concept wins over hub breadth
 
@@ -229,7 +229,7 @@ def test_cooccur_ranking_has_no_associative_reach(tmp_path):
     st.upsert_note("BRIDGE", build_contribution("BRIDGE", "alpha omega"))  # links alpha<->omega
     st.upsert_note("OMEGA", build_contribution("OMEGA", "omega omega"))    # no alpha at all
 
-    direct = _cooccur_ranking(st, "A", k=5, exclude={"BRIDGE"}, scope=None)
+    direct = cooccur_ranking(st, "A", k=5, exclude={"BRIDGE"}, scope=None)
     assert "OMEGA" not in [p for p, _w in direct or []]
 
 
@@ -405,7 +405,7 @@ def test_fuse_recall_leg_proposes_notes_absent_from_semantic_legs():
 
 
 # ---------------------------------------------------------------------------
-# Task 3.4 (perf/hot-paths): stem-postings inverted index backs _concept_idf
+# Task 3.4 (perf/hot-paths): stem-postings inverted index backs concept_idf
 # and _rank_cooccur_from_profile's candidate scoring. This is a
 # REFERENCE-EQUIVALENCE suite: the postings-backed implementations must
 # return IDENTICAL values (idf map / ranked list / None) to the old full-scan
@@ -420,13 +420,13 @@ import statistics as _statistics
 
 from silica.kernel.recall import relatedness as _relatedness_mod
 from silica.kernel.base.layout import in_folder as _path_in_scope
-from silica.kernel.recall.relatedness import _concept_idf, _rank_cooccur_from_profile
+from silica.kernel.recall.relatedness import concept_idf, _rank_cooccur_from_profile
 
 _snowball = __import__("snowballstemmer").stemmer("english").stemWord
 
 
 def _old_concept_idf(cooccur_store, stems, *, scope):
-    """Frozen copy of the pre-3.4 `_concept_idf`: full paths()/note_nodes() scan."""
+    """Frozen copy of the pre-3.4 `concept_idf`: full paths()/note_nodes() scan."""
     df: dict[str, int] = {}
     n = 0
     for path in cooccur_store.paths():
@@ -525,7 +525,7 @@ def test_concept_idf_reference_equivalence_scope_none_and_scoped(tmp_path):
     st = _dozen_notes_store(tmp_path)
     stems = {_snowball(w) for w in ("alpha", "beta", "gamma", "zeta", "missingstem")}
     for scope in (None, "folder"):
-        new = _concept_idf(st, stems, scope=scope)
+        new = concept_idf(st, stems, scope=scope)
         old = _old_concept_idf(st, stems, scope=scope)
         assert new == old
 
@@ -743,7 +743,7 @@ def _old_rank_bm25(cooccur_store, profile, *, k, blocked, scope):
 
     if not profile:
         return None
-    idf = _concept_idf(cooccur_store, set(profile), scope=scope)
+    idf = concept_idf(cooccur_store, set(profile), scope=scope)
     lens, avgdl = cooccur_store.doc_lengths()
     note_scores: dict[str, float] = {}
     for path in cooccur_store.paths():

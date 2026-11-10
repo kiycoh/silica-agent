@@ -55,7 +55,7 @@ def _compute_cooccur_delta(
     from silica.kernel.recall.cooccurrence import get_cooccur_store
     from silica.kernel.text.text import tokens
     from silica.kernel.base.notekey import store_key
-    from silica.kernel.recall.relatedness import _concept_idf, _cooccur_ranking, related_notes_many
+    from silica.kernel.recall.relatedness import concept_idf, cooccur_ranking, related_notes_many
 
     try:
         store = cooccur_store if cooccur_store is not None else get_cooccur_store()
@@ -83,7 +83,7 @@ def _compute_cooccur_delta(
             all_stems: set[str] = set()
             for p in store.paths():
                 all_stems |= set(store.note_nodes(p))
-            idf_map = _concept_idf(store, all_stems, scope=scope)
+            idf_map = concept_idf(store, all_stems, scope=scope)
         shared = set(store.note_nodes(a)) & set(store.note_nodes(b))
         ranked = sorted(shared, key=lambda s: (-idf_map.get(s, 0.0), s))
         return [store.node_label(s) for s in ranked[:5]]
@@ -191,7 +191,7 @@ def _compute_cooccur_delta(
         god_set = set(god_ids)
         god_related: dict[str, set[str]] = {}
         for g in god_ids:
-            ranking = _cooccur_ranking(store, g, k=50, exclude=set(), scope=scope)
+            ranking = cooccur_ranking(store, g, k=50, exclude=set(), scope=scope)
             god_related[g] = {p for p, _w in (ranking or [])}
         for a in autolinks:
             # The "other" endpoint(s) are those not themselves hubs; convergence

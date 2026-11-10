@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import functools
 import re
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from silica.kernel.base.frontmatter import FM_RE_TOLERANT
 from silica.kernel.base.syntax import (
@@ -42,6 +42,9 @@ from silica.kernel.base.syntax import (
     INLINE_MATH_RE,
     WIKILINK_TOKEN_RE,
 )
+
+if TYPE_CHECKING:
+    from silica.kernel.write.ops import InverseOp
 
 # Bare URLs — never link a word inside https://example.com/Neural-Networks
 _URL_RE = re.compile(r"https?://[^\s<>()\[\]]+")
@@ -371,17 +374,22 @@ def backlink_pass(
     *,
     title_index: list[str],
     neighbourhood: list[str],
-) -> dict[str, list[str]]:
+) -> tuple[dict[str, list[str]], list[InverseOp]]:
     """For each note in `neighbourhood`, autolink only the `new_titles`.
 
     Runs `autolink(body, title_index, candidates=new_titles)` on every neighbour,
     wrapping mentions of newly-created notes with wikilinks in pre-existing content.
-    Returns {path: titles_added}. Inherits all autolink() guarantees (graph-safe,
+    Returns ({path: titles_added}, undo), one gate.undo_of per rewritten note
+    from the very body it rewrote, for the caller to record where its writes are
+    undone: the FSM's chunk transaction, or a journal run for the tool. The tool
+    used to record none, so /revert could not take back what a ledger task
+    linked (probe 2026-11-10). Inherits all autolink() guarantees (graph-safe,
     skip-region aware, idempotent). Best-effort: per-note failures are logged and
     skipped.
     """
     import os as _os
     from silica.driver import DRIVER
+    from silica.kernel.write import gate
     from silica.kernel.base.layout import is_inbox_path
     from silica.kernel.base.manifest import active_write_dir, within
 
@@ -391,6 +399,7 @@ def backlink_pass(
     write_root = active_write_dir()
 
     result: dict[str, list[str]] = {}
+    undo: list[InverseOp] = []
     for path in neighbourhood:
         if write_root and not within(path, write_root):
             continue
@@ -412,12 +421,13 @@ def backlink_pass(
             if added:
                 DRIVER.overwrite(path, new_body)
                 result[path] = added
+                undo.append(gate.undo_of(path, body))
                 import logging as _l
                 _l.getLogger(__name__).info("BACKLINK: %s ← %s", path, added)
         except Exception as _e:
             import logging as _l
             _l.getLogger(__name__).debug("BACKLINK: skipped '%s' (non-fatal): %s", path, _e)
-    return result
+    return result, undo
 
 
 def build_title_index(refs: list) -> list[str]:

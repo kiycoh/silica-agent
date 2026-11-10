@@ -6,7 +6,7 @@
 Every function degrades to [] when the embedding index is empty or unreadable.
 They read stored vectors only and never construct an embedder, so a provider
 that is down does not suppress the proposals: this module reaches nothing
-under silica.agent, which is what lets the P2/DKB contract cover it without
+under silica.model, which is what lets the P2/DKB contract cover it without
 an exemption.
 """
 from __future__ import annotations

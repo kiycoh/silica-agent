@@ -51,13 +51,12 @@ def _prefers(candidate, incumbent) -> bool:
     Only under safe mode is a note ever present twice; everywhere else this
     answers False and grouping keeps its first hit exactly as before.
     """
-    from silica.kernel.base.manifest import active_write_dir, within
-    from silica.kernel.base.manifest import SAFE_WRITE_DIR
+    from silica.kernel.base.manifest import mirrors, original_of
 
-    if active_write_dir() != SAFE_WRITE_DIR:
+    if not mirrors():
         return False
     a, b = candidate.path or "", incumbent.path or ""
-    return bool(a and b) and within(b, SAFE_WRITE_DIR) and not within(a, SAFE_WRITE_DIR)
+    return bool(a and b) and original_of(b) is not None and original_of(a) is None
 
 
 def recon_file(inbox_file: str) -> dict:

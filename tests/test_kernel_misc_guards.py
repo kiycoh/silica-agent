@@ -47,7 +47,7 @@ def test_enrich_with_empty_context_does_not_forbid_its_own_target(monkeypatch):
     """The regression: hub defaulted to the target's own title, and the bounds
     turn the hub into a forbidden path matched by BASENAME, so every /enrich
     rejected its own write and wrote nothing."""
-    from silica.kernel.write.gate import enrich_bounds
+    from silica.capabilities._base import enrich_bounds
     from silica.kernel.write.ops import OpType
 
     captured = _run_enrich_capturing(monkeypatch, {})

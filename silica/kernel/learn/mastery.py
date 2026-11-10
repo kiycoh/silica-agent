@@ -326,23 +326,16 @@ def steps_passed(plan: dict, entries: list[dict] | None = None, notes: dict | No
     return out
 
 
-def status_line(plan: str = "") -> str:
-    """The readings in one line for `/learn --status [plan]`."""
+def status_line(paths: list[str] | None = None, label: str = "vault") -> str:
+    """The readings in one line for `/learn --status [plan]`, over a plan's
+    `paths` or the whole vault. The caller finds the plan: reaching plans from
+    here kept mastery in Learn's import ring (re-audit 2026-11-10, kernel 11)."""
     from silica.kernel.learn import learner, quiz
 
     rows = learner.view()
     entries = quiz.entries()
-    paths = None
-    label = "vault"
-    if plan:
-        from silica.kernel.learn import plans
-
-        p = plans.find_plan(plan)
-        if p is None:
-            return f"No plan named {plan!r}."
-        paths = plans.scope_of(p)["paths"]
+    if paths is not None:
         rows = {k: r for k, r in rows.items() if r["path"] in set(paths)}
-        label = p["name"]
     measured = [r for r in rows.values() if r["attempts"]]
     due = [r for r in measured if r["R"] is not None and r["R"] < DUE_R]
     cal = calibration(entries, paths)

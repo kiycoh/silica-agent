@@ -409,17 +409,17 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     # per-concept embedding only if the embedder returns a ragged response,
     # so a short/odd reply can never silently drop concepts.
     #
-    # The query text is name+excerpt, built with the SAME _note_text used to
+    # The query text is name+excerpt, built with the SAME note_text used to
     # index notes, so the query vector is comparable to the stored title+body
     # vectors. Embedding the bare name lets short acronyms ("MEM", "ACE") score
     # spuriously high against unrelated short-acronym notes ("RAM (Random Access
     # Memory)", "MACE"); the excerpt anchors the concept in its real neighbourhood.
-    from silica.kernel.recall.embed import _note_text
+    from silica.kernel.recall.embed import note_text
 
     def _concept_embed_text(concept: Any) -> str:
         if isinstance(concept, dict):
-            return _note_text(concept.get("name", ""), concept.get("inbox_excerpt", ""))
-        return _note_text(str(concept), "")
+            return note_text(concept.get("name", ""), concept.get("inbox_excerpt", ""))
+        return note_text(str(concept), "")
 
     all_texts: list[str] = []
     for batch in chunk.get("batches", []):
@@ -456,8 +456,8 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     import numpy as _np
 
     def _emb_near_dup(a, b) -> bool:
-        va = vec_by_text.get(_note_text(a[0], a[1]))
-        vb = vec_by_text.get(_note_text(b[0], b[1]))
+        va = vec_by_text.get(note_text(a[0], a[1]))
+        vb = vec_by_text.get(note_text(b[0], b[1]))
         if va is None or vb is None:
             return False
         va, vb = _np.asarray(va, dtype=float), _np.asarray(vb, dtype=float)

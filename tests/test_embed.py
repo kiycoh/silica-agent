@@ -11,8 +11,8 @@ import pytest
 
 from silica.kernel.recall.embed import (
     EmbedStore,
-    _note_text,
-    _note_title_text,
+    note_text,
+    note_title_text,
     build_index,
     refresh_note,
 )
@@ -58,32 +58,32 @@ def test_cosine_normalised_vectors():
 
 
 # ---------------------------------------------------------------------------
-# _note_text — truncation
+# note_text — truncation
 # ---------------------------------------------------------------------------
 
 def test_note_text_truncates_at_1200():
     long_body = "x" * 2000
-    result = _note_text("Title", long_body)
+    result = note_text("Title", long_body)
     assert len(result) <= 1200
 
 
 def test_note_text_includes_title():
-    result = _note_text("Neural Networks", "Deep learning intro")
+    result = note_text("Neural Networks", "Deep learning intro")
     assert "Neural Networks" in result
 
 
 def test_note_text_with_folder_prefix():
-    result = _note_text("CAN", "Controller Area Network bus", folder="Robotica")
+    result = note_text("CAN", "Controller Area Network bus", folder="Robotica")
     assert result.startswith("[Robotica] CAN")
 
 
 def test_note_text_no_folder_is_backward_compatible():
-    result = _note_text("CAN", "Controller Area Network bus")
+    result = note_text("CAN", "Controller Area Network bus")
     assert result.startswith("CAN"), "No folder → no prefix, backward-compatible"
 
 
 def test_note_text_folder_respects_max_chars():
-    result = _note_text("T", "x" * 2000, folder="Robotica")
+    result = note_text("T", "x" * 2000, folder="Robotica")
     assert len(result) <= 1200
 
 
@@ -419,12 +419,12 @@ def test_build_index_stores_title_vecs(tmp_path):
 
 
 def test_note_title_text_with_folder():
-    result = _note_title_text("ROS", folder="Robotica")
+    result = note_title_text("ROS", folder="Robotica")
     assert result == "[Robotica] ROS"
 
 
 def test_note_title_text_no_folder():
-    result = _note_title_text("ROS")
+    result = note_title_text("ROS")
     assert result == "ROS"
 
 

@@ -161,7 +161,7 @@ def refd_prerequisites(G_dir, nodes, store, *, scope: str | None = None) -> list
     """RefD over (directed wikilinks, co-occurrence related sets) of `nodes`, in
     the store keyspace. Here and not in the report that shows it, because Learn
     orders a session by the same edges and Learn is read by the report."""
-    from silica.kernel.recall.relatedness import _cooccur_ranking
+    from silica.kernel.recall.relatedness import cooccur_ranking
 
     keys = {notekey.store_key(n) for n in nodes}
     links: dict[str, set[str]] = {}
@@ -170,7 +170,7 @@ def refd_prerequisites(G_dir, nodes, store, *, scope: str | None = None) -> list
     related: dict[str, list[tuple[str, float]]] = {}
     for p in store.paths():
         if p in keys:
-            ranking = _cooccur_ranking(store, p, k=_REFD_RELATED_K, exclude={p}, scope=scope)
+            ranking = cooccur_ranking(store, p, k=_REFD_RELATED_K, exclude={p}, scope=scope)
             if ranking:
                 related[p] = [(q, float(w)) for q, w in ranking if q in keys]
     return refd_edges(links, related, theta=_REFD_THETA, min_related=_REFD_MIN_RELATED)

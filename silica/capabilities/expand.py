@@ -18,11 +18,11 @@ import os
 from typing import Any
 
 from silica.kernel.write.gate import commit_ops
-from silica.kernel.write.gate import expand_bounds
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.validate import min_write_snippet_chars
 from silica.kernel.workqueue import ExpandJob, WorkItem
-from silica.capabilities._base import NoteContent, clean_twin_bundle, emit_feedback, load_prompt, parse_content, read_or_skip
+from silica.capabilities._base import (NoteContent, clean_twin_bundle, emit_feedback, expand_bounds, load_prompt,
+                                       parse_content, read_or_skip)
 
 logger = logging.getLogger(__name__)
 
@@ -91,10 +91,26 @@ def run_expand(item: WorkItem[ExpandJob], config: Any) -> dict[str, Any]:
     prior = read_or_skip(item.target_path)[0] if item.target_path else None
     landed = bool(prior)
     if landed:
+        from silica.kernel.base import frontmatter
         from silica.kernel.write.bulk import render_write
+        from silica.kernel.write.contested import SUPERSEDED_BY_KEY
+        from silica.kernel.write.templates import related_lines
+
+        # A note flagged near-title and thin reaches the dedup judge and this
+        # worker at once (settle_flagged), so the judge may have landed first. A
+        # merge left the content in its winner: re-authoring the loser would drop
+        # the pointer and stand the duplicate back up. A distinct verdict left a
+        # relation line in the body, which the rewrite keeps.
+        data, _raw, prior_body = frontmatter.split(prior or "")
+        if data and data.get(SUPERSEDED_BY_KEY):
+            return {"status": "skipped", "reason": f"merged into {data[SUPERSEDED_BY_KEY]}"}
+        content = render_write(op)
+        kept = [line for line in related_lines(prior_body) if line not in content]
+        if kept:
+            content = content.rstrip("\n") + "\n\n" + "\n".join(kept) + "\n"
         op = Op(
             op=OpType.overwrite, heading=op.heading, source_basename=op.source_basename,
-            path=op.path, content=render_write(op), base_content=prior, hub=hub,
+            path=op.path, content=content, base_content=prior, hub=hub,
             reason=op.reason,
         )
     result = commit_ops(

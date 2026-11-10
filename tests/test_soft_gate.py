@@ -157,6 +157,26 @@ def test_settle_flagged_records_ledger_and_asks_judge_with_loser_path():
     assert kinds["expand"].target_path == "Corso/Percettrone.md"
 
 
+def test_a_note_flagged_near_title_and_thin_goes_to_the_judge_and_to_expand():
+    """validate raises the title gate first, so the short flag is the second of
+    the two: read only at the start of the review, the note went to the judge
+    alone, a distinct verdict cleared the review, and the body stayed thin."""
+    from silica.router.states.write import settle_flagged
+
+    q, ledger = _FakeQueue(), _FakeLedger()
+    op = Op(op=OpType.write, heading="Percettrone", source_basename="lez.md",
+            path="Corso/Percettrone.md", snippet="x" * 50, hub="Hub",
+            review="near_title candidate='Percettroni' path='Corso/Percettroni.md' ratio=0.90; "
+                   "snippet too short (50 < 275 chars)")
+    settle_flagged(_fsm(q, ledger), [op], committed={"Corso/Percettrone.md"})
+
+    kinds = {it.kind: it for it in q.items}
+    assert set(kinds) == {"dedup", "expand"}
+    assert kinds["dedup"].context.loser_path == "Corso/Percettrone.md"
+    assert kinds["expand"].target_path == "Corso/Percettrone.md"
+    assert kinds["expand"].context.reason == "snippet too short (50 < 275 chars)"
+
+
 def test_settle_flagged_ignores_ops_that_did_not_land():
     from silica.router.states.write import settle_flagged
 
@@ -247,6 +267,53 @@ def test_expand_overwrites_a_landed_short_note(tmp_vault):
     data, _, body = frontmatter.split(op.content)
     assert "review" not in data and LONG.strip() in body
     assert commit.call_args.kwargs["bounds"].allowed_ops == frozenset({OpType.overwrite})
+
+
+def _landed_short_item():
+    from silica.kernel.workqueue import WorkItem
+
+    return WorkItem(kind="expand", target_path="Corso/Percettrone.md", context=expand_job({
+        "op": {"op": "write", "heading": "Percettrone", "path": "Corso/Percettrone.md",
+               "snippet": "corto", "source_basename": "lez.md"},
+        "excerpt": "il percettrone separa due classi", "reason": "snippet too short",
+        "hub": "Corso", "target_dir": "Corso", "inbox_file": "Inbox/lez.md", "content_hash": "h",
+    }))
+
+
+def test_expand_leaves_a_landed_note_a_merge_absorbed_first(tmp_vault):
+    """The judge and the expand worker run at once on a note flagged both: a
+    merge that landed first moved the content to its winner, and re-authoring
+    the loser would drop superseded_by and stand the duplicate back up."""
+    from silica.capabilities.expand import run_expand
+
+    tmp_vault.note("Corso/Percettrone.md",
+                   "---\nAI: true\nsuperseded_by: '[[Percettroni]]'\n"
+                   "review: snippet too short (50 < 275 chars)\n---\n\n# Percettrone\n\ncorto\n")
+    with patch("silica.capabilities.expand._author_body", return_value=LONG), \
+         patch("silica.capabilities.expand.commit_ops") as commit:
+        res = run_expand(_landed_short_item(), CONFIG)
+
+    assert res["status"] == "skipped" and "Percettroni" in res["reason"]
+    commit.assert_not_called()
+
+
+def test_expand_keeps_the_relation_line_a_distinct_verdict_left(tmp_vault):
+    from silica.capabilities.expand import run_expand
+    from silica.kernel.write.templates import related_trace, related_unjudged
+
+    judged, unjudged = related_trace("Percettroni", "different things"), related_unjudged("Neurone")
+    tmp_vault.note("Corso/Percettrone.md",
+                   f"---\nAI: true\n---\n\n# Percettrone\n\ncorto\n\n{judged}\n{unjudged}\n")
+    with patch("silica.capabilities.expand._author_body", return_value=LONG), \
+         patch("silica.capabilities.expand.commit_ops",
+               return_value={"status": "committed", "committed": 1}) as commit, \
+         patch("silica.kernel.write.deferred.get_deferred_store"):
+        res = run_expand(_landed_short_item(), CONFIG)
+
+    assert res["status"] == "committed"
+    [op] = commit.call_args.args[0]
+    assert LONG.strip() in op.content and judged in op.content and unjudged in op.content
+    assert op.content.count(judged) == 1
 
 
 # ---------------------------------------------------------------------------

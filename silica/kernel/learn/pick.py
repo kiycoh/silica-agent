@@ -13,25 +13,21 @@ generators do, after the pick. Rows are the learner view's, so the surfaces
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 
 from silica.kernel.base import note_index
 from silica.kernel.base.noteshape import is_material
 from silica.kernel.learn.items import LEVEL_OF
+from silica.kernel.learn.pace import FINAL_DAYS
 from silica.kernel.learn.schedule import DUE_R, events_by_key
+from silica.kernel.text.title import near_title_of
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_N = 8
-SESSION_MAX = 24   # the most questions one session asks
 AMNESTY_FACTOR = 2   # due > 2n: one calm line, the capped session, never the backlog
 # engram's copy (MIT): a break is not a debt.
 AMNESTY_LINE = "{due} due after a break is spacing doing its job, not a debt. This session takes {n}; the rest waits."
-# The last days before a dated plan's `by`: reviews only, as RemNote's Final
-# Review Period. ponytail: 2 is a simulation's number, not a measurement;
-# reopen at 20 completed dated plans in the ledger or 2027-03-31.
-FINAL_DAYS = 2
 
 
 def _days_to(deadline: str | None, now_ts: float) -> int | None:
@@ -85,9 +81,9 @@ def contrast_pairs(notes: dict[str, dict]) -> list[tuple[str, str]]:
             other = by_title.get(cand.split("|")[0].split("#")[0].strip().casefold())
             if other:
                 add(path, other)
-        m = re.search(r"path='([^']+)'", str((data or {}).get("review") or ""))
-        if m and m.group(1) in notes:
-            add(path, m.group(1))
+        near = near_title_of(str((data or {}).get("review") or ""))
+        if near and near[1] in notes:
+            add(path, near[1])
     return out
 
 

@@ -35,8 +35,8 @@ def test_a_long_caption_cannot_push_the_prose_out_of_the_window():
 
 
 def test_the_embedding_text_carries_the_caption():
-    from silica.kernel.recall.embed import _note_text
-    assert "Computer" in _note_text("Turing", CAPTIONED)
+    from silica.kernel.recall.embed import note_text
+    assert "Computer" in note_text("Turing", CAPTIONED)
 
 
 def test_the_lexical_index_holds_caption_words_and_not_file_names():

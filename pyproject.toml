@@ -386,7 +386,7 @@ ignore_imports = [
 # e peer import fuori dalla rotta di dispatch.
 
 [[tool.importlinter.contracts]]
-name = "graph structure is deterministic — structural modules never import agent (P2/DKB)"
+name = "graph structure is deterministic: structural modules never reach a model (P2/DKB)"
 type = "forbidden"
 source_modules = [
   "silica.kernel.recall.cooccurrence",
@@ -402,13 +402,21 @@ source_modules = [
   "silica.kernel.code.codegraph",
   # embed_signals reads stored vectors only; it stopped constructing an embedder
   # (the call was an availability probe whose result was never used), so it no
-  # longer reaches silica.agent and the exemption it used to need is gone.
+  # longer reaches the model stack and the exemption it used to need is gone.
   "silica.kernel.report.graph_report.embed_signals",
 ]
-forbidden_modules = ["silica.agent"]
-# run_substrate is NOT listed: it imports get_embedder, a legitimate embedding
-# overlay. classify/prep_delegation call an LLM but do not build graph
-# structure, so they are out of scope for this contract.
+# The whole model package, not silica.agent alone: since the provider stack
+# moved to silica.model, below the kernel, forbidding the agent guarded nothing
+# the layers contract did not already, and a structural module could build an
+# embedder with every contract green (re-audit 2026-11-10, kernel 13 and N1).
+forbidden_modules = ["silica.agent", "silica.model"]
+ignore_imports = [
+  # parse_reply is stdlib JSON parsing of a reply the caller's own `ask`
+  # returned; image_readings is handed the model call and never imports one.
+  "silica.kernel.recall.image_readings -> silica.model.reply",
+]
+# classify/prep_delegation call an LLM but do not build graph structure, so
+# they are out of scope for this contract.
 
 [[tool.importlinter.contracts]]
 name = "structural is not semantic — codegraph never enters the fusion legs"

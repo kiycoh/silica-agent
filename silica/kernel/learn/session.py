@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import threading
 import uuid
 from collections.abc import Callable
@@ -85,7 +84,7 @@ _SETS = ("skipped", "escalated", "dropped", "retested")
 _SAVE_LOCK = threading.Lock()
 _ITEMS_LOCK = threading.Lock()   # a retest is appended from a route and from its generator's thread
 # Asked again before the end (ADR-0135 point 4): one a note, a quarter of
-# pick.SESSION_MAX.
+# pace.SESSION_MAX.
 RETEST_MAX = 6
 
 
@@ -333,12 +332,12 @@ def start(n=None, plan: str = "", note: str = "", scope: Any = None, step: Any =
     sent it: unset sizes a step's practice on its notes."""
     global _LIVE
     from silica.config import CONFIG
-    from silica.kernel.learn import pick, plans
+    from silica.kernel.learn import pace, pick, plans
     from silica.model import llm
 
     if _LIVE is not None:
         raise Refused(BUSY, "a session is live; close it first")
-    size = max(1, min(pick.SESSION_MAX, int(n or pick.DEFAULT_N)))
+    size = max(1, min(pace.SESSION_MAX, int(n or pick.DEFAULT_N)))
     found = None
     if plan:
         found = plans.find_plan(plan)
@@ -980,53 +979,9 @@ def _next_line(rows: list[dict]) -> str:
     return f"Next session starts from {miss['title'] or miss['path']}." if miss else "Next session draws from what is due."
 
 
-# ---------------------------------------------------------------- the `## Sessions` line
-# A closed session's line on its plan note, composed and read here and nowhere
-# else: position 0 is the date, 1 the items, and the id, the tag's value, is
-# what makes a retry append nothing.
-
-_SESSION_ID_RE = re.compile(r"session:\s*([0-9a-f]{8,32})")
-
-
-def compose_line(rc: dict, sid: str) -> str:
-    """The receipt as its plan's line."""
-    t = rc["tally"]
-    met = " · met: " + ", ".join(f"{d['objective']} {d['met']}" for d in rc["by_objective"]) if rc["by_objective"] else ""
-    return (f"{datetime.now(timezone.utc).date().isoformat()} · {rc['recorded']} items · ratings: "
-            f"{t['Good'] + t['Easy']} Good/Easy · {t['Hard']} Hard · {t['Again']} Again{met} · {rc['next'].rstrip('.')} · session: {sid}")
-
-
-def line_id(line: str) -> str:
-    m = _SESSION_ID_RE.search(line)
-    return m.group(1) if m else ""
-
-
-def has_line(text: str, sid: str) -> bool:
-    """Whether a note already carries this session's line."""
-    return f"session: {sid}" in text
-
-
-def parse_lines(lines: list[str]) -> list[dict]:
-    """The `## Sessions` section's lines as {date, items, line, session, met,
-    rest}. `rest` is what follows the items without the id, the column a line
-    with no `met:` shows, so the page holds no copy of this format."""
-    out = []
-    for line in lines:
-        line = line.strip()
-        if not line.startswith("- "):
-            continue
-        parts = [p.strip() for p in line[2:].split(" · ")]
-        m = re.match(r"(\d+) item", parts[1] if len(parts) > 1 else "")
-        met = next((x[len("met: "):] for x in parts if x.startswith("met: ")), "")
-        rest = " · ".join(re.sub(r" · session: [0-9a-f]+$", "", line[2:]).split(" · ")[2:])
-        out.append({"date": parts[0][:10], "items": int(m.group(1)) if m else 0,
-                    "line": line[2:], "session": line_id(line), "met": met, "rest": rest})
-    return out
-
-
 def close(sid: str) -> dict:
     global _LIVE, _LAST
-    from silica.kernel.learn import plans
+    from silica.kernel.learn import plans, reference
 
     if _LIVE is None or _LIVE["id"] != sid:
         if _LAST and _LAST["id"] == sid:
@@ -1035,7 +990,7 @@ def close(sid: str) -> dict:
     s = _LIVE
     rc = _receipt(s)
     if s["plan"] and rc["recorded"]:
-        line = compose_line(rc, sid)
+        line = reference.compose_line(rc, sid)
         try:
             plans.append_session(s["plan"], line)
             rc["plan_line"] = line

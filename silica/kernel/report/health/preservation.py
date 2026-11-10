@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from silica.kernel.link.autolink import autolink
-from silica.kernel.link.sweep import _prune_related, _unlink_body
+from silica.kernel.link.sweep import prune_related, unlink_body
 from silica.kernel.base import frontmatter
 from silica.kernel.write import templates
 from silica.kernel.write.contested import (
@@ -139,7 +139,7 @@ def fm_roundtrip(rel, text, ctx):  # frontmatter.dump: contested, add_alias, Lea
 def sweep_body(rel, text, ctx):  # the sweep's body half, nothing resolving
     m = frontmatter.FM_RE.match(text)
     head, body = (text[:m.end()], text[m.end():]) if m else ("", text)
-    new, _s, _r = _unlink_body(body, lambda t: "")
+    new, _s, _r = unlink_body(body, lambda t: "")
     return head + new
 
 
@@ -147,8 +147,8 @@ def sweep_full(rel, text, ctx):  # sweep.sweep_note: unlink the body, prune rela
     m = frontmatter.FM_RE.match(text)
     if not m:
         return sweep_body(rel, text, ctx)
-    fm_new, _d = _prune_related(m.group(0), lambda t: "")
-    body, _s, _r = _unlink_body(text[m.end():], lambda t: "")
+    fm_new, _d = prune_related(m.group(0), lambda t: "")
+    body, _s, _r = unlink_body(text[m.end():], lambda t: "")
     return fm_new + body
 
 

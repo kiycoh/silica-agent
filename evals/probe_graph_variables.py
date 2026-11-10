@@ -185,7 +185,7 @@ def fused_with(key: str, es, store, *, k: int = K, graph=None, mode: str = "leg"
                coupling=None) -> list[str]:
     """The production fusion with one extra leg mounted, as the probe's arm C.
 
-    Rebinds nothing: it calls the same `_embed_ranking` / `_cooccur_ranking`
+    Rebinds nothing: it calls the same `_embed_ranking` / `cooccur_ranking`
     the facade calls and fuses them with the facade's own `_rrf_fuse`, so with
     no extra leg it reproduces `related_notes` path-for-path (asserted by
     `check_reproduces_facade`, the alpha=1.0 trick of the PPR probe). `mode`
@@ -203,7 +203,7 @@ def fused_with(key: str, es, store, *, k: int = K, graph=None, mode: str = "leg"
     e = R._embed_ranking(es, key, k=pool, exclude=blocked)
     if e is not None:
         rankings.append([(p, sc) for p, _n, sc in e])
-    c = R._cooccur_ranking(store, key, k=pool, exclude=blocked, scope=None)
+    c = R.cooccur_ranking(store, key, k=pool, exclude=blocked, scope=None)
     if c is not None:
         rankings.append(list(c))
     boost = None

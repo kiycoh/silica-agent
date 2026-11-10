@@ -14,7 +14,7 @@ ensure_hub_link, is in test_ensure_hub_link_frontmatter.py.
 """
 from __future__ import annotations
 
-from silica.kernel.link.sweep import _unlink_body
+from silica.kernel.link.sweep import unlink_body
 from silica.kernel.base import frontmatter
 from silica.kernel.write import templates
 
@@ -47,19 +47,19 @@ def test_dump_still_drops_the_leading_blank_lines():
 
 
 def test_sweep_unlinks_to_the_alias_as_written():
-    body, stripped, _ = _unlink_body("asintoticamente[[Ghost| efficienti]] davvero\n",
+    body, stripped, _ = unlink_body("asintoticamente[[Ghost| efficienti]] davvero\n",
                                      lambda t: "")
     assert body == "asintoticamente efficienti davvero\n"
     assert stripped == ["Ghost"]
 
 
 def test_sweep_relink_keeps_the_alias_as_written():
-    body, _, relinked = _unlink_body("a[[Ahura Mazda| god]] b\n",
+    body, _, relinked = unlink_body("a[[Ahura Mazda| god]] b\n",
                                      lambda t: "Ahura-Mazda")
     assert body == "a[[Ahura-Mazda| god]] b\n"
     assert relinked == ["Ahura-Mazda"]
 
 
 def test_sweep_without_alias_still_unlinks_to_the_target():
-    body, _, _ = _unlink_body("See [[Ghost]] and [[Ghost|]] here\n", lambda t: "")
+    body, _, _ = unlink_body("See [[Ghost]] and [[Ghost|]] here\n", lambda t: "")
     assert body == "See Ghost and Ghost here\n"

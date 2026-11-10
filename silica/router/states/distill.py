@@ -22,6 +22,7 @@ from silica.kernel.base.frontmatter import FM_RE_TOLERANT
 from silica.config import CONFIG
 from silica.driver import DRIVER
 from silica.kernel.text.sanitize import sanitize_output
+from silica.kernel.text.title import SHORT_FLAG, near_title_of, review_flags
 from silica.kernel.write.validate import validate_ops
 from silica.router.phases import MAX_STEER_ATTEMPTS, REJECTION_RATE_MAX, InjectorState, phase
 from silica.router.run_state import job_origin
@@ -32,11 +33,6 @@ if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
 
 logger = logging.getLogger(__name__)
-
-# Emitted by the C3 title gate in validate_operations (band 2).
-_NEAR_TITLE_RE = re.compile(
-    r"near_title candidate='([^']*)' path='([^']*)'(?: ratio=([0-9.]+))?"
-)
 
 # Frontmatter `date:` of a source document. Two-step (block, then key inside
 # it) so a `date:` line in the body can never match; the YYYY-MM-DD prefix is
@@ -63,6 +59,15 @@ def _doc_date(fsm: "InjectorFSM", idx: int) -> str:
         return ""
 
 
+def _short_flag(reason: str) -> str | None:
+    """The thin-body flag among a review's flags, wherever it stands. A note
+    flagged near-title too carries it second (validate raises the title gate
+    first), and reading only a review that started with it sent that note to
+    the dedup judge alone, which clears the review on a distinct verdict and
+    left the body thin with nothing to say so (re-audit 2026-11-10)."""
+    return next((f for f in review_flags(reason) if f.startswith(SHORT_FLAG)), None)
+
+
 def enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed: bool = False) -> None:
     """Fuzzy-band title flags become live dedup WorkItems (C3 reuses C2).
 
@@ -80,25 +85,23 @@ def enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed:
     for r in rejected_raw:
         if not isinstance(r, dict):
             continue
-        m = _NEAR_TITLE_RE.search(r.get("reason", "") or "")
-        if not m:
+        near = near_title_of(r.get("reason", "") or "")
+        if near is None:
             continue
+        candidate, candidate_path, ratio = near
         op = r.get("op", {}) or {}
         # The C3 title gate already computed the fuzzy ratio (validate.py band 2);
         # carry it as the dedup title_score so SILICA_DEDUP_GATE judges these
         # near-identical-title pairs on their real similarity instead of a
         # degenerate 0.0 (which would force every one of them to "distinct").
-        try:
-            title_score = float(m.group(3)) if m.group(3) else 0.0
-        except (TypeError, ValueError):
-            title_score = 0.0
+        title_score = ratio if ratio is not None else 0.0
         items.append(WorkItem(
             kind="dedup",
-            target_path=m.group(2),
+            target_path=candidate_path,
             context=DedupJob(
                 concept=op.get("heading", ""),
                 excerpt=op.get("snippet", ""),
-                candidate=m.group(1),
+                candidate=candidate,
                 score=0.0,
                 title_score=title_score,
                 # current_source_file, NOT inbox_file: the latter is pinned to
@@ -151,8 +154,8 @@ def enqueue_short_snippet_expands(fsm: "InjectorFSM", rejected_raw: list) -> Non
     for r in rejected_raw:
         if not isinstance(r, dict):
             continue
-        reason = r.get("reason", "") or ""
-        if not reason.startswith("snippet too short"):
+        reason = _short_flag(r.get("reason", "") or "")
+        if reason is None:
             continue
         op = r.get("op", {}) or {}
         try:
@@ -189,7 +192,7 @@ def _steer_retryable(fsm: "InjectorFSM", rejected_raw: list, idx: int) -> list:
         if not isinstance(r, dict):
             continue
         reason = r.get("reason", "") or ""
-        if _NEAR_TITLE_RE.search(reason) or reason.startswith("snippet too short"):
+        if near_title_of(reason) or _short_flag(reason):
             continue
         op = r.get("op") if isinstance(r.get("op"), dict) else None
         if not op or not op.get("heading"):
