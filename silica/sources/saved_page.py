@@ -704,33 +704,40 @@ def _flat_notes(text: str) -> dict[str, str]:
     else: json.loads builds every list and object a hostile file nests in it before a check can
     refuse them. ValueError for anything that is not that object, or that holds more notes than
     a wiki file can carry."""
-    from json.decoder import scanstring
+    # typeshed does not declare it, though json.decoder has exported it since Python 2.6
+    from json.decoder import scanstring  # type: ignore[attr-defined]
 
     ws = re.compile(r"[ \t\n\r]*")
+
+    def skip(at: int) -> int:
+        m = ws.match(text, at)
+        assert m  # `*` matches the empty string at any index
+        return m.end()
+
     out: dict[str, str] = {}
-    i = ws.match(text).end()
+    i = skip(0)
     if text[i:i + 1] != "{":
         raise ValueError("not an object")
-    i = ws.match(text, i + 1).end()
+    i = skip(i + 1)
     while text[i:i + 1] != "}":
         if out and text[i:i + 1] != ",":
             raise ValueError("not an object of strings")
         if out:
-            i = ws.match(text, i + 1).end()
+            i = skip(i + 1)
         if text[i:i + 1] != '"':
             raise ValueError("not an object of strings")
         key, i = scanstring(text, i + 1)
-        i = ws.match(text, i).end()
+        i = skip(i)
         if text[i:i + 1] != ":":
             raise ValueError("not an object of strings")
-        i = ws.match(text, i + 1).end()
+        i = skip(i + 1)
         if text[i:i + 1] != '"':
             raise ValueError("not an object of strings")
         out[key], i = scanstring(text, i + 1)
-        i = ws.match(text, i).end()
+        i = skip(i)
         if len(out) > _ENTRIES_MAX // 2:
             raise ValueError("more notes than a wiki file carries")
-    if ws.match(text, i + 1).end() != len(text):
+    if skip(i + 1) != len(text):
         raise ValueError("more after the object")
     return out
 

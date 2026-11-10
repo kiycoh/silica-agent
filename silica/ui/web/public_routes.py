@@ -840,7 +840,8 @@ def _graph(raw) -> dict | None:
     malformed note is dropped and the links renumbered past it, so no link joins two other notes."""
     if not (isinstance(raw, dict) and isinstance(raw.get("n"), list) and isinstance(raw.get("e"), list)):
         return None
-    n, at = [], {}
+    n: list[list] = []
+    at: dict[int, int] = {}
     for i, r in enumerate(raw["n"]):
         if len(n) == _NODES:
             break

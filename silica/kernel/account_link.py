@@ -154,7 +154,10 @@ def _linked_to() -> tuple[str, str] | None:
     except (OSError, ValueError):
         # no file, or one no Publish could use: nothing says which account the rows were sent to
         return None
-    return (raw.get("host"), raw.get("handle")) if isinstance(raw, dict) else None
+    if not isinstance(raw, dict):
+        return None
+    host, handle = raw.get("host"), raw.get("handle")
+    return (host, handle) if isinstance(host, str) and isinstance(handle, str) else None
 
 
 def _named(at: str) -> str:
@@ -282,13 +285,13 @@ def _answer(files: list[str], said: dict) -> dict:
     on the receiver first, then here, by 2027-02-01 or at the first wiki the review finds short."""
     from silica.kernel import rights
 
-    rows = [said.get(f) if isinstance(said.get(f), dict) else {} for f in sorted(files)]
+    rows: list[dict] = [r if isinstance(r := said.get(f), dict) else {} for f in sorted(files)]
     a = next((r for r in rows if r.get("answer") == "open"), None) \
         or next((r for r in rows if r.get("answer") in rights.ANSWERS), None)
     if a is None:
         return {}
     lic = a.get("license") if a.get("license") in rights.LICENSES else ""
-    credit = a.get("credit").strip()[:rights._CREDIT_MAX] if isinstance(a.get("credit"), str) else ""
+    credit = c.strip()[:rights._CREDIT_MAX] if isinstance(c := a.get("credit"), str) else ""
     return {k: v for k, v in (("answer", a["answer"]), ("license", lic), ("credit", credit)) if v}
 
 
@@ -478,7 +481,8 @@ def send(slug: str, vault: Path | None = None, visibility: str | None = None) ->
     out = _body(r, at)
     if r.status_code != 200:
         logger.info("account link: %s answered %s to a Publish of %s", at, r.status_code, slug)
-        raise ValueError(_refusal(r.status_code, out.get("detail") if isinstance(out.get("detail"), str) else "", at))
+        detail = out.get("detail")
+        raise ValueError(_refusal(r.status_code, detail if isinstance(detail, str) else "", at))
     url = out.get("url") if isinstance(out.get("url"), str) and out["url"].startswith("https://") else ""
     notes = out.get("notes") if type(out.get("notes")) is int else 0
     off = conf["visibility"] == "off"
