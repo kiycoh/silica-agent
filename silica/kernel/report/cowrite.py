@@ -4,26 +4,21 @@
 """Co-write transactions for the coupling variable (V3): which notes each
 nucleate run wrote together, read from the run manifests.
 
-Lives here and not in silica.kernel.progress, which owns the run layout,
-because progress transitively imports silica.agent (via episodic) and the
-L1 report may not. The runs root is derived from the same ~/.silica home the
-rest of the kernel uses; only the "runs" segment is named twice.
+Lives here and not in silica.kernel.progress, which writes the runs, because
+progress reaches the model stack (kernel.progress -> kernel.recall.episodic ->
+model.providers -> model.llm) and its reader, report.graph_report.compute, is
+a graph-structure module that must not (pyproject's P2/DKB contract). The runs
+root and the two file names come from kernel.base.home, below both.
 """
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import orjson
 
+from silica.kernel.base import home
+
 logger = logging.getLogger(__name__)
-
-
-def runs_root() -> Path:
-    # Function, not constant: tests monkeypatch it.
-    from silica.config import silica_home
-
-    return silica_home() / "runs"
 
 
 def cowrite_transactions(vault: str, *, cap: int = 30) -> tuple[list[set[str]], int]:
@@ -39,12 +34,12 @@ def cowrite_transactions(vault: str, *, cap: int = 30) -> tuple[list[set[str]], 
     """
     out: list[set[str]] = []
     dropped = 0
-    root = runs_root()
+    root = home.runs_dir()
     if not root.exists():
         return out, dropped
     for d in sorted(root.iterdir()):
-        ledger = d / "ledger.json"
-        manifest = d / "manifest.json"
+        ledger = d / home.RUN_LEDGER
+        manifest = d / home.RUN_MANIFEST
         if not (d.is_dir() and ledger.exists() and manifest.exists()):
             continue
         try:

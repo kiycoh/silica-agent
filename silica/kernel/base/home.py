@@ -76,6 +76,19 @@ def energy_file(vault: str) -> Path:
     return Path(vault) / ".silica" / "energy.json"
 
 
+def runs_dir() -> Path:
+    """`~/.silica/runs/`, one folder per pipeline run, machine-wide (each run's
+    ledger names its vault). Here and not only in kernel.progress, which writes
+    the runs, because the co-write report reads them and must not import
+    progress: progress reaches model.llm through recall.episodic."""
+    return silica_home() / "runs"
+
+
+# The two files of a run that the co-write report reads beside progress.
+RUN_LEDGER = "ledger.json"
+RUN_MANIFEST = "manifest.json"
+
+
 def attachments_dir() -> Path:
     """Images attached to a chat turn (ADR-0077), kept by content outside every
     vault: saving one into a vault stays an explicit nucleate.

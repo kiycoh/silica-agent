@@ -25,13 +25,15 @@ from typing import Any, Literal
 
 import orjson
 from pydantic import TypeAdapter
-from silica.config import silica_home
+from silica.kernel.base import home
 
 TaskStatus = Literal["pending", "running", "done", "failed", "skipped", "blocked", "deferred"]
 PlanStepKind = Literal["mechanical", "semantic", "gate", "txn"]
 
 def runs_dir() -> Path:
-    return silica_home() / "runs"
+    # This module's seam and not an import of home's: the run writers below read
+    # it by this name, and tests send every run to a tmp dir through it.
+    return home.runs_dir()
 
 logger = logging.getLogger(__name__)
 
@@ -144,11 +146,11 @@ class RunManifest:
         return [e.title for e in self.entries]
 
     def save(self) -> Path:
-        return _save_json(self, "manifest.json")
+        return _save_json(self, home.RUN_MANIFEST)
 
     @classmethod
     def load(cls, run_id: str) -> "RunManifest":
-        path = run_dir_for(run_id) / "manifest.json"
+        path = run_dir_for(run_id) / home.RUN_MANIFEST
         return TypeAdapter(cls).validate_python(orjson.loads(path.read_bytes()))
 
     def digest_section(self, max_items: int = 30) -> str:
@@ -518,11 +520,11 @@ class ProgressLedger:
         return "\n".join(parts)
 
     def save(self) -> Path:
-        return _save_json(self, "ledger.json")
+        return _save_json(self, home.RUN_LEDGER)
 
     @classmethod
     def load(cls, run_id: str) -> ProgressLedger:
-        path = run_dir_for(run_id) / "ledger.json"
+        path = run_dir_for(run_id) / home.RUN_LEDGER
         return TypeAdapter(cls).validate_python(orjson.loads(path.read_bytes()))
 
     def _get(self, task_id: str) -> Task:
@@ -680,8 +682,8 @@ def latest_run_id() -> str | None:
     vault = _active_vault()
     candidates = [
         d for d in runs_dir().iterdir()
-        if d.is_dir() and (d / "ledger.json").exists()
-        and _ledger_vault(d / "ledger.json") == vault
+        if d.is_dir() and (d / home.RUN_LEDGER).exists()
+        and _ledger_vault(d / home.RUN_LEDGER) == vault
     ]
     if not candidates:
         return None
