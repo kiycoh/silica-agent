@@ -12,11 +12,13 @@ same on a terminal and in the browser's answer.
 """
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
 import re
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -1203,33 +1205,56 @@ def triage(target: str, enabled, run_root: str = "", undo_run: str | None = None
     return None if adapter is None else stage(adapter, target, run_root, undo_run)
 
 
+def resume_state(f: str, converted: Callable[[], dict[str, dict]]) -> tuple[str, dict | None]:
+    """/nucleate's batch resume for a file no source claims, one rule for the
+    command (`plan_units`) and for the browser's jobs (`owed`). Conversion is the
+    expensive half (minutes of OCR per scanned book), so a re-run must not pay it
+    again, and both identities are already on disk: segments in the inbox ("ready",
+    an interrupted run) and the done/ archive ("done", a finished book) both carry
+    the `source_file` frontmatter convert() stamps.
+
+    "convert" when it still needs one, "folder" for a directory, and "" for a file
+    convert() takes no reader for or a path resolve_input refuses. The callers part
+    there on purpose: `owed` queues no job for it, `plan_units` hands it to
+    convert(), which says what is wrong with it. `converted` is `prior_conversions`,
+    read on first need. With the state, the inbox and done/ entry it was read from."""
+    from silica.kernel.base.formats import DOC_EXTS
+    from silica.sources.convert import resolve_input
+
+    try:
+        src = resolve_input(f)
+    except ValueError:
+        return "", None  # a Zotero key, or a missing file: convert() names which
+    if src.is_dir():
+        return "folder", None
+    # Before the reader check: segments of a file whose format lost its reader
+    # are still that file's, and the command has always reused them.
+    prior = converted().get(str(src))
+    if prior and prior["inbox"]:
+        return "ready", prior
+    if prior and prior["done"]:
+        return "done", prior
+    return ("convert" if src.suffix.lower() in DOC_EXTS else ""), None
+
+
 def owed(files: list[str]) -> list[str]:
     """The files of a /nucleate that name one document each and still need a
-    conversion: no source claims them, and no earlier conversion of the same
-    file sits in the inbox or in done/ (the batch resume of `plan_units`).
+    conversion: no source claims them, and `resume_state` says "convert".
     [] when one of them is a glob or a folder: the whole command runs as before."""
-    from silica.kernel.base.formats import DOC_EXTS
     from silica.kernel.base.manifest import get_active_manifest
-    from silica.sources.convert import resolve_input
     from silica.sources.registry import adapter_for
 
     enabled = get_active_manifest().sources
+    converted = functools.cache(prior_conversions)
     out: list[str] = []
-    converted: dict | None = None
     for f in files:
         if any(ch in f for ch in "*?["):
             return []
-        try:
-            src = resolve_input(f)
-        except ValueError:
-            continue  # a Zotero key, or a missing file: the command says which
-        if src.is_dir():
+        state, _ = resume_state(f, converted)
+        if state == "folder":
             return []
-        if src.suffix.lower() not in DOC_EXTS or adapter_for(f, enabled=enabled) is not None:
-            continue  # a note or code: staged by the command, no conversion
-        converted = prior_conversions() if converted is None else converted
-        seen = converted.get(str(src))
-        if not (seen and (seen["inbox"] or seen["done"])):
+        # A note or code is staged by the command, with no conversion.
+        if state == "convert" and adapter_for(f, enabled=enabled) is None:
             out.append(f)
     return out
 
@@ -1241,7 +1266,7 @@ def plan_units(
     files, leaf_for, staged = _nucleate_zotero(files, enabled, undo_run, console)
     md_files: list[str] = []
     needs_agent = not files  # only flags given (dropped --folder=) → agent infers
-    converted: dict[str, dict] | None = None  # built on first need
+    converted = functools.cache(prior_conversions)
     # Pipeline units: loose .md arguments form one ready unit; each source
     # document is its own unit — ready when its segments already exist,
     # queued for conversion otherwise. One Coordinator run per unit, so
@@ -1257,33 +1282,21 @@ def plan_units(
             if not Path(f).suffix:
                 needs_agent = True
                 continue
-            # Batch resume: conversion is the expensive half (minutes of
-            # OCR per scanned book), so a re-run must not pay it again.
-            # Both identities are already on disk — segments in the inbox
-            # (interrupted run) and the done/ archive (finished book) both
-            # carry `source_file` frontmatter.
-            from silica.sources.convert import resolve_input
-            try:
-                src_key = str(resolve_input(f))
-            except ValueError:
-                src_key = ""  # convert() stays the authority on missing files
-            if converted is None:
-                converted = prior_conversions()
-            prior = converted.get(src_key) if src_key else None
-            if prior and prior["inbox"]:
+            state, prior = resume_state(f, converted)
+            if state == "ready" and prior:
                 console.print(
                     f"  {f}: reusing [bold]{len(prior['inbox'])}[/] "
                     f"already-converted segment(s)"
                 )
                 ready_units.append((f, prior["inbox"]))
                 continue
-            if prior and prior["done"]:
+            if state == "done" and prior:
                 console.print(
                     f"  [dim]{f}: already nucleated "
                     f"({prior['done']} segment(s) in done/) — skipped[/]"
                 )
                 continue
-            to_convert.append(f)
+            to_convert.append(f)  # "" too: convert() stays the authority on what it refuses
             continue
         if result["status"] == "distill":
             md_files.append(f)

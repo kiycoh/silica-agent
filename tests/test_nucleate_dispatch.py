@@ -1079,3 +1079,30 @@ def test_keep_sources_is_on_by_default_and_can_be_turned_off(stub_coordinator):
     # the old explicit flag still parses, for anything that scripts it
     expansion("/nucleate Inbox/a.md --target=Concepts/AI --keep-sources")
     assert stub_coordinator[-1]["keep_sources"] is True
+
+
+def test_the_command_and_the_browsers_jobs_resume_a_batch_by_one_rule(tmp_vault):
+    """`ingest.resume_state` is the batch resume for both: a book whose segments
+    wait in the inbox is reused, one archived in done/ is skipped, and only a
+    document never converted is owed a job. They part on purpose for what is no
+    document: a format with no reader and a path that resolves to nothing get no
+    job, and the command hands both to convert(), which says what is wrong."""
+    from silica.command_table import Result
+    from silica.kernel.base.manifest import get_active_manifest
+    from silica.sources import ingest
+
+    vault = Path(CONFIG.vault_path)
+    for name in ("A.pdf", "B.pdf", "C.pdf", "E.xyz"):
+        tmp_vault.note(f"books/{name}", "%PDF-1.4\n")
+    tmp_vault.note("Inbox/A-1.md", f'---\nsource_file: "{vault}/books/A.pdf"\n---\n# A\n')
+    tmp_vault.note("done/B-1.md", f'---\nsource_file: "{vault}/books/B.pdf"\n---\n# B\n')
+    files = ["books/A.pdf", "books/B.pdf", "books/C.pdf", "books/E.xyz", "books/gone.pdf"]
+
+    assert ingest.owed(list(files)) == ["books/C.pdf"]
+    out = Result()
+    plan = ingest.plan_units(list(files), get_active_manifest().sources, {}, None, out)
+    assert plan.ready_units == [("books/A.pdf", ["Inbox/A-1.md"])]
+    assert plan.to_convert == ["books/C.pdf", "books/E.xyz", "books/gone.pdf"]
+    said = [str(o) for objects, _ in out.lines for o in objects]
+    assert said == ["  books/A.pdf: reusing [bold]1[/] already-converted segment(s)",
+                    "  [dim]books/B.pdf: already nucleated (1 segment(s) in done/) — skipped[/]"]
