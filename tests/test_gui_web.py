@@ -2310,7 +2310,7 @@ def test_theme_is_an_admitted_setting(tmp_path, monkeypatch):
     from silica.ui.web import settings as st
 
     monkeypatch.setattr(
-        "silica.onboarding.wizard.resolve_env_path", lambda: tmp_path / ".env")
+        "silica.kernel.base.user_env.resolve_env_path", lambda: tmp_path / ".env")
     monkeypatch.delenv("SILICA_THEME", raising=False)
     monkeypatch.setattr(st, "SHELL_ENV", {})
 

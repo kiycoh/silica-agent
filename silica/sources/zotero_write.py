@@ -461,7 +461,7 @@ def authorize(zot: Zotero) -> bool:
     user-level .env, outside the vault. A single-use key is consumed by its
     first write, so keeping it would only make the next write fail.
     """
-    from silica.onboarding import wizard
+    from silica.kernel.base import user_env
 
     server = zot.server_id or zot.library_id()
     r = zot.send("POST", "/api/local/authorize", json={"appName": "Silica"},
@@ -472,6 +472,6 @@ def authorize(zot: Zotero) -> bool:
     zot.api_key = data.get("key", "")
     remember = bool(data.get("remember"))
     if remember and zot.api_key:
-        wizard.write_env({"SILICA_ZOTERO_API_KEY": zot.api_key})
+        user_env.write_env({"SILICA_ZOTERO_API_KEY": zot.api_key})
         claim_env({"SILICA_ZOTERO_API_KEY": zot.api_key})
     return remember

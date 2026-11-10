@@ -446,7 +446,7 @@ def apply(key: str, value) -> dict:
     with its new value, so the panel can resync the rows it did not edit.
     ``{ok: False, error}`` when the key is unknown, locked, or unusable.
     """
-    from silica.onboarding.wizard import write_env
+    from silica.kernel.base.user_env import write_env
 
     rows = _applicable()
     row = rows.get(key)

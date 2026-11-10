@@ -124,7 +124,7 @@ def test_zotero_unlink_asks_before_it_deletes(fake, tmp_vault, capsys):
 
 
 def test_zotero_grant_says_whether_the_key_was_kept(fake, tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr("silica.onboarding.wizard.resolve_env_path", lambda: tmp_path / ".env")
+    monkeypatch.setattr("silica.kernel.base.user_env.resolve_env_path", lambda: tmp_path / ".env")
     fake.authorize_answer = {"key": "s" * 32, "remember": False}
 
     direct("/zotero grant", [])
@@ -139,7 +139,7 @@ def test_a_kept_key_outlives_the_first_model_call(fake, tmp_path, monkeypatch):
 
     monkeypatch.setenv("SILICA_ZOTERO_API_KEY", "")  # restored at teardown, whatever the grant writes
     monkeypatch.delenv("SILICA_ZOTERO_API_KEY")
-    monkeypatch.setattr("silica.onboarding.wizard.resolve_env_path", lambda: tmp_path / ".env")
+    monkeypatch.setattr("silica.kernel.base.user_env.resolve_env_path", lambda: tmp_path / ".env")
     fake.authorize_answer = {"key": "s" * 32, "remember": True}
 
     direct("/zotero grant", [])

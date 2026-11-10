@@ -17,9 +17,8 @@ from silica.config import (
     model_from_env,
     RERANK_PORT,
     SilicaConfig,
-    USER_ENV,
 )
-from silica.kernel.base import gitstate
+from silica.kernel.base import gitstate, user_env
 from silica.kernel.base.layout import DOC_SCAN_CAP, files_with
 from silica.kernel.base.manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
@@ -27,10 +26,6 @@ from silica.provider_table import HOSTED, PROVIDERS
 from silica.term.banner import print_banner
 from silica.term.console import CONSOLE
 from silica.term.style import GLYPHS
-
-# Optional leading `#` so merge_env can uncomment-and-fill a `# KEY=default`
-# line seeded from .env.example, not just rewrite an already-active key.
-_KEY_RE = re.compile(r"^\s*#?\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
 # Each hosted row of the provider table as a key prompt: (env var, model
 # pick-list, label). First model is what Enter accepts; `other` is appended by
@@ -203,56 +198,6 @@ def _live_hosted_models(provider: str, api_key: str, curated: list[str]) -> list
     if alive:
         return alive
     return [f"{provider}/{m.removeprefix('models/')}" for m in live[:8]]
-
-
-def resolve_env_path() -> Path:
-    """The `.env` a settings write must land in — the one that would win at boot.
-
-    Always the user-level file, because config.py layers that one and nothing
-    else: it is the only path where a write is still there at the next launch.
-    This used to prefer a project .env when one existed, so a settings edit made
-    inside any checkout landed in that checkout's file — and, once the project
-    layer was removed, would have landed in a file nobody reads.
-
-    Creates the parent directory, never the file.
-    """
-    USER_ENV.parent.mkdir(parents=True, exist_ok=True)
-    return USER_ENV
-
-
-def write_env(updates: dict[str, str]) -> Path:
-    """Persist keys into the user .env, atomically, readable by its owner only.
-
-    The one writer for a key: the settings panel and the Zotero grant both call
-    it, because the grant had its own copy and missed the 0600 the panel got
-    (2026-10-11). The file holds every API key the user has, so a crash
-    mid-write must not truncate it and a group must not read it.
-    """
-    from silica.kernel.base.durable import atomic_write_bytes
-
-    path = resolve_env_path()
-    base = path.read_text(encoding="utf-8") if path.exists() else ""
-    atomic_write_bytes(path, merge_env(base, updates).encode("utf-8"), mode=0o600)
-    return path
-
-
-def merge_env(existing: str, updates: dict[str, str]) -> str:
-    """Update KEY=VALUE lines in place — uncommenting a `# KEY=default` line when
-    KEY is collected — preserve every other line untouched, and append keys that
-    were not present. Never deletes a line it did not write."""
-    pending = dict(updates)
-    out: list[str] = []
-    for line in existing.splitlines():
-        m = _KEY_RE.match(line)
-        if m and m.group(1) in pending:
-            key = m.group(1)
-            out.append(f"{key}={pending.pop(key)}")
-        else:
-            out.append(line)
-    for key, value in pending.items():
-        out.append(f"{key}={value}")
-    text = "\n".join(out)
-    return text + "\n" if text else ""
 
 
 def _ask(
@@ -1050,7 +995,7 @@ def _run_wizard_inner(
     # Atomic: a crash mid-write here would truncate the live .env — every API
     # key the user has — not just the values being merged.
     from silica.kernel.base.durable import atomic_write_bytes
-    atomic_write_bytes(env_path, merge_env(base, updates).encode("utf-8"), mode=0o600)
+    atomic_write_bytes(env_path, user_env.merge_env(base, updates).encode("utf-8"), mode=0o600)
     CONSOLE.print(f"  [green]{GLYPHS['ok']} Wrote {env_path}[/]")
 
     # Doctor checks against the values just chosen.
@@ -1083,7 +1028,7 @@ def run_wizard(
     advanced: bool = False,
 ) -> int:
     if env_path is None:
-        env_path = resolve_env_path()  # shared with the web settings panel
+        env_path = user_env.resolve_env_path()  # shared with the web settings panel
     try:
         return _run_wizard_inner(input_fn, env_path, advanced=advanced)
     except KeyboardInterrupt:

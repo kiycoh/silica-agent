@@ -24,13 +24,13 @@ def _fresh_setup_env(monkeypatch):
 
 class TestMergeEnv:
     def test_updates_managed_key_in_place(self):
-        from silica.onboarding.wizard import merge_env
+        from silica.kernel.base.user_env import merge_env
         out = merge_env("SILICA_MODEL=old\nFOO=bar\n", {"SILICA_MODEL": "new"})
         assert "SILICA_MODEL=new" in out
         assert "SILICA_MODEL=old" not in out
 
     def test_preserves_unknown_lines_and_comments(self):
-        from silica.onboarding.wizard import merge_env
+        from silica.kernel.base.user_env import merge_env
         existing = "# my comment\nFOO=bar\n\nexport OTHER=keep\n"
         out = merge_env(existing, {"SILICA_MODEL": "m"})
         assert "# my comment" in out
@@ -38,41 +38,41 @@ class TestMergeEnv:
         assert "export OTHER=keep" in out
 
     def test_appends_new_keys(self):
-        from silica.onboarding.wizard import merge_env
+        from silica.kernel.base.user_env import merge_env
         out = merge_env("FOO=bar\n", {"SILICA_BACKEND": "fs"})
         assert out.splitlines()[-1] == "SILICA_BACKEND=fs"
 
     def test_empty_existing(self):
-        from silica.onboarding.wizard import merge_env
+        from silica.kernel.base.user_env import merge_env
         out = merge_env("", {"SILICA_MODEL": "m"})
         assert out == "SILICA_MODEL=m\n"
 
     def test_matches_export_prefix(self):
-        from silica.onboarding.wizard import merge_env
+        from silica.kernel.base.user_env import merge_env
         out = merge_env("export SILICA_MODEL=old\n", {"SILICA_MODEL": "new"})
         assert "SILICA_MODEL=new" in out
         assert "old" not in out
 
     def test_uncomments_and_fills_commented_key(self):
-        from silica.onboarding.wizard import merge_env
+        from silica.kernel.base.user_env import merge_env
         out = merge_env("# SILICA_MODEL=example\n", {"SILICA_MODEL": "m"})
         assert "SILICA_MODEL=m" in out
         assert "# SILICA_MODEL" not in out
 
     def test_leaves_unrelated_commented_lines_verbatim(self):
-        from silica.onboarding.wizard import merge_env
+        from silica.kernel.base.user_env import merge_env
         out = merge_env("# SILICA_MODEL=example\n# SILICA_BACKEND=fs\n", {"SILICA_MODEL": "m"})
         assert "SILICA_MODEL=m" in out
         assert "# SILICA_BACKEND=fs" in out  # unrelated key stays commented
 
     def test_appends_key_absent_from_commented_template(self):
-        from silica.onboarding.wizard import merge_env
+        from silica.kernel.base.user_env import merge_env
         out = merge_env("# SILICA_MODEL=example\n", {"GROQ_API_KEY": "gsk"})
         assert "# SILICA_MODEL=example" in out  # untouched
         assert out.splitlines()[-1] == "GROQ_API_KEY=gsk"
 
     def test_duplicate_commented_key_sets_only_first(self):
-        from silica.onboarding.wizard import merge_env
+        from silica.kernel.base.user_env import merge_env
         out = merge_env("# SILICA_MODEL=a\n# SILICA_MODEL=b\n", {"SILICA_MODEL": "m"})
         lines = out.splitlines()
         assert lines[0] == "SILICA_MODEL=m"    # first uncommented + set

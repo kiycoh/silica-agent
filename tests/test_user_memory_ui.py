@@ -315,7 +315,7 @@ def test_the_switch_is_a_settings_row_that_persists(client, tmp_path, monkeypatc
     from silica.ui.web import settings as st
 
     env = tmp_path / ".env"
-    monkeypatch.setattr("silica.onboarding.wizard.resolve_env_path", lambda: env)
+    monkeypatch.setattr("silica.kernel.base.user_env.resolve_env_path", lambda: env)
     # apply() writes os.environ; declared so monkeypatch puts the real one back.
     monkeypatch.setenv("SILICA_MEMORY", "")
     row = next(r for r in st.sections()["Memory"] if r.key == "SILICA_MEMORY")

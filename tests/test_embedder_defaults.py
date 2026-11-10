@@ -122,7 +122,7 @@ def test_the_panels_swap_reindexes_under_the_new_document_prefix(monkeypatch, tm
     from silica.tools import TOOLS
     from silica.ui.web import settings_routes
 
-    monkeypatch.setattr("silica.onboarding.wizard.resolve_env_path", lambda: tmp_path / ".env")
+    monkeypatch.setattr("silica.kernel.base.user_env.resolve_env_path", lambda: tmp_path / ".env")
     monkeypatch.setattr(CONFIG, "embedding_model", "embeddinggemma-2")
     assert CONFIG.embedding_document_prefix == "title: none | text: "
     seen: dict = {}

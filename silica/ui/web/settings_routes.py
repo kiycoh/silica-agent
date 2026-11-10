@@ -80,7 +80,7 @@ def get_settings():
     one round trip."""
     from silica import __version__
     from silica.config import hosted
-    from silica.onboarding.wizard import resolve_env_path
+    from silica.kernel.base.user_env import resolve_env_path
     from silica.ui.web import settings as st
     from silica.update import behind_count
 

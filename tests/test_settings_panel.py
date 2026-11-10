@@ -13,7 +13,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from silica.config import CONFIG  # noqa: E402
-from silica.onboarding.wizard import merge_env, resolve_env_path  # noqa: E402
+from silica.kernel.base.user_env import merge_env, resolve_env_path  # noqa: E402
 from silica.onboarding import settings_ops
 from silica.ui.web import settings as st  # noqa: E402
 
@@ -22,7 +22,7 @@ from silica.ui.web import settings as st  # noqa: E402
 def env_file(tmp_path, monkeypatch):
     """Point every write at a throwaway .env — never the developer's own."""
     path = tmp_path / ".env"
-    monkeypatch.setattr("silica.onboarding.wizard.resolve_env_path", lambda: path)
+    monkeypatch.setattr("silica.kernel.base.user_env.resolve_env_path", lambda: path)
     return path
 
 
@@ -50,7 +50,7 @@ def test_the_env_holds_keys_so_only_its_owner_reads_it(env_file):
     both end 0600: the file holds every API key the user has."""
     import os
 
-    from silica.onboarding.wizard import write_env
+    from silica.kernel.base.user_env import write_env
 
     write_env({"SILICA_MODEL": "a"})
     assert os.stat(env_file).st_mode & 0o777 == 0o600
@@ -67,7 +67,7 @@ def test_env_path_is_the_user_file_even_inside_a_repo(tmp_path, monkeypatch):
     sub = repo / "sub"
     sub.mkdir(parents=True)
     user_env = tmp_path / "home" / ".silica" / ".env"
-    monkeypatch.setattr("silica.onboarding.wizard.USER_ENV", user_env)
+    monkeypatch.setattr("silica.kernel.base.user_env.USER_ENV", user_env)
     monkeypatch.chdir(sub)
     (repo / ".env").write_text("X=1")
     (sub / ".env").write_text("X=2")
@@ -136,11 +136,11 @@ def test_loopback_names_are_served(client, host):
 def test_changing_the_provider_writes_its_whole_group_at_once(env_file, monkeypatch):
     """No intermediate state where the provider is new and the model is old:
     both move in one merge_env, so there is no instant to observe them apart."""
-    from silica.onboarding import wizard
+    from silica.kernel.base import user_env
 
     writes = []
-    real_write = wizard.write_env
-    monkeypatch.setattr(wizard, "write_env", lambda u: (writes.append(dict(u)), real_write(u))[1])
+    real_write = user_env.write_env
+    monkeypatch.setattr(user_env, "write_env", lambda u: (writes.append(dict(u)), real_write(u))[1])
     monkeypatch.setattr(CONFIG, "model", "qwen3-32b")
     monkeypatch.setattr(CONFIG, "_provider", "lmstudio")
     # apply() makes the keys live by writing os.environ; declare them here so

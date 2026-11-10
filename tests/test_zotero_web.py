@@ -109,7 +109,7 @@ def test_settings_rows_write_the_block(fake, web):
 
 def test_grant_reports_whether_the_key_was_kept(fake, web, tmp_path, monkeypatch):
     _link()
-    monkeypatch.setattr("silica.onboarding.wizard.resolve_env_path", lambda: tmp_path / ".env")
+    monkeypatch.setattr("silica.kernel.base.user_env.resolve_env_path", lambda: tmp_path / ".env")
 
     assert web.post("/zotero/grant").json() == {"ok": True, "kept": True}
 

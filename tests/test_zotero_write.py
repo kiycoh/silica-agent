@@ -244,7 +244,7 @@ def test_unlink_removes_silica_notes_and_groups_and_nothing_else(fake):
 
 def test_always_allow_keeps_the_key_outside_the_vault(fake, tmp_path, monkeypatch):
     env = tmp_path / "user.env"
-    monkeypatch.setattr("silica.onboarding.wizard.resolve_env_path", lambda: env)
+    monkeypatch.setattr("silica.kernel.base.user_env.resolve_env_path", lambda: env)
 
     remember = zw.authorize(_zot(fake, key=""))
 
@@ -255,7 +255,7 @@ def test_always_allow_keeps_the_key_outside_the_vault(fake, tmp_path, monkeypatc
 
 def test_a_single_use_key_is_not_kept(fake, tmp_path, monkeypatch):
     env = tmp_path / "user.env"
-    monkeypatch.setattr("silica.onboarding.wizard.resolve_env_path", lambda: env)
+    monkeypatch.setattr("silica.kernel.base.user_env.resolve_env_path", lambda: env)
     fake.authorize_answer = {"key": "s" * 32, "remember": False}
 
     assert zw.authorize(_zot(fake, key="")) is False
