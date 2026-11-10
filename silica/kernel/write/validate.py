@@ -521,7 +521,7 @@ class Grounding:
 
     def __init__(self, index: PayloadIndex, *, profile: str | None,
                  ungrounded_out: list | None, grounding_out: list | None) -> None:
-        from silica.kernel.prep_delegation import active_distill_profile
+        from silica.kernel.base.manifest import active_distill_profile
 
         self._index = index
         self._ungrounded_out = ungrounded_out

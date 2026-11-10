@@ -338,7 +338,7 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
     if lifecycle and lifecycle not in LIFECYCLES:
         return {"query": query, "error": f"unknown lifecycle '{lifecycle}'; one of "
                 + ", ".join(LIFECYCLES), "context": "", "notes": [], "partial": [], "facts": 0}
-    from silica.kernel.write.timeline import DATE_PREFIX
+    from silica.kernel.calendar.timeline import DATE_PREFIX
 
     since, until = since.strip(), until.strip()
     bad = next((b for b in (since, until) if b and not DATE_PREFIX.fullmatch(b)), None)
@@ -369,7 +369,7 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
     if since or until:
         from silica.config import CONFIG
         from silica.kernel.workspaces import in_scope
-        from silica.kernel.write.timeline import dated_window
+        from silica.kernel.calendar.timeline import dated_window
 
         # The window is an allow set, applied inside each leg like a
         # workspace's and intersected with it (ADR-0148 point 2).
@@ -538,7 +538,7 @@ def silica_timeline(start: Annotated[str, Field(description='Inclusive ISO start
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.write.timeline import timeline
+    from silica.kernel.calendar.timeline import timeline
 
     vault = Path(CONFIG.vault_path or "").expanduser()
     if not vault.is_dir():

@@ -89,7 +89,7 @@ class TestTheReportMemo:
 
 class TestTheTimelineMemo:
     def test_rows_replay_on_the_same_epoch(self, bound_vault):
-        from silica.kernel.write.timeline import _all_rows
+        from silica.kernel.calendar.timeline import _all_rows
 
         (bound_vault / "D.md").write_text(
             "---\ndate: 2026-01-02\n---\nbody\n", encoding="utf-8")
@@ -100,7 +100,7 @@ class TestTheTimelineMemo:
         assert _all_rows(bound_vault) is not first
 
     def test_ignored_directories_are_not_walked(self, tmp_path):
-        from silica.kernel.write.timeline import timeline
+        from silica.kernel.calendar.timeline import timeline
 
         (tmp_path / "note.md").write_text(
             "---\ndate: 2026-01-02\n---\nbody\n", encoding="utf-8")

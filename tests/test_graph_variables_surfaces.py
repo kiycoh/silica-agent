@@ -215,7 +215,7 @@ def _n(nid, sgroup=-1, ntype="note"):
 
 
 def test_load_bearing_is_stamped_on_the_nodes_with_what_a_cut_costs():
-    from silica.kernel.graph.overlays import stamp_load_bearing
+    from silica.kernel.report.overlays import stamp_load_bearing
 
     nodes = [_n("a"), _n("cut"), _n("b"), _n("c"), _n("G", ntype="ghost")]
     G = nx.Graph([("a", "cut"), ("cut", "b"), ("b", "c")])
@@ -231,7 +231,7 @@ def test_proposed_layer_keeps_only_pairs_a_shared_concept_corroborates(monkeypat
     """Uncorroborated, V1 lost every golden pair it was tested on (ADR-0027).
     The layer is allowed to exist because the corroboration is the filter, so
     a pair the index cannot vouch for is not drawn."""
-    from silica.kernel.graph import overlays
+    from silica.kernel.report import overlays
 
     monkeypatch.setattr(
         "silica.kernel.graph.graph_export.shared_concepts",
@@ -246,7 +246,7 @@ def test_proposed_layer_keeps_only_pairs_a_shared_concept_corroborates(monkeypat
 
 
 def test_proposed_layer_is_empty_without_an_index(monkeypatch):
-    from silica.kernel.graph import overlays
+    from silica.kernel.report import overlays
 
     monkeypatch.setattr(
         "silica.kernel.graph.graph_export.shared_concepts", lambda pairs, k=3: {})

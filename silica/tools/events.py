@@ -51,7 +51,7 @@ def silica_agenda(start: Annotated[str, Field(description="Window start: 'today'
     from silica.kernel.calendar.tasks import scan_tasks
     from silica.kernel.calendar.model import scan_events
     from silica.kernel.calendar.occurrences import expand
-    from silica.kernel.write.timeline import timeline
+    from silica.kernel.calendar.timeline import timeline
 
     today = dt.date.today()
     s = (start or "today").strip().casefold()

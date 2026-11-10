@@ -69,21 +69,6 @@ def _splice_lens(body: str, profile: str) -> str:
     return body
 
 
-def active_distill_profile() -> str:
-    """The distill profile in force: SILICA_DISTILL_PROFILE env >
-    `conventions.distill_profile` > "default".
-
-    Never raises: the validator asks on every ingest op, and a missing or
-    unreadable manifest must read as the default profile, not an error."""
-    try:
-        from silica.kernel.base.manifest import get_active_manifest
-
-        declared = get_active_manifest().conventions.distill_profile
-    except Exception:
-        declared = ""
-    return live_env("SILICA_DISTILL_PROFILE") or declared or "default"
-
-
 def render_prompt(target: str, hub: str | None = None, source_text: str = "",
                   session_date: str = "", language: str | None = None,
                   profile: str | None = None) -> str:
@@ -114,10 +99,10 @@ def render_prompt(target: str, hub: str | None = None, source_text: str = "",
     "English", ...), never None.
     """
     from silica.kernel.text import language as lang_mod
-    from silica.kernel.base.manifest import get_active_manifest
+    from silica.kernel.base import manifest
 
-    conventions = get_active_manifest().conventions
-    profile = profile or active_distill_profile()
+    conventions = manifest.get_active_manifest().conventions
+    profile = profile or manifest.active_distill_profile()
     body = _splice_lens(load_prompt("distiller_prompt.txt"), profile)
     body = body.replace("{TARGET}", target)
     if hub:

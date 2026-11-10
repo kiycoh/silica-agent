@@ -128,10 +128,9 @@ class TestFormResolution:
 
     def test_resolve_fallback_names_the_vault_profile(self, tmp_vault, monkeypatch):
         import silica.kernel.forms as forms
-        import silica.kernel.prep_delegation as prep
 
         monkeypatch.setattr(forms, "sniff_form", lambda text: "")
-        monkeypatch.setattr(prep, "active_distill_profile", lambda: "extractive")
+        monkeypatch.setattr("silica.kernel.base.manifest.active_distill_profile", lambda: "extractive")
         got = forms.resolve("ambiguous body\n")
 
         assert (got.form, got.profile, got.origin) == ("", "extractive", "fallback")

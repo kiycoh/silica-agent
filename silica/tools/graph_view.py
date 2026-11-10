@@ -43,8 +43,9 @@ from pathlib import Path
 # The edge colours ride along so each legend swatch and the edges it stands for
 # cannot drift apart: they were two literals of the same hex until one moved.
 from silica.kernel.base.noteshape import NATIVE_TYPES
-from silica.kernel.graph import file_tree, overlays
-from silica.kernel.graph.overlays import (
+from silica.kernel.graph import file_tree
+from silica.kernel.report import overlays
+from silica.kernel.report.overlays import (
     _EDGE_COLOR_COUPLED,
     _EDGE_COLOR_COUPLED_PAPER,
     _EDGE_COLOR_GAP,

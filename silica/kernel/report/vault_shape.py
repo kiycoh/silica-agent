@@ -192,7 +192,7 @@ def write_sessions(report) -> dict | None:
     ambiguous, because guessing one of the two would silently move a mark into
     the wrong column.
     """
-    from silica.kernel.write.timeline import timeline
+    from silica.kernel.calendar.timeline import timeline
 
     vault = Path(CONFIG.vault_path or "").expanduser()
     if not vault.is_dir():

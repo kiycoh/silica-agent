@@ -24,7 +24,7 @@ class TestRenderPrompt:
     def test_an_explicit_profile_wins_over_the_global_one(self, monkeypatch):
         from silica.kernel import prep_delegation
 
-        monkeypatch.setattr(prep_delegation, "active_distill_profile",
+        monkeypatch.setattr("silica.kernel.base.manifest.active_distill_profile",
                             lambda: "default")
 
         rendered = prep_delegation.render_prompt(
@@ -35,7 +35,7 @@ class TestRenderPrompt:
     def test_no_profile_keeps_the_global_resolution(self, monkeypatch):
         from silica.kernel import prep_delegation
 
-        monkeypatch.setattr(prep_delegation, "active_distill_profile",
+        monkeypatch.setattr("silica.kernel.base.manifest.active_distill_profile",
                             lambda: "default")
 
         rendered = prep_delegation.render_prompt(target="Concepts/AI")
@@ -51,7 +51,7 @@ class TestRenderPrompt:
         directive itself must follow the profile."""
         from silica.kernel import prep_delegation
 
-        monkeypatch.setattr(prep_delegation, "active_distill_profile",
+        monkeypatch.setattr("silica.kernel.base.manifest.active_distill_profile",
                             lambda: "default")
 
         default = prep_delegation.render_prompt(target="Life")
@@ -70,7 +70,7 @@ class TestRenderPrompt:
         the ephemeral store in the first place. Promotion needs its own lens."""
         from silica.kernel import prep_delegation
 
-        monkeypatch.setattr(prep_delegation, "active_distill_profile",
+        monkeypatch.setattr("silica.kernel.base.manifest.active_distill_profile",
                             lambda: "default")
 
         rendered = prep_delegation.render_prompt(

@@ -180,7 +180,7 @@ def _pin_file_profile(fsm: "InjectorFSM", fi: int, inbox_file: str) -> None:
     res = forms.resolve(text)
     profile = res.profile
     if res.form == "draft":
-        from silica.kernel.prep_delegation import active_distill_profile
+        from silica.kernel.base.manifest import active_distill_profile
 
         profile = active_distill_profile()
         logger.info(

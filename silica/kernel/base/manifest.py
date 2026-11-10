@@ -20,7 +20,7 @@ from pathlib import Path
 
 import yaml
 
-from silica.config import env_raw
+from silica.config import env_raw, live_env
 from silica.kernel.base import roots
 
 logger = logging.getLogger(__name__)
@@ -764,3 +764,16 @@ def apply_manifest_to_config() -> None:
         # without a declared cooccurrence_lang must NOT be silently pinned to
         # english.
         CONFIG.cooccurrence_lang = m.cooccurrence_lang or "auto"
+
+
+def active_distill_profile() -> str:
+    """The distill profile in force: SILICA_DISTILL_PROFILE env >
+    `conventions.distill_profile` > "default".
+
+    Never raises: the validator asks on every ingest op, and a missing or
+    unreadable manifest must read as the default profile, not an error."""
+    try:
+        declared = get_active_manifest().conventions.distill_profile
+    except Exception:
+        declared = ""
+    return live_env("SILICA_DISTILL_PROFILE") or declared or "default"

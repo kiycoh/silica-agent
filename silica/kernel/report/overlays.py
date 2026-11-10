@@ -4,9 +4,10 @@
 """What the graph says beyond the links a person wrote: the proposal layers, and the readings
 stamped on each node.
 
-Deterministic reports over the graph data, so they sit with it and any surface can ask. The
-frame that draws them is `silica.tools.graph_view`; none of this knows it exists, except the
-hues, which ride on each edge because the frame paints what it is handed.
+Deterministic reports over the graph data, beside the co-write and structure reports two of
+them read, so any surface can ask. The frame that draws them is `silica.tools.graph_view`; none
+of this knows it exists, except the hues, which ride on each edge because the frame paints what
+it is handed.
 """
 from __future__ import annotations
 

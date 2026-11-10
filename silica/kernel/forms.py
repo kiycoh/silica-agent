@@ -240,7 +240,7 @@ def resolve(text: str, *, allow_sniff: bool = True) -> Form:
     the caller; they name a profile, not a form, and never reach here.
     """
     import silica.kernel.forms as _self  # late-bound so tests can stub sniff_form
-    from silica.kernel import prep_delegation
+    from silica.kernel.base import manifest
 
     # Conversion provenance vetoes the draft lane: a file carrying
     # `source_file:` was produced by convert() from the user's own document —
@@ -277,5 +277,5 @@ def resolve(text: str, *, allow_sniff: bool = True) -> Form:
         sniffed = _self.sniff_form(text)
         if sniffed and not (converted and sniffed == "draft"):
             return Form(sniffed, profile_for(sniffed), "sniff")
-    fallback = prep_delegation.active_distill_profile()
+    fallback = manifest.active_distill_profile()
     return Form("", fallback, "default" if fallback == "default" else "fallback")

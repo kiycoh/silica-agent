@@ -106,7 +106,7 @@ def distill_env(monkeypatch):
     monkeypatch.setenv("DISTILLER_MAX_TOKENS", "2048")
     monkeypatch.delenv("SILICA_DISTILL_TWO_PASS", raising=False)
     monkeypatch.delenv("SILICA_DISTILL_PROFILE", raising=False)
-    monkeypatch.setattr(prep_delegation, "active_distill_profile",
+    monkeypatch.setattr("silica.kernel.base.manifest.active_distill_profile",
                         lambda: "default")
 
     def _no_network(*a, **k):

@@ -160,7 +160,7 @@ def test_the_key_is_what_the_size_says():
 def test_size_is_links_counted_once_and_a_native_note_counts_for_nothing():
     import networkx as nx
 
-    from silica.kernel.graph.overlays import size_by_links
+    from silica.kernel.report.overlays import size_by_links
 
     G = nx.Graph([("a", "b"), ("a", "c"), ("a", "p"), ("a", "a")])
     nodes = [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "p", "type": "plan", "size": 16},

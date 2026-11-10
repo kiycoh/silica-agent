@@ -130,7 +130,7 @@ def test_the_timeline_the_calendar_and_learn_leave_a_composed_leaf_out(confined)
     from silica.kernel.calendar import tasks
     from silica.kernel.base import note_index
     from silica.kernel.recall.requires import written_requires
-    from silica.kernel.write import timeline
+    from silica.kernel.calendar import timeline
 
     (confined / "silica/sources/Leaf.md").write_text(
         "---\nevent_start: 2026-02-02\nrequires: ['[[A]]']\n---\n- [ ] t 📅 2026-02-03\n", encoding="utf-8")
