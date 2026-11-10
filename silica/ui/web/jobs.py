@@ -560,14 +560,13 @@ def from_command(text: str, session: str | None) -> dict | None:
         parts = shlex.split(text.strip())
     except ValueError:
         return None  # the command's own parser names the unbalanced quote
-    from silica.session.words import positional, str_flag
+    from silica.commands.ingress import read_words
     from silica.kernel.base.formats import DOC_EXTS
     from silica.sources.convert import resolve_input
     from silica.sources import ingest
 
-    args = ingest.rejoin_spaced_paths(parts[1:])
-    files = positional(args)
-    target = str_flag(args, "--target")
+    words = read_words(parts[1:])
+    files, target = words.files, words.target
     if not files:
         return None  # usage, or /nucleate's drain of the write-ahead log
     if word == "/nucleate":

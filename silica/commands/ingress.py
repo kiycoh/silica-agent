@@ -4,9 +4,57 @@
 """What brings a source in: /nucleate, /promote, /convert, /web-search, /fetch, /keep."""
 from __future__ import annotations
 
+import datetime
+from dataclasses import dataclass
+
 from silica.command_table import Call, Result
 from silica.session.words import int_flag, positional, str_flag
 from silica.sources import ingest
+
+
+@dataclass(frozen=True)
+class Words:
+    """/convert's and /nucleate's words, read once: by the command, and by the
+    browser's jobs (`ui/web/jobs.from_command`), which convert the files ahead
+    of the command and carry `flags` to the /nucleate they offer. Read twice,
+    a flag added to the command reached the jobs only if added there too, and
+    four never did."""
+
+    files: list[str]          # as typed: a path keeps its case
+    flags: list[str]          # every word that is not a file, as typed
+    target: str
+    hub: str
+    # Explicit lens override: tops the whole form ladder
+    # (docs/specs/nucleation-forms.md), filing included.
+    profile: str
+    seen: str                 # the capture clock, the day the events happened, or ""
+    bad_seen: str             # a --seen that is no date, said and ignored
+    # On by default: the leaf lives in `sources/`, which every index built on
+    # the vault listing leaves out (is_source_leaf: embeddings, the graph, the
+    # driver's search), while the passage search behind silica_search_context
+    # walks it and returns it (silica_core's recall/paths.py, probed 2026-11-04).
+    # It is what makes a note's verbatim source reachable at all
+    # (reliability_tier reads exactly that). --no-keep-sources opts out.
+    keep_sources: bool
+
+
+def read_words(words: list[str]) -> Words:
+    """The command's words after its name, read as the command reads them."""
+    args = ingest.rejoin_spaced_paths(words)
+    seen, bad = str_flag(args, "--seen"), ""
+    if seen:
+        # Trust boundary: this string becomes the valid_from on every claim
+        # of the run — a typo'd date would poison note_clock vault-wide.
+        try:
+            seen = datetime.date.fromisoformat(seen).isoformat()
+        except ValueError:
+            seen, bad = "", seen
+    return Words(
+        files=positional(args), flags=[a for a in args if a.startswith("-")],
+        target=str_flag(args, "--target"), hub=str_flag(args, "--hub"),
+        profile=str_flag(args, "--profile"), seen=seen, bad_seen=bad,
+        keep_sources="--no-keep-sources" not in args,
+    )
 
 
 def nucleate(c: Call) -> Result:
@@ -18,37 +66,14 @@ def nucleate(c: Call) -> Result:
     from the arguments alone.
     """
     out = c.out
-    args = ingest.rejoin_spaced_paths(c.args)
-    if not args:
+    w = read_words(c.args)
+    if not w.files and not w.flags:
         return out.to_model(ingest.drain_wal(out))
-    seen = str_flag(args, "--seen")  # capture clock: the day the events happened
-    if seen:
-        # Trust boundary: this string becomes the valid_from on every claim
-        # of the run — a typo'd date would poison note_clock vault-wide.
-        import datetime as _dt
-        try:
-            seen = _dt.date.fromisoformat(seen).isoformat()
-        except ValueError:
-            out.print(f"  [yellow]--seen ignored: {seen!r} is not YYYY-MM-DD[/]")
-            seen = ""
+    if w.bad_seen:
+        out.print(f"  [yellow]--seen ignored: {w.bad_seen!r} is not YYYY-MM-DD[/]")
     return out.to_model(ingest.nucleate(
-        positional(args),  # preserve original case
-        target_dir=str_flag(args, "--target"),
-        hub=str_flag(args, "--hub"),
-        seen=seen,
-        # Explicit lens override: tops the whole form ladder
-        # (docs/specs/nucleation-forms.md), filing included.
-        profile=str_flag(args, "--profile"),
-        # On by default: the leaf lives in `sources/`, which every index built on
-        # the vault listing leaves out (is_source_leaf: embeddings, the graph, the
-        # driver's search), while the passage search behind silica_search_context
-        # walks it and returns it (silica_core's recall/paths.py, probed 2026-11-04).
-        # It is what makes a note's verbatim source reachable at all
-        # (reliability_tier reads exactly that). --no-keep-sources opts out.
-        keep_sources="--no-keep-sources" not in args,
-        user_input=c.raw,
-        console=out,
-        ask=c.ask and c.ask.text,
+        w.files, target_dir=w.target, hub=w.hub, seen=w.seen, profile=w.profile,
+        keep_sources=w.keep_sources, user_input=c.raw, console=out, ask=c.ask and c.ask.text,
     ))
 
 
@@ -60,15 +85,13 @@ def promote(c: Call) -> Result:
 def convert(c: Call) -> Result:
     """/convert <file...> [--target=DIR] — document to inbox notes, no distillation."""
     out = c.out
-    args = ingest.rejoin_spaced_paths(c.args)
-    files = positional(args)
-    target_dir = str_flag(args, "--target")
-    if not files:
+    w = read_words(c.args)
+    if not w.files:
         return out.refused("/convert requires at least one file path. Usage: /convert <file...> [--target=DIR]")
     from silica.sources.convert import convert
-    for f in files:
+    for f in w.files:
         try:
-            paths = convert(f, dest_dir=target_dir)
+            paths = convert(f, dest_dir=w.target)
             out.print(
                 f"  Converted {f} → [bold]{len(paths)}[/] note(s): {', '.join(paths)}"
             )
