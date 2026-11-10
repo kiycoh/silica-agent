@@ -39,6 +39,9 @@ OFF_LINE = ("No persona applies to this conversation any more: answer as Silica 
 
 
 def is_persona(skill) -> bool:
+    # Core's split and not base.frontmatter's identical copy: the skills loader
+    # reads SKILL.md with this one (silica_core/kernel/skills.py), and the
+    # persona test must read the file as the loader did.
     from silica_core.kernel.write.frontmatter import split
 
     try:

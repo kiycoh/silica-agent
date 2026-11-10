@@ -352,6 +352,8 @@ def pending(vault: str) -> list[dict]:
             continue   # damaged by hand: Settings shows the rest
         if meta.get("dismissed"):
             continue
+        # Core's split, the skills loader's parser: the same reading of SKILL.md
+        # as is_persona's (silica/kernel/personas.py).
         from silica_core.kernel.write.frontmatter import split
 
         data, _raw, body = split(text)

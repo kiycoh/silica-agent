@@ -107,8 +107,8 @@ def _parse(text: str):
     """The skill `text` holds, the body the model receives, and whether it is
     a persona (ADR-0127), or a 400 that names the check it failed and what to
     change."""
-    # _NAME and _COMMENT are the loader's own rules, imported rather than
-    # copied so the refusal here and the loader's never disagree.
+    # _NAME, _COMMENT and split are the loader's own rules, imported rather
+    # than copied so the refusal here and the loader's never disagree.
     from silica.kernel.personas import is_persona
     from silica_core.kernel.skills import _COMMENT, _NAME, load
     from silica_core.kernel.write.frontmatter import split
