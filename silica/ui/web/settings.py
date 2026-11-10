@@ -99,7 +99,7 @@ def sections() -> dict[str, tuple[Row, ...]]:
     """The admitted rows, by panel section. A row may appear twice (thinking is
     both the session's one live toggle and a display preference); the panel
     syncs every control bound to the same key after a write."""
-    from silica.onboarding.wizard import EMBED_MODELS, RERANK_MODELS
+    from silica.onboarding.serve import EMBED_MODELS, RERANK_MODELS
 
     providers = tuple(sorted(PROVIDER_PREFIXES))
     table = {
@@ -343,7 +343,7 @@ def _probe_models() -> dict[str, list[str]]:
     and embeddings usually share one server, so the usual cost is two requests."""
     from concurrent.futures import ThreadPoolExecutor
 
-    from silica.onboarding.wizard import endpoint_model_ids
+    from silica.onboarding.serve import endpoint_model_ids
 
     urls = settings_ops.base_urls()
     distinct = sorted({u for u in urls.values() if u})
@@ -418,12 +418,11 @@ def provider_group(provider: str) -> dict[str, str]:
     list, or whatever a local endpoint actually advertises. Neither answers → the
     model is left alone and the user picks it in the row below.
     """
-    from silica.model.providers import PROVIDER_PRESETS
-    from silica.onboarding.wizard import endpoint_model_ids
+    from silica.model.limits import base_url as fixed_url
+    from silica.onboarding.serve import endpoint_model_ids
 
     updates = {"SILICA_PROVIDER": provider}
-    preset = PROVIDER_PRESETS.get(provider, {})
-    base_url = preset.get("base_url", "")
+    base_url = fixed_url(provider)
     hosted = HOSTED_PROVIDERS.get(provider)
     if hosted:
         updates["SILICA_MODEL"] = hosted[1][0]

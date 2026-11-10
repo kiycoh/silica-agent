@@ -76,6 +76,42 @@ def ready(base_url: str) -> bool:
         return False
 
 
+# The ids the wizard offers and the Settings panel suggests beside what an
+# endpoint advertises: here with the probe, so the panel does not read them
+# through the wizard's prompts.
+EMBED_MODELS = [
+    "embeddinggemma-2",  # the config default (ADR-0078); Ollama's name too
+    "text-embedding-qwen3-embedding-0.6b",  # LM Studio's id for the previous default
+    "text-embedding-qwen3-embedding-4b",
+    "nomic-embed-text",
+    "text-embedding-3-small",
+]
+
+# Served /rerank endpoints only (llama.cpp --reranking, Infinity, Jina); the
+# [rerank] extra's own server picks its weights from SILICA_LOCAL_RERANK_MODEL.
+RERANK_MODELS = ["bge-reranker-v2-m3-Q8_0", "bge-reranker-v2-m3"]
+
+
+def endpoint_model_ids(base_url: str, api_key: str = "") -> list[str]:
+    """Model ids advertised by an OpenAI-compatible `/models` endpoint, best-effort
+    ([] on any error). Powers the wizard's LM Studio autodetect, its local-embeddings
+    suggestion and its hosted pick-list validation, and the Settings panel's
+    pick-lists and Endpoints section; `api_key` becomes a Bearer header for the
+    hosted endpoints that demand one."""
+    import httpx
+
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        data = httpx.get(
+            f"{base_url.rstrip('/')}/models", headers=headers, timeout=3.0
+        ).json()
+        return [m["id"] for m in data.get("data", []) if m.get("id")]
+    except Exception:
+        # A server that is down, slow or not OpenAI-shaped: no suggestions, and
+        # every caller still takes a typed id, so a probe never blocks a pick.
+        return []
+
+
 # The cause is rarely on the last line: llama.cpp prints "cleaning up before
 # exit" after the error that killed it. Show the error lines when there are any.
 _ERROR_LINE = re.compile(r"\b(error|failed|cannot|no such|denied|refused)\b", re.I)
