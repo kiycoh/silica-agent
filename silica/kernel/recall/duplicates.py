@@ -134,8 +134,10 @@ def _stale_line(path: str) -> str:
 
 
 def _loser_text(path: str, body: str) -> str:
-    """`body` as the judge reads it. An empty note gets no line: a prefix with
-    nothing under it is noise, not a warning."""
+    """`body` as the judge reads it, from /dedup and /curate alike: the same
+    pair reached the judge with the line from one command and without it from
+    the other. An empty note gets no line: a prefix with nothing under it is
+    noise, not a warning."""
     return _stale_line(path) + body if body else body
 
 
@@ -165,7 +167,8 @@ def pairs_to_items(pairs: list[dict]) -> list[WorkItem]:
             continue  # a pair with an unreadable side cannot be judged: left for the next run
 
         larger, smaller, smaller_body = _split(source, target, body_src, body_tgt)
-        job = DedupJob.between_notes(loser=smaller, winner=larger, loser_body=smaller_body, score=score)
+        job = DedupJob.between_notes(loser=smaller, winner=larger, loser_body=_loser_text(smaller, smaller_body),
+                                     score=score)
         reason = f"dedup score={score:.3f}"
         if "full_score" in pair and "title_score" in pair:
             job.full_score = pair["full_score"]

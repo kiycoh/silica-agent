@@ -90,3 +90,14 @@ def test_a_stale_agent_note_does_not_outrank_a_persons(monkeypatch, score):
     assert item.target_path == "docs/Human.md"
     assert [m.loser_path for m in members] == ["docs/Agent.md"]
     assert members[0].excerpt.startswith("[stale] structural:")
+
+
+def test_dedup_hands_the_judge_the_same_line(monkeypatch):
+    """/dedup reads the pair's bodies off disk as /curate does, past the read
+    gate's banner, so its judge gets the line too."""
+    bodies = {"a/n.md": "the body", "b/m.md": "the merge target, " * 20}
+    monkeypatch.setattr(duplicates, "_read", bodies.get)
+    monkeypatch.setattr(codedocs, "peek", lambda v: {"a/n.md": "structural"})
+    [item] = duplicates.pairs_to_items([{"source": "a/n.md", "target": "b/m.md", "score": 0.8}])
+    assert item.target_path == "b/m.md"
+    assert item.context.excerpt.startswith("[stale] structural:")
