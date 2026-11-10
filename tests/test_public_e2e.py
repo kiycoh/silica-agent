@@ -39,11 +39,20 @@ def app(tmp_vault, tmp_path, monkeypatch):
     from silica.kernel.base.manifest import reset_manifest_cache
     from silica.kernel.publish import add_vault
     from silica.kernel.write.provenance import append_record
+    from silica.sources import saved_page
     from silica.ui.web import server
     from silica.ui.web.session import SESSION
 
-    for k in ("SILICA_HOSTED", "SILICA_VIEWS", "SILICA_PUBLIC_BASE"):
-        monkeypatch.delenv(k, raising=False)
+    # The hosted service, the one place Publish builds the pages a cover prints on (ADR-0157 point
+    # 10), with the Wikis catalog it opens on refused here rather than read from the public host.
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://wikis.test")
+
+    def offline(url, **_):
+        raise ValueError(f"no network in a test: {url}")
+
+    monkeypatch.setattr(saved_page, "_fetch_json", offline)
     monkeypatch.setenv("SILICA_PUBLIC_DIR", str(tmp_path / "public"))
     monkeypatch.setenv("SILICA_PUBLIC_HANDLE", "marta")
     reset_manifest_cache()
@@ -92,7 +101,10 @@ def app(tmp_vault, tmp_path, monkeypatch):
 def _open(page: Page, width: int) -> None:
     page.send("Emulation.setDeviceMetricsOverride", {"width": width, "height": 900, "deviceScaleFactor": 1, "mobile": False})
     page.send("Page.navigate", {"url": page.base + "/#public"})
-    page.wait(f"{GO} && {GO}.textContent.length > 0", 30, "My Wikis to load")
+    page.wait(f"{GO} && {GO}.textContent.length > 0", 30, "My wikis to load")
+    # The view opens on Wikis, the catalog (ADR-0157 point 1), and the wikis themselves are My
+    # wikis. Clicked once the view has drawn, so the script that listens on the tab is running.
+    page.js("document.querySelector('#wikis-tabs [data-wtab=\"mine\"]').click()")
 
 
 @pytest.mark.parametrize("width", [1440, 390])

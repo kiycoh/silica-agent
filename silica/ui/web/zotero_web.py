@@ -5,10 +5,12 @@
 
 Plain functions returning dicts, so the logic is tested without a browser, and
 most of them are routes as they stand: see the table at the end. A ZoteroError
-becomes a 409 at the app, through `refused`.
+becomes a 409 at the app, through `refused`; a vault.yaml write refused becomes
+a 400 at the route, through `_manifest_said`.
 """
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -324,17 +326,37 @@ async def refused(_request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(failures.refusal(exc.args[0] if exc.args else "Zotero failed"), status_code=409)
 
 
+def _manifest_said(fn):
+    """A vault.yaml that does not parse, or would not read back, so set_zotero wrote nothing: its
+    sentence, written for the person, says which line to fix (manifest._write_lines). At the Zotero
+    routes alone and not at the app, so any other route that writes vault.yaml keeps the answer it
+    gives today."""
+
+    @functools.wraps(fn)
+    def route(*args, **kwargs):
+        from silica.kernel.base.manifest import ManifestRefused
+
+        try:
+            return fn(*args, **kwargs)
+        except ManifestRefused as exc:
+            raise HTTPException(status_code=400, detail=exc.args[0])  # vault.yaml left as it was
+
+    return route
+
+
 # Sync defs: every route talks to Zotero over HTTP, so they run in the
 # threadpool and a slow Zotero never stalls the event loop that streams turns.
 router = APIRouter(prefix="/zotero")
 
 
 @router.post("/link")
+@_manifest_said
 def _link_route(payload: dict):
     return link(bool(payload.get("on")))
 
 
 @router.post("/setting")
+@_manifest_said
 def _setting_route(payload: dict):
     try:
         return setting(str(payload.get("key", "")), payload.get("value"))
@@ -343,6 +365,7 @@ def _setting_route(payload: dict):
 
 
 @router.post("/file")
+@_manifest_said
 def _file_route(payload: dict):
     return file(list(payload.get("moves") or []))
 
@@ -355,4 +378,4 @@ for _method, _path, _fn in (
     ("POST", "/groups", groups_write), ("GET", "/peek", peek), ("GET", "/covers", covers_status),
     ("POST", "/covers", covers_start), ("GET", "/labels", labels), ("POST", "/unlink", unlink),
 ):
-    router.add_api_route(_path, _fn, methods=[_method], response_model=None)
+    router.add_api_route(_path, _manifest_said(_fn), methods=[_method], response_model=None)

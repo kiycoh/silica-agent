@@ -142,7 +142,8 @@ SHARED_ROUTES = {
     "/stop", "/stt", "/supported_types", "/trash", "/trash/erase", "/trash/restore", "/tree/delete",
     "/tree/move", "/tree/undo", "/turn/redo", "/vault/export", "/vault/export/added",
     "/vault/export/summary", "/vault/fetch", "/vault/import", "/vault/invitations",
-    "/vault/invitations/decline", "/vault/invitations/preview", "/vault/invitations/save",
+    "/vault/invitations/decline", "/vault/invitations/file", "/vault/invitations/preview",
+    "/vault/invitations/save",
     "/vault/save", "/vault/save/preview",
     "/vault_brief",
     "/vault_info", "/vault_version", "/workspaces", "/workspaces/line", "/workspaces/membership",
@@ -251,3 +252,100 @@ def test_the_page_is_told_what_this_process_withholds(free, monkeypatch):
     monkeypatch.delenv("SILICA_HOSTED")
     monkeypatch.delenv("SILICA_DEMO")
     assert table()["views"]["withheld_commands"] == []
+
+
+# --- ADR-0157 point 1: the view is Wikis, with the catalog and My wikis ---------
+
+def _read(name: str) -> str:
+    return (STATIC_SRC / name).read_text(encoding="utf-8")
+
+
+def _words(html: str, js: str) -> str:
+    """What a person can read: the markup and the script, comments out, since a comment may name
+    the view's old names to say why they went."""
+    return re.sub(r"<!--.*?-->", "", html, flags=re.S) + re.sub(r"^\s*//.*$", "", js, flags=re.M)
+
+
+def test_the_view_is_named_wikis_wherever_a_person_reads_it():
+    html = _read("index.html")
+    rail = re.findall(r'<button[^>]*data-tab="public"[^>]*>.*?</button>', html, re.S)
+    assert len(rail) == 2 and all('data-tip="Wikis: ' in b for b in rail)
+    assert 'aria-label="Wikis"' in rail[0] and rail[1].endswith("<span>Wikis</span></button>")
+    assert '<span class="hp-what">Wikis</span>' in html
+    words = _words(html, _read("app-public.js"))
+    # "Pages" was the catalog's name and "My Wikis" the view's (ADR-0157 point 1 amends both)
+    assert not re.search(r"\bPages\b", words)
+    assert "My Wikis" not in words
+
+
+def test_the_bar_holds_two_tabs_in_explores_grammar_and_remembers_the_last():
+    html = _read("index.html")
+    bar = html[html.index('<div id="public-bar">'):html.index('<div id="public-body">')]
+    tabs = bar[bar.index('<nav id="wikis-tabs"'):bar.index("</nav>")]
+    assert re.findall(r'<button type="button" class="stab[^"]*" data-wtab="(\w+)"[^>]*>([^<]+)</button>', tabs) \
+        == [("wikis", "Wikis"), ("mine", "My wikis")]
+    assert "mbar-title" not in bar
+    js = _read("app-public.js")
+    assert '"silica-wikis-tab"' in js and 'glide($("#wikis-tabs"))' in js
+    css = _read("app-public.css")
+    assert '#wikis-tabs.glide > .stab.active' in css
+
+
+def test_the_catalog_tab_reads_through_the_apps_server_and_sets_its_words_as_text():
+    js = _read("app-public.js")
+    cat = js[js.index("// --- Wikis, the catalog"):js.index("// --- the cover (ADR-0146")]
+    assert '"/wikis/catalog"' in cat and "/wikis/graph?handle=" in cat
+    assert '"Wikis could not be read."' in cat and '"No wiki is in Wikis yet."' in cat
+    assert '"Search Wikis"' in cat and '"Open ↗"' in cat and '"Save to Silica"' in cat
+    assert "IntersectionObserver" in cat
+    assert "openSaveSheet({ url: wikiAddr(w)" in cat
+    # every field of a card is an account's words (ADR-0157 point 2): never markup
+    assert "innerHTML" not in cat
+
+
+def test_shared_with_you_needs_no_handle_and_a_zip_opens_only_on_my_wikis():
+    js = _read("app-public.js")
+    ask = js[js.index("function pubAsk("):js.index("function pubAskPaint(")]
+    assert "invitesBox()" in ask
+    render = js[js.index("function renderPublic("):js.index("// --- Save as a file")]
+    gone = render[render.index("if (!st || !st.available)"):render.index("link.hidden = !st.url")]
+    assert "invitesBox()" in gone
+    drop = js[js.index('$("#view-public").addEventListener("drop"'):]
+    assert 'wikisTab !== "mine"' in drop[:drop.index("openWikiFile(zip)")]
+
+
+# --- ADR-0157 point 9: the hosted Settings list the linked computers -------------
+
+def _linked_block() -> str:
+    js = _read("app-settings.js")
+    start = js.index("async function renderLinkedComputers")
+    return js[start:js.index("// The attached payload", start)]
+
+
+def test_settings_list_the_linked_computers_behind_the_gateway_gate():
+    js = _read("app-settings.js")
+    about = js[js.index("function renderAbout"):js.index("function renderSignOutEverywhere")]
+    hosted = about[about.index("if (data.hosted)"):about.index("stInfoRow(host, \"updates\"")]
+    # only the hosted branch draws it, and only where /link/* exists (the sign-out gate)
+    assert "dataset.signout !== undefined" in hosted and "renderLinkedComputers(host)" in hosted
+    assert "renderLinkedComputers" not in about.replace(hosted, "")
+
+
+def test_the_linked_computers_block_reads_and_removes_through_the_gateway():
+    block = _linked_block()
+    assert 'fetch("/link/list")' in block and 'fetch("/link/revoke"' in block
+    assert '"Content-Type": "application/json"' in block and "JSON.stringify({ id: l.id })" in block
+    assert "`Linked ${stLinkDate(l.created)} · until ${stLinkDate(l.expires)}`" in block
+    assert '"Remove"' in block and "Linked computers" in block
+    assert "No computer is linked. A Silica on a computer links from Wikis → My wikis → Link an account." in block
+    assert "Linked computers could not be read." in block
+    # text from the gateway is set as text, never parsed as markup
+    assert "innerHTML" not in block
+
+
+def test_the_settings_script_declares_each_top_level_const_once():
+    """Classic scripts share one global scope, so a second `const ST_MONTHS` is a SyntaxError that
+    leaves the whole file unloaded: no Settings at all. Found in the browser, not by the string
+    tests above, which still passed."""
+    names = re.findall(r"^const (\w+)", _read("app-settings.js"), re.M)
+    assert len(names) == len(set(names)), sorted({n for n in names if names.count(n) > 1})

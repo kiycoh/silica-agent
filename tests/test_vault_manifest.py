@@ -200,3 +200,126 @@ def test_nucleate_gating_sources_prose_only(tmp_path, monkeypatch, capsys):
     assert msg == ""  # handled: skipped, nothing for the agent
     assert not (vault / "Inbox" / "m.md").exists()  # code source disabled
     assert "Skipped" in capsys.readouterr().out
+
+
+# --- the line-level writer of a block's key (set_block_key / unset_block_key) -----------------
+# vault.yaml is hand-written and PyYAML writes lists both ways, so a key's value can run over many
+# lines in either shape: what is left of an old value makes the file unreadable, and the next
+# write of `vaults:` writes back the empty read (final review of ADR-0157, C1).
+
+def _manifest(vault, text: str):
+    from silica.kernel.base.manifest import MANIFEST_REL
+
+    p = vault / MANIFEST_REL
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def _read(vault) -> dict:
+    import yaml
+
+    from silica.kernel.base.manifest import MANIFEST_REL
+
+    return yaml.safe_load((vault / MANIFEST_REL).read_text(encoding="utf-8"))
+
+
+_INDENTED = ("public:\n  handle: marta\n  vaults:\n    - folder: Memory\n      title: Old\n"
+             "    - folder: Courses\n  sources: {}\n  folders:\n    - Memory\n    - Courses\n"
+             "  page: true\nzotero:\n  library: dc8XI1gaCC7j\n")
+# PyYAML's own default_flow_style=False shape: a list's dashes at its key's column
+_INDENTLESS = ("public:\n  handle: marta\n  vaults:\n  - folder: Memory\n    title: Old\n"
+               "  - folder: Courses\n  sources: {}\n  folders:\n  - Memory\n  - Courses\n"
+               "  page: true\nzotero:\n  library: dc8XI1gaCC7j\n")
+
+
+@pytest.mark.parametrize("text", [_INDENTED, _INDENTLESS], ids=["indented", "indentless"])
+def test_a_list_value_is_replaced_whole_and_its_neighbours_stay(tmp_path, text):
+    from silica.kernel.base.manifest import set_block_key, unset_block_key
+
+    _manifest(tmp_path, text)
+
+    set_block_key(tmp_path, "public", "vaults", [{"folder": "Notes", "title": "New"}])
+    unset_block_key(tmp_path, "public", "folders")
+    unset_block_key(tmp_path, "public", "page")
+
+    got = _read(tmp_path)
+    assert got["public"] == {"handle": "marta", "vaults": [{"folder": "Notes", "title": "New"}], "sources": {}}
+    assert got["zotero"] == {"library": "dc8XI1gaCC7j"}
+
+
+def test_only_a_key_at_the_blocks_own_depth_is_the_key(tmp_path):
+    """A file named `handle` under `sources:` is not the Page's handle."""
+    from silica.kernel.base.manifest import set_block_key, unset_block_key
+
+    _manifest(tmp_path, "public:\n  sources:\n    handle:\n      answer: mine\n  handle: marta\n")
+
+    set_block_key(tmp_path, "public", "handle", "luca")
+    assert _read(tmp_path)["public"] == {"sources": {"handle": {"answer": "mine"}}, "handle": "luca"}
+    unset_block_key(tmp_path, "public", "handle")
+    assert _read(tmp_path)["public"] == {"sources": {"handle": {"answer": "mine"}}}
+
+
+def test_a_block_indented_by_four_gets_its_new_key_at_four(tmp_path):
+    from silica.kernel.base.manifest import set_block_key
+
+    _manifest(tmp_path, "public:\n    handle: marta\n")
+
+    set_block_key(tmp_path, "public", "vaults", [{"folder": "Memory"}])
+
+    assert _read(tmp_path)["public"] == {"handle": "marta", "vaults": [{"folder": "Memory"}]}
+
+
+@pytest.mark.parametrize("title", ["Culture \U0001f3a8", "Citt\u00e0 \u4e2d\u6587", "a\x85b\u2028c\x9fd\ufffee"])
+def test_a_title_past_ascii_comes_back_as_it_was_written(tmp_path, monkeypatch, title):
+    """An emoji went out as a surrogate pair, which PyYAML reads as two lone halves: the view
+    could not be read and every build failed on it."""
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
+    (tmp_path / "Culture").mkdir()
+    from silica.kernel import publish
+
+    publish.add_vault("Culture")
+    publish.update_vault("culture", {"title": title})
+
+    assert publish.vaults(tmp_path)[0]["title"] == title.strip()[:80]
+    publish.vaults(tmp_path)[0]["title"].encode("utf-8")  # no lone surrogate left to refuse
+
+
+def test_an_emoji_credit_comes_back_as_it_was_written(tmp_path, monkeypatch):
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
+    from silica.kernel import rights
+
+    rights.save_answer("Book.pdf", "open", license="CC BY", credit="Ada \U0001f9ea Lab", vault=tmp_path)
+
+    assert rights.answers(tmp_path)["Book.pdf"]["credit"] == "Ada \U0001f9ea Lab"
+
+
+def test_a_pair_written_before_the_fix_is_read_as_its_character(tmp_path):
+    """Files written with the old escape exist: they read as the character, not two halves."""
+    from silica.kernel import publish, rights
+
+    _manifest(tmp_path, 'public:\n  vaults: [{"folder": "Culture", "title": "Culture \\ud83c\\udfa8"}]\n'
+                        '  sources: {"Book.pdf": {"answer": "open", "credit": "\\ud83e\\uddea", "license": "CC BY"}}\n'
+                        '  handle: "\\udfa8"\n')
+
+    assert publish.vaults(tmp_path)[0]["title"] == "Culture \U0001f3a8"
+    assert rights.answers(tmp_path)["Book.pdf"]["credit"] == "\U0001f9ea"
+    assert publish.block(tmp_path)["handle"] == "\ufffd"  # a lone half has no character: replaced
+
+
+@pytest.mark.parametrize("text", [
+    "public:\n  vaults:\n    - folder: [Memory\n",  # does not parse
+    "public: {}\n",  # parses, but a key under it would not
+], ids=["unreadable", "inline-block"])
+def test_a_write_that_cannot_keep_the_file_readable_is_refused_and_writes_nothing(tmp_path, text):
+    from silica.kernel.base.manifest import MANIFEST_REL, set_block_key, unset_block_key
+
+    p = _manifest(tmp_path, text)
+
+    with pytest.raises(ValueError):
+        set_block_key(tmp_path, "public", "handle", "marta")
+    assert p.read_bytes() == text.encode("utf-8")
+    if text.startswith("public:\n"):
+        with pytest.raises(ValueError):
+            unset_block_key(tmp_path, "public", "vaults")
+        assert (tmp_path / MANIFEST_REL).read_bytes() == text.encode("utf-8")

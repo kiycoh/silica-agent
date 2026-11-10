@@ -21,14 +21,17 @@ ROSS = "Ross (Z-Library).pdf"
 
 @pytest.fixture
 def stats(tmp_vault, tmp_path, monkeypatch):
-    """A wiki of a book in two segments, lecture slides, hand notes and pasted images."""
+    """A wiki of a book in two segments, lecture slides, hand notes and pasted images, on the
+    hosted service, the one install that builds pages (ADR-0157 point 10)."""
     from silica.kernel.publish import add_vault, set_visibility
     from silica.kernel.base.manifest import reset_manifest_cache
     from silica.kernel.write.provenance import append_record
 
     monkeypatch.setenv("SILICA_PUBLIC_DIR", str(tmp_path / "public"))
     monkeypatch.setenv("SILICA_PUBLIC_HANDLE", "marta")
-    monkeypatch.delenv("SILICA_PUBLIC_BASE", raising=False)
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
     monkeypatch.delenv("SILICA_PUBLIC_REPORT", raising=False)
     reset_manifest_cache()
     root = Path(tmp_path) / "vault"
@@ -301,9 +304,9 @@ def test_an_answered_site_is_copied_into_the_wiki_with_its_credit(stats, tmp_vau
     page = (_live(stats) / "web.html").read_text(encoding="utf-8")
     md = (_live(stats) / "web.md").read_text(encoding="utf-8")
     assert len(list((_live(stats) / "assets").iterdir())) == 1
-    assert 'src="assets/' in page and "https://upload.wikimedia.org/x/Normal.png" in page
+    assert 'src="/@marta/stats/assets/' in page and "https://upload.wikimedia.org/x/Normal.png" in page
     assert "from upload.wikimedia.org" in page and "from upload.wikimedia.org" in md
-    assert "![Normal](assets/" in md
+    assert "![Normal](https://pages.test/@marta/stats/assets/" in md
 
 
 def test_a_copy_outlives_the_site_it_came_from(stats, tmp_vault):
@@ -495,6 +498,33 @@ def test_personal_data_keeps_a_listed_wiki_out_of_the_catalog_and_the_screen_say
     assert sheet["wikis"] == "It can ask to enter Wikis once the note in Other checks is fixed."
     _build()
     assert json.loads((_live(stats) / "vault.json").read_text(encoding="utf-8"))["listed"] is False
+
+
+@pytest.mark.parametrize("answer", [{"answer": "mine"},
+                                    {"answer": "open", "license": "CC BY", "credit": "Ross, Probability"}])
+def test_a_note_copied_from_a_source_answered_mine_or_open_can_ask_to_enter_wikis(stats, tmp_vault, answer):
+    from silica.kernel import rights
+    from silica.kernel.publish import update_vault
+
+    update_vault("stats", {"license": "CC BY 4.0", "listed": True})
+    tmp_vault.note("Stats/Bayes.md", f"{BOOK}\n")
+    rights.save_answer(ROSS, **answer)
+    sheet = _sheet()
+    assert "copied word for word" in _row(sheet, "Bayes")["status"]
+    assert sheet["wikis"] == "It can ask to enter Wikis."
+    _build()
+    assert "bayes.html" in _names(stats)
+    assert json.loads((_live(stats) / "vault.json").read_text(encoding="utf-8"))["listed"] is True
+
+
+def test_a_note_copied_from_any_other_source_never_reaches_what_the_catalog_could_list(stats, tmp_vault):
+    from silica.kernel import rights
+
+    tmp_vault.note("Stats/Bayes.md", f"---\nrewritten: true\n---\n{BOOK}\n")
+    for answer in ({"answer": "else"}, {"answer": "open", "license": "CC BY-ND", "credit": "Ross"},
+                   {"answer": "open", "license": "CC BY"}):
+        rights.save_answer(ROSS, **answer)
+        assert "Stats/Bayes.md" not in rights.decide(rights.read_wiki("stats"), rights.answers())["notes"]
 
 
 def test_a_license_not_stated_keeps_a_wiki_out_of_the_catalog(stats):

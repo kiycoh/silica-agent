@@ -180,9 +180,12 @@ def test_readers_are_handles_and_never_the_author(vault, monkeypatch):
         update_vault("memory", {"readers": ["not a handle"]})
 
 
-def test_off_moves_a_vault_aside_and_public_brings_it_back(vault, tmp_path):
+def test_off_moves_a_vault_aside_and_public_brings_it_back(vault, tmp_path, monkeypatch):
     from silica.kernel.publish import add_vault, handle, set_visibility, site_root
 
+    # the hosted service's folders; a computer's are left where they are (tests/test_link.py)
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_PUBLIC_HANDLE", "marta")
     add_vault("Memory")
     root = site_root(handle())
     (root / "live" / "memory").mkdir(parents=True)
@@ -198,8 +201,9 @@ def test_private_is_a_paid_hosted_accounts_and_a_downgrade_turns_it_off(vault, m
         add_vault, enforce_tier, handle, private_allowed, set_visibility, site_root, vaults)
 
     add_vault("Memory")
+    # a computer alone publishes nothing (ADR-0157 point 4), Private no more than Public
     assert private_allowed() == "hosted"
-    with pytest.raises(ValueError, match="hosted"):
+    with pytest.raises(ValueError, match="Link a Silica account to publish"):
         set_visibility("memory", "private")
     monkeypatch.setenv("SILICA_HOSTED", "1")
     monkeypatch.setenv("SILICA_PUBLIC_HANDLE", "marta")

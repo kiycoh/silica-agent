@@ -6,8 +6,9 @@ note, or the areas a reader picks of a published vault, copied into the
 reader's vault under `Saved/@handle/<Vault>/`, never read from another vault.
 
 A vault publishes a `.md` beside each note's `.html` and all of them in
-`notes.json`, whose links already point at the author's pages and whose
-private links are already plain words, so the copy can only rewrite the
+`notes.json`, whose links already point at the author's pages (in a wiki
+file, at each other by slug, ADR-0157 point 8) and whose private links are
+already plain words, so the copy can only rewrite the
 links the reader can serve from their own vault: a note of the same author
 they saved before, or one saved in the same write. A Private vault reaches
 the reader as the same files, put outside their vault by the host's relay.
@@ -19,23 +20,52 @@ from silica.config import PUBLIC_PAGES_HOST, live_env, silica_home
 import datetime
 import json
 import re
+import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from silica.kernel.base.syntax import NAME_UNSAFE_RE
+# one number for the file opened here, the one public_site builds and the package a linked
+# computer sends (ADR-0157 Open 4)
+from silica.kernel.publish import WIKI_FILE_MAX
 
 SAVED_DIR = "Saved"
 # a note, /@handle/<vault>/<note>, and a vault, /@handle/<vault>/ (ADR-0151 point 4)
 _PAGE_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)/([a-z0-9-]+)$")
 _VAULT_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)/$")
-_MD_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+# Never a link whose words open with an image: in `[![alt](a.png)](page)` the image is the words,
+# and its `](` would be read as the link's, turning the picture into `![alt](page)`.
+_MD_LINK = re.compile(r"(?<!!)\[(?!!\[)([^\]\n]+)\]\((https?://[^)\s]+)\)")
+# A wiki file has no address, so its notes link each other by slug alone, `<slug>.html` (a Private
+# build with no host writes `<slug>.md`): nothing before the slug, and `in names` checks the slug itself.
+# An anchor after it is dropped: it is an html id, which no heading of the saved note is named.
+_REL_LINK = re.compile(r"(?<!!)\[(?!!\[)([^\]\n]+)\]\(([^)\s/:#]+)\.(?:html|md)(?:#[^)\s]*)?\)")
+# Any other link with no scheme. Not `#...`, which points within the note and still works there.
+_ANY_REL_LINK = re.compile(r"(?<!!)\[(?!!\[)([^\]\n]+)\]\((?![A-Za-z][A-Za-z0-9+.-]*:|#)[^)\s]+\)")
+# A fenced block, to its closing fence or the end, and a code span within one paragraph: the
+# author's code, where `callbacks[i](arg)` reads as a relative link to the two patterns above.
+# shortcut: an indented code block (four spaces) is not seen, so a link-shaped line in one is
+# rewritten. None of 2,547 notes in silica_wiki, alex_second_brain and joe-felz-library has one
+# outside a fence (2026-11-08); recognise the block at the first saved note that shows one changed.
+_CODE = re.compile(r"^ {0,3}((`|~)\2{2,})[^\n]*\n.*?(?:^ {0,3}\1\2*[ \t]*$|\Z)"
+                   r"|(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n).)+?(?<!`)\3(?!`)", re.M | re.S)
 _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")
 
 
-def allowed_hosts() -> set[str]:
+def _public_hosts() -> list[str]:
     # the hosted pages' host (ADR-0143 point 6): the apex is the landing, on GitHub Pages
     raw = live_env("SILICA_PUBLIC_HOSTS") or PUBLIC_PAGES_HOST
-    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+    return [h.strip().lower() for h in raw.split(",") if h.strip()]
+
+
+def allowed_hosts() -> set[str]:
+    return set(_public_hosts())
+
+
+def catalog_host() -> str:
+    """The host the Wikis catalog is read from (ADR-0157 point 2): the first one listed, since
+    Save takes any of them but the app shows one catalog."""
+    return next(iter(_public_hosts()), "")
 
 
 def _on_host(url: str):
@@ -76,6 +106,21 @@ def _wikilink(m: re.Match, path: str, words: str) -> str:
     row = m.string[m.string.rfind("\n", 0, m.start()) + 1:].lstrip()
     bar = "\\|" if row.startswith("|") else "|"
     return f"[[{path}{bar}{words}]]"
+
+
+def _outside_code(pattern: re.Pattern, fn, text: str) -> str:
+    """pattern.sub(fn, text), leaving a match that touches code as it is. A code span inside the
+    link's words is not code around it: `[`f`](f.html)` is a link, while in `a[i](b)` the brackets
+    are the code's own."""
+    code = [c.span() for c in _CODE.finditer(text)]
+
+    def sub(m: re.Match) -> str:
+        s, e = m.span(1)
+        if any(a < m.end() and m.start() < b and not (s <= a and b <= e) for a, b in code):
+            return m.group(0)
+        return fn(m)
+
+    return pattern.sub(sub, text)
 
 
 def _folder_name(title: str) -> str:
@@ -220,10 +265,10 @@ def room(adding_notes: int, adding_bytes: int, vault: Path | None = None) -> dic
             "short": "; ".join(short)}
 
 
-def _fetch_json(url: str):
+def _fetch_json(url: str, *, cap: int = 64 * 1024 * 1024):
     from silica.sources.web_fetch import fetch
 
-    resp, final = fetch(url, types=("application/json", "text/"), cap=64 * 1024 * 1024)
+    resp, final = fetch(url, types=("application/json", "text/"), cap=cap)
     if (urlsplit(final).hostname or "").lower() not in allowed_hosts():
         raise ValueError("that wiki moved to a host Silica does not save from")
     return resp.json()
@@ -250,9 +295,10 @@ def _vault_files(url: str) -> tuple[dict, dict]:
 
 
 def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None, files=None,
-                  private: bool = False) -> dict:
+                  private: bool = False, assets: Path | None = None, file: bool = False) -> dict:
     """What the save sheet shows for a vault, and every note it would write.
-    `files` is (manifest, notes) already read, as an invitation's are. A note
+    `files` is (manifest, notes) already read, as an invitation's are; `file`
+    says they came from a wiki file (ADR-0157 point 7). A note
     already saved from this vault stays as it is and is counted, not written:
     a reader saves a vault in pieces, and the notes of one vault share one
     folder (ADR-0151, amendment of 2026-11-06, point 10)."""
@@ -267,7 +313,8 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
         handle, vslug = manifest.get("handle", ""), manifest.get("slug", "")
     if not isinstance(manifest, dict) or not isinstance(notes, dict):
         raise ValueError("that wiki could not be read")
-    title = t if isinstance(t := manifest.get("title"), str) else vslug
+    # an empty title is none: a manifest without one saves under its slug, not "Saved vault"
+    title = t if isinstance(t := manifest.get("title"), str) and t.strip() else vslug
     chosen = [s for s in _chosen(manifest, areas, named) if isinstance(notes.get(s), str)]
     today = datetime.date.today().isoformat()
     folder = in_write_dir(f"{SAVED_DIR}/@{handle}/{_folder_name(title)}")
@@ -280,6 +327,7 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
     titles: dict[str, str] = {}
     taken: set[str] = set()
     already: set[str] = set()
+    listed = set(_chosen(manifest, None))
     for slug in chosen:
         props, _raw, _body = fm.split(notes[slug])
         props = props or {}
@@ -307,16 +355,29 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
 
         def relink(m: re.Match) -> str:
             words, target = m.group(1), m.group(2)
-            tail = target.rsplit("/", 1)[-1].removesuffix(".md")
-            if (not base or target.startswith(base)) and tail in names:
-                return _wikilink(m, names[tail], words)
-            own = mine.get(target)
-            if own:
-                return _wikilink(m, own.removesuffix(".md"), words)
+            if m.re is _REL_LINK:
+                if target in names:
+                    return _wikilink(m, names[target], words)
+                if target not in listed:
+                    # no note of this wiki: a relay's stays as written, a file's goes to words below
+                    return m.group(0)
+            else:
+                tail = target.rsplit("/", 1)[-1].removesuffix(".md")
+                # Only under the wiki's own address. A file's manifest has none, and with "" this
+                # took any https link whose path ended in one of its slugs for that note.
+                if base and target.startswith(base) and tail in names:
+                    return _wikilink(m, names[tail], words)
+                own = mine.get(target)
+                if own:
+                    return _wikilink(m, own.removesuffix(".md"), words)
             # a Private vault's address is never served: a link to a note not saved is its words
             return words if private else m.group(0)
 
-        new_body = _MD_LINK.sub(relink, body)
+        new_body = _outside_code(_REL_LINK, relink, _MD_LINK.sub(relink, body))
+        if file:
+            # ADR-0157 point 8: a file's other relative links keep their words, since nothing at
+            # their address is in the reader's vault. A relay's or a web save's stay as written.
+            new_body = _outside_code(_ANY_REL_LINK, lambda m: m.group(1), new_body)
         tags = props.get("tags") if isinstance(props.get("tags"), list) else []
         # a note the author saved from someone else credits that someone (ADR-0143 point 10)
         author, src = _credit(props, handle, base + slug if base else "")
@@ -325,7 +386,8 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
             note["source"] = src
         note.update({"saved": today, "form": "clip", **({"shared": "private"} if private else {})})
         out[names[slug] + ".md"] = fm.dump(note, new_body)
-    adding = sum(len(t.encode("utf-8")) for t in out.values())
+    # the images save_vault copies count against the room too, or a wiki of photos passes it
+    adding = sum(len(t.encode("utf-8")) for t in out.values()) + _image_bytes(assets)
     return {"url": url, "title": title, "author": f"@{handle}", "folder": folder,
             "notes": len(out), "already": len(already), "of": len(_chosen(manifest, None)),
             "areas": manifest.get("areas", []), "room": room(len(out), adding, vault),
@@ -333,7 +395,7 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
 
 
 def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, files=None,
-               private: bool = False, assets: Path | None = None) -> dict:
+               private: bool = False, assets: Path | None = None, file: bool = False) -> dict:
     """Write the chosen notes as one run of the undo journal, so `/revert`
     takes the whole save back (ADR-0151 point 8). Refused past the room
     left, naming the shortfall, before anything is written."""
@@ -343,7 +405,7 @@ def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, f
     from silica.driver import DRIVER
     from silica.kernel.write import gate
 
-    p = prepare_vault(url, areas, vault, named=named, files=files, private=private)
+    p = prepare_vault(url, areas, vault, named=named, files=files, private=private, assets=assets, file=file)
     if not p["files"]:
         raise ValueError("those notes are saved already" if p["already"] else "no note of that wiki was chosen")
     if p["room"]["short"]:
@@ -356,11 +418,20 @@ def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, f
         # a Private vault's images travel with it, beside the notes that cite them as assets/<name>
         dest = Path(vault or CONFIG.vault_path or ".") / p["folder"] / "assets"
         dest.mkdir(parents=True, exist_ok=True)
-        for f in assets.iterdir():
-            if f.is_file() and not f.is_symlink():
-                shutil.copyfile(f, dest / f.name)
+        for f in _images(assets):
+            shutil.copyfile(f, dest / f.name)
     return {"folder": p["folder"], "notes": len(p["files"]), "run": run_id,
             "first": next(iter(p["files"]))}
+
+
+def _images(assets: Path | None) -> list[Path]:
+    if assets is None or not assets.is_dir():
+        return []
+    return [f for f in assets.iterdir() if f.is_file() and not f.is_symlink()]
+
+
+def _image_bytes(assets: Path | None) -> int:
+    return sum(f.stat().st_size for f in _images(assets))
 
 
 # --- Private vaults shared with this account (ADR-0151 point 9) ----------------
@@ -368,7 +439,9 @@ def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, f
 # owned by root and readable by this account alone, outside the vault and its quota. A saved or
 # declined one is marked in the account's own `done` folder with the hash the relay wrote, so the
 # relay stops offering it until the author publishes it again.
-_NAME = re.compile(r"^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$")
+# Always fullmatch: `$` also matches before a final newline, so "eve\n" passed .match and was
+# listed, and "marta\n" got past the relay's folder while it showed as @marta.
+_NAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?")
 
 
 def invitations_dir() -> Path:
@@ -394,43 +467,118 @@ def _is_done(author: str, slug: str, stamp: str) -> bool:
         return False
 
 
-def invitations() -> list[dict]:
-    """The Private vaults offered to this account and not yet saved or declined."""
-    root = invitations_dir()
-    out: list[dict] = []
+def file_invitations_dir() -> Path:
+    """Where Open a file unpacks a wiki file (ADR-0157 point 7). Not the relay's folder: on the
+    hosted service that one is root's, and the account cannot write in it."""
+    raw = live_env("SILICA_FILE_INVITATIONS_DIR")
+    return Path(raw) if raw else silica_home() / "file-invitations"
+
+
+def _folders(root: Path):
     if not root.is_dir():
-        return out
+        return
     for a in sorted(root.iterdir()):
-        if not (a.is_dir() and _NAME.match(a.name)):
-            continue
-        for d in sorted(a.iterdir()):
-            if not (d.is_dir() and _NAME.match(d.name)) or _is_done(a.name, d.name, _stamp(d)):
-                continue
-            try:
-                m = json.loads((d / "vault.json").read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            count = m.get("count") if isinstance(m.get("count"), dict) else {}
-            out.append({"author": a.name, "vault": d.name,
-                        "title": str(m.get("title") or d.name)[:80], "line": str(m.get("line") or "")[:160],
-                        "notes": int(count.get("notes") or 0), "areas": m.get("areas") or [],
-                        "unlinked": len(m.get("unlinked") or []),
-                        "published": str(m.get("published") or "")[:10], "license": str(m.get("license") or "")})
+        if a.is_dir() and _NAME.fullmatch(a.name):
+            yield from (d for d in sorted(a.iterdir()) if d.is_dir() and _NAME.fullmatch(d.name))
+
+
+def invitations() -> list[dict]:
+    """The Private vaults offered to this account and not yet saved or declined, then the wiki
+    files opened here. A relay's folder owns its author and wiki: a file of the same two is never
+    offered beside it, saved or not, so `_invitation` and this list always mean the same folder."""
+    relay = invitations_dir()
+    out: list[dict] = []
+    for d in _folders(relay):
+        if not _is_done(d.parent.name, d.name, _stamp(d)):
+            out += _listed(d, file=False)
+    for d in _folders(file_invitations_dir()):
+        if not (relay / d.parent.name / d.name / "vault.json").is_file():
+            out += _listed(d, file=True)
     return out
 
 
+def _text(v, n: int) -> str:
+    # A lone surrogate is valid JSON and no UTF-8: the response carrying it could not be encoded,
+    # so one such title made every GET of the list a 500.
+    return v[:n].encode("utf-8", "replace").decode("utf-8") if isinstance(v, str) else ""
+
+
+def _int(v) -> int:
+    return v if type(v) is int else 0  # a bool is an int to isinstance
+
+
+def _num(v) -> float:
+    # compared, never converted: math.isfinite(10**400) raises OverflowError, and NaN or an
+    # infinity fails both comparisons
+    return v if type(v) in (int, float) and -1e308 < v < 1e308 else 0
+
+
+def _manifest(m) -> dict:
+    """The fields of a wiki's vault.json that a reader's Silica reads, each of its own type or
+    left out. A manifest is the author's, a file's anyone's: one field of the wrong type raised in
+    the list every later GET drew, so a single file took Shared with you down for good."""
+    m = m if isinstance(m, dict) else {}
+    count = m.get("count") if isinstance(m.get("count"), dict) else {}
+
+    def rows(key: str) -> list:
+        v = m.get(key)
+        return v if isinstance(v, list) else []
+
+    return {
+        "handle": _text(m.get("handle"), 60), "slug": _text(m.get("slug"), 60),
+        "title": _text(m.get("title"), 80), "line": _text(m.get("line"), 160),
+        "license": _text(m.get("license"), 80), "published": _text(m.get("published"), 10),
+        "url": _text(m.get("url"), 300), "count": {"notes": _int(count.get("notes"))},
+        # an area keeps its place even when its row is not one: a note names its area by index
+        "areas": [[_text(a[0], 120), _int(a[1])] if isinstance(a, list) and len(a) >= 2 else ["", 0]
+                  for a in rows("areas")],
+        "n": [[_num(r[0]), _num(r[1]), r[2], _num(r[3]), _text(r[4], 200), r[5]] for r in rows("n")
+              if isinstance(r, list) and len(r) >= 6 and type(r[2]) is int and isinstance(r[5], str)],
+        "unlinked": [[_text(r[0], 200), r[1]] for r in rows("unlinked")
+                     if isinstance(r, list) and len(r) >= 2 and isinstance(r[1], str)],
+    }
+
+
+def _read_manifest(d: Path) -> dict | None:
+    try:
+        return _manifest(json.loads((d / "vault.json").read_text(encoding="utf-8")))
+    except (OSError, ValueError, RecursionError):
+        # half written, too deep or not JSON: nothing to offer, and the folder is not this list's to fix
+        return None
+
+
+def _listed(d: Path, *, file: bool) -> list[dict]:
+    m = _read_manifest(d)
+    if m is None:
+        return []
+    return [{"author": d.parent.name, "vault": d.name, "title": m["title"] or d.name, "line": m["line"],
+             "notes": m["count"]["notes"], "areas": m["areas"], "unlinked": len(m["unlinked"]),
+             "published": m["published"], "license": m["license"], "file": file}]
+
+
 def _invitation(author: str, slug: str) -> Path:
-    if not (_NAME.match(author or "") and _NAME.match(slug or "")):
+    if not (_NAME.fullmatch(author or "") and _NAME.fullmatch(slug or "")):
         raise ValueError("no such invitation")
-    d = invitations_dir() / author / slug
-    if not (d / "vault.json").is_file():
-        raise ValueError("that invitation is gone: its author may have withdrawn it")
-    return d
+    # the relay's first, as invitations() lists them
+    for root in (invitations_dir(), file_invitations_dir()):
+        d = root / author / slug
+        if (d / "vault.json").is_file():
+            return d
+    raise ValueError("that invitation is gone: its author may have withdrawn it")
+
+
+def _from_file(d: Path) -> bool:
+    return d.parent.parent == file_invitations_dir() and (d / ".from-file").is_file()
 
 
 def _files(d: Path) -> tuple[dict, dict]:
-    m = json.loads((d / "vault.json").read_text(encoding="utf-8"))
-    n = json.loads((d / "notes.json").read_text(encoding="utf-8"))
+    m = _read_manifest(d)
+    try:
+        n = json.loads((d / "notes.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        n = None
+    if m is None or not isinstance(n, dict):
+        raise ValueError("that invitation could not be read")
     # the author is the folder the host wrote, never the manifest's claim
     m["handle"], m["slug"] = d.parent.name, d.name
     return m, n
@@ -439,7 +587,8 @@ def _files(d: Path) -> tuple[dict, dict]:
 def prepare_invitation(author: str, slug: str, areas=None, vault: Path | None = None) -> dict:
     d = _invitation(author, slug)
     m, n = _files(d)
-    p = prepare_vault(str(m.get("url") or ""), areas, vault, files=(m, n), private=True)
+    p = prepare_vault(m["url"], areas, vault, files=(m, n), private=True, assets=d / "assets",
+                      file=_from_file(d))
     p.pop("files")
     return p
 
@@ -447,17 +596,256 @@ def prepare_invitation(author: str, slug: str, areas=None, vault: Path | None = 
 def save_invitation(author: str, slug: str, areas=None, vault: Path | None = None) -> dict:
     d = _invitation(author, slug)
     m, n = _files(d)
-    out = save_vault(str(m.get("url") or ""), areas, vault, files=(m, n), private=True, assets=d / "assets")
-    _mark_done(author, slug, _stamp(d))
+    out = save_vault(m["url"], areas, vault, files=(m, n), private=True, assets=d / "assets",
+                     file=_from_file(d))
+    _done_with(d)
     return out
 
 
 def decline_invitation(author: str, slug: str) -> None:
     d = _invitation(author, slug)
-    _mark_done(author, slug, _stamp(d))
+    if _from_file(d):
+        try:
+            shutil.rmtree(d)
+        except OSError as exc:
+            raise ValueError(f"that file could not be removed ({exc.strerror or exc})") from None
+    else:
+        _done_with(d)
+
+
+def _done_with(d: Path) -> None:
+    """A saved invitation, or a declined relay one. A file's folder goes rather than being marked
+    done: the mark is keyed author.slug with the file's hash, so the same file opened again would
+    be hidden from the person who chose to open it. A relay one is marked, and a file of the same
+    author and wiki goes with it: hidden behind the relay's folder for good, it would only hold
+    one of the ten places. A folder that will not go stays where it was, and the save or the
+    decline it follows stands."""
+    if _from_file(d):
+        shutil.rmtree(d, ignore_errors=True)
+        return
+    _mark_done(d.parent.name, d.name, _stamp(d))
+    copy = file_invitations_dir() / d.parent.name / d.name
+    if _from_file(copy):
+        shutil.rmtree(copy, ignore_errors=True)
 
 
 def _mark_done(author: str, slug: str, stamp: str) -> None:
     done = _done_dir()
     done.mkdir(parents=True, exist_ok=True)
     (done / f"{author}.{slug}").write_text(stamp or "-", encoding="utf-8")
+
+
+# --- a wiki file, opened (ADR-0157 point 7) ---------------------------------------
+# The zip comes from anyone. Its data is read and its pages never: a page is the author's HTML and
+# a script, and Silica builds its own from the notes. What is written is only vault.json,
+# notes.json and the images under assets/, by names this code makes, so no entry's name decides
+# where a byte lands; the refusals below are for a zip no Silica built, which is not opened at all.
+# No svg: it can carry a script, and the reader's vault would serve it back.
+_ASSET = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(png|jpe?g|gif|webp)", re.IGNORECASE)
+_DRIVE = re.compile(r"^[A-Za-z]:")
+# A wiki file holds two entries a note (its page and its .md) and one an image: 100,000 is some
+# 45,000 notes, far past the largest vault seen (1,780 notes, 2026-10-29), and about 42 MB of
+# headers held while zipfile reads them.
+_ENTRIES_MAX = 100_000
+# Read whole before they are parsed, and JSON grows as it parses: 9 MB of `[]` held 192 MiB. A
+# wiki's vault.json runs about 100 bytes a note and its notes.json 3.5 KB (Culture, 26 notes,
+# 2026-11-08), so 4 MB is some 40,000 notes and 32 MB some 9,000 notes of that length.
+_MANIFEST_MAX = 4_000_000
+_NOTES_JSON_MAX = 32_000_000
+# What waits in Shared with you from files at once; past it a file is refused until one goes.
+_FILES_WAITING_MAX = 10
+
+
+def _file_too_big() -> ValueError:
+    return ValueError(f"that file is past the {WIKI_FILE_MAX / 1e6:g} MB a wiki file may hold")
+
+
+def _part_too_big(name: str, cap: int) -> ValueError:
+    return ValueError(f"that wiki file's {name} is past the {cap / 1e6:g} MB a wiki's may hold")
+
+
+_DAMAGED = "that wiki file could not be read: the zip is damaged"
+
+
+def _zip_read(said: str, fn, *args):
+    """fn(*args), a read of the zip and nothing else: the zip is anyone's. zipfile, zlib, bz2,
+    lzma and struct each raise their own on a crafted archive (a bare OSError from bz2, an
+    LZMAError), and the list grows with Python: every one of them is a file that cannot be read,
+    a 400 with `said` and not a 500. A refusal of ours, a ValueError, passes as it was. Never
+    around a write: a full or unwritable disk is the reader's, and would read as a broken file."""
+    try:
+        return fn(*args)
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"{said} ({type(exc).__name__})") from None
+
+
+def _unpacked(z, keep: dict, into: Path) -> None:
+    """Each kept entry into `into`, counting what comes out: a zip's sizes are its own claim. The
+    reads go through _zip_read and the writes do not, so an OSError of the disk reaches the
+    route as the disk's."""
+    held = 0
+    for name, info in keep.items():
+        src = _zip_read(_DAMAGED, z.open, info)
+        with src, open(into / name, "wb") as out:
+            while chunk := _zip_read(_DAMAGED, src.read, 1 << 20):
+                held += len(chunk)
+                if held > WIKI_FILE_MAX:
+                    raise _file_too_big()
+                out.write(chunk)
+
+
+def _flat_notes(text: str) -> dict[str, str]:
+    """notes.json as a Silica writes it, an object of strings, read without building anything
+    else: json.loads builds every list and object a hostile file nests in it before a check can
+    refuse them. ValueError for anything that is not that object, or that holds more notes than
+    a wiki file can carry."""
+    # typeshed does not declare it, though json.decoder has exported it since Python 2.6
+    from json.decoder import scanstring  # type: ignore[attr-defined]
+
+    ws = re.compile(r"[ \t\n\r]*")
+
+    def skip(at: int) -> int:
+        m = ws.match(text, at)
+        assert m  # `*` matches the empty string at any index
+        return m.end()
+
+    out: dict[str, str] = {}
+    i = skip(0)
+    if text[i:i + 1] != "{":
+        raise ValueError("not an object")
+    i = skip(i + 1)
+    while text[i:i + 1] != "}":
+        if out and text[i:i + 1] != ",":
+            raise ValueError("not an object of strings")
+        if out:
+            i = skip(i + 1)
+        if text[i:i + 1] != '"':
+            raise ValueError("not an object of strings")
+        key, i = scanstring(text, i + 1)
+        i = skip(i)
+        if text[i:i + 1] != ":":
+            raise ValueError("not an object of strings")
+        i = skip(i + 1)
+        if text[i:i + 1] != '"':
+            raise ValueError("not an object of strings")
+        out[key], i = scanstring(text, i + 1)
+        i = skip(i)
+        if len(out) > _ENTRIES_MAX // 2:
+            raise ValueError("more notes than a wiki file carries")
+    if skip(i + 1) != len(text):
+        raise ValueError("more after the object")
+    return out
+
+
+def open_file(data: bytes) -> dict:
+    """A wiki file someone sent, as an invitation from a file in
+    file_invitations_dir()/<handle>/<slug>/: {"author", "vault", "title", "notes"}. The handle is
+    the file's word, which nothing here can check, and the screen says so. Opening the same
+    author's wiki again replaces the one opened before; a relay invitation of the two is never
+    replaced. ValueError with a sentence on a refusal, and then nothing is written."""
+    import hashlib
+    import io
+    import stat
+    import tempfile
+    import time
+    import zipfile
+
+    if len(data) > WIKI_FILE_MAX:
+        raise _file_too_big()
+    # zipfile holds every entry's header before any check below can run, about 420 bytes each
+    # (measured 2026-11-08), and 100 MB of empty entries is 1.1 M of them. Each one zipfile reads
+    # starts with this signature, so its count bounds them, before a byte is parsed.
+    if data.count(b"PK\x01\x02") > _ENTRIES_MAX:
+        raise ValueError(f"that file holds more than {_ENTRIES_MAX:,} entries, which no wiki file does")
+    z = _zip_read("that file is not a zip Silica can read", zipfile.ZipFile, io.BytesIO(data))
+    with z:
+        for info in z.infolist():
+            name = info.filename
+            if name.startswith("/") or "\\" in name or ".." in name.split("/") or _DRIVE.match(name):
+                raise ValueError(f"that file holds {name[:120]!r}, a name that leaves its folder")
+            if stat.S_ISLNK(info.external_attr >> 16):
+                raise ValueError(f"that file holds {name[:120]!r}, a link, which Silica never unpacks")
+        entries = [i for i in z.infolist() if not i.is_dir()]
+        heads = [i for i in entries if i.filename.count("/") == 1 and i.filename.endswith("/vault.json")]
+        if len(heads) != 1:
+            raise ValueError("that zip is not a wiki file: it holds no one <wiki>/vault.json")
+        top = heads[0].filename.removesuffix("vault.json")
+        keep = {}
+        for i in entries:
+            rest = i.filename.removeprefix(top) if i.filename.startswith(top) else ""
+            if rest in ("vault.json", "notes.json") or (
+                    rest.startswith("assets/") and _ASSET.fullmatch(rest.removeprefix("assets/"))):
+                keep[rest] = i
+        if "notes.json" not in keep:
+            raise ValueError("that zip is not a wiki file: it holds no notes.json beside its vault.json")
+        if sum(i.file_size for i in keep.values()) > WIKI_FILE_MAX:
+            raise _file_too_big()
+        if keep["vault.json"].file_size > _MANIFEST_MAX:
+            raise _part_too_big("vault.json", _MANIFEST_MAX)
+        if keep["notes.json"].file_size > _NOTES_JSON_MAX:
+            raise _part_too_big("notes.json", _NOTES_JSON_MAX)
+        raw = _zip_read(_DAMAGED, z.read, keep["vault.json"])
+        if len(raw) > _MANIFEST_MAX:
+            raise _part_too_big("vault.json", _MANIFEST_MAX)
+        try:
+            m = json.loads(raw)
+        except (ValueError, RecursionError):
+            raise ValueError("that wiki file could not be read: its vault.json is not a wiki's") from None
+        if not isinstance(m, dict):
+            raise ValueError("that wiki file could not be read: its vault.json is not a wiki's")
+        handle, slug = m.get("handle"), m.get("slug")
+        if not (isinstance(handle, str) and isinstance(slug, str)
+                and _NAME.fullmatch(handle) and _NAME.fullmatch(slug)):
+            raise ValueError("that file does not name its author and its wiki as Silica names them")
+        manifest = _manifest(m)
+        del raw, m  # the parse of a 4 MB manifest can hold some 90 MB, and nothing below needs it
+        title = manifest["title"] or slug
+        if (invitations_dir() / handle / slug / "vault.json").is_file():
+            raise ValueError(f"@{handle}'s {title} already came to you as an invitation, "
+                             "and a file does not replace it")
+        root = file_invitations_dir()
+        waiting = [d for d in _folders(root) if (d / "vault.json").is_file()]
+        if len(waiting) >= _FILES_WAITING_MAX and root / handle / slug not in waiting:
+            raise ValueError(f"{_FILES_WAITING_MAX} wiki files are waiting in Shared with you. "
+                             "Decline one to open another.")
+        root.mkdir(parents=True, exist_ok=True)
+        # An Open killed mid-write never reaches its cleanup. An hour is far past any unpacking of
+        # 100 MB, so no live one is taken.
+        for old in root.glob(".open-*"):
+            try:
+                if old.stat().st_mtime < time.time() - 3600:
+                    shutil.rmtree(old, ignore_errors=True)
+            except OSError:
+                pass  # gone between the glob and the stat: another Open swept it first
+        # Beside the folder it becomes, under a name _NAME refuses, so invitations() never lists a
+        # half-written one, a refused one leaves the earlier one as it was, and the move is a rename.
+        tmp = Path(tempfile.mkdtemp(prefix=".open-", dir=root))
+        try:
+            (tmp / "assets").mkdir()
+            # the manifest written is the one read, each field of its type, so every later list
+            # reads a small file that cannot raise
+            parts = {k: v for k, v in keep.items() if k != "vault.json"}
+            _unpacked(z, parts, tmp)
+            if (tmp / "notes.json").stat().st_size > _NOTES_JSON_MAX:
+                raise _part_too_big("notes.json", _NOTES_JSON_MAX)
+            try:
+                notes = _flat_notes((tmp / "notes.json").read_text(encoding="utf-8"))
+            except ValueError:
+                raise ValueError("that wiki file could not be read: its notes.json is not a wiki's") from None
+            manifest["handle"], manifest["slug"] = handle, slug
+            manifest["count"] = {"notes": len(notes)}
+            (tmp / "vault.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (tmp / ".hash").write_text(hashlib.sha256((tmp / "notes.json").read_bytes()).hexdigest(),
+                                       encoding="utf-8")
+            (tmp / ".from-file").write_bytes(b"")
+            dest = root / handle / slug
+            dest.parent.mkdir(exist_ok=True)
+            if dest.exists():
+                shutil.rmtree(dest)
+            tmp.rename(dest)
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+    return {"author": handle, "vault": slug, "title": title, "notes": len(notes)}

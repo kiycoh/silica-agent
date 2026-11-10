@@ -37,8 +37,13 @@ VIEWS: dict[str, View] = {
     "calendar": View("calendar", "Calendar", routes=("/calendar", "/reminders"),
                      tools=("silica_agenda", "silica_event_create", "silica_event_update")),
     "metrics": View("examine", "Examine", routes=("/metrics",)),
-    # ADR-0143: the choice and Publish; saving a page (/vault/save) is every account's
-    "public": View("public", "My Wikis", routes=("/public",), linked=False),
+    # ADR-0143: the choice and Publish; saving a page (/vault/save) is every account's.
+    # /wikis is the catalog the same tab shows (ADR-0157 point 1), which a demo must not fetch.
+    # A computer's link to its account is Publish's (point 9), named one by one: bare /link is
+    # the graph's link lookup, which every account keeps.
+    "public": View("public", "Wikis",
+                   routes=("/public", "/wikis", "/link/start", "/link/poll", "/link/state", "/link/unlink"),
+                   linked=False),
 }
 
 

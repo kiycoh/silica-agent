@@ -28,7 +28,8 @@
   text-decoration: underline;
 }
 
-#public-body {
+#public-body,
+#wikis-body {
   flex: 1;
   overflow-y: auto;
   padding: 1rem 1.1rem 2rem;
@@ -167,6 +168,9 @@
   flex: 1;
   min-width: 14rem;
 }
+
+/* the file's name is what the person looks for in Downloads */
+.pp-saved b { color: var(--frost); font-weight: 500; }
 
 /* the globe on a row: the pin's size, shown as the pin is (hover, focus, on) */
 .tree-pub {
@@ -454,12 +458,107 @@ body.drawer-recall #public-bar {
   padding-right: 52px;
 }
 
+/* --- Wikis: the two tabs and the catalog (ADR-0157 points 1 to 3) --------------------------
+   The tabs are Explore's (app-panels.css .stab) in the metrics bar's glass. One attribute on the
+   view says which tab shows, so a render of My wikis while the catalog shows paints out of sight
+   instead of over it, and the handle's question stays on My wikis. */
+#wikis-tabs {
+  display: flex;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--glass);
+  box-shadow: var(--glass-edge);
+}
+
+#wikis-tabs.glide > .stab.active {
+  background: transparent;
+}
+
+#view-public[data-wtab="wikis"] :is(#public-body, #public-url, #public-count, #link-line, .pg-ask),
+#view-public[data-wtab="mine"] :is(#wikis-body, #wikis-from) {
+  display: none;
+}
+
+#wikis-from b {
+  color: var(--frost);
+  font-weight: 500;
+}
+
+.wk-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wk-top .pg-sel {
+  flex: 1;
+  min-width: 0;
+}
+
+.wk-top .pp-dim {
+  white-space: nowrap;
+}
+
+/* three across at the page measure, two in a narrow window, one on a phone */
+.wk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 12px;
+}
+
+.wk-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  /* an entry's words are an account's: one long one may not push the card past its column */
+  overflow-wrap: anywhere;
+}
+
+.wk-card .pp-cover-box {
+  margin-bottom: 6px;
+}
+
+.wk-t {
+  margin: 0;
+  color: var(--frost);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.wk-by,
+.wk-line {
+  margin: 0;
+}
+
+.wk-by {
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+}
+
+.wk-line {
+  color: var(--text);
+  font-size: var(--fs-ctl);
+}
+
+.wk-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+
 /* --- the view stands centred, its cover above the boxes (ADR-0146 point 4) -------
    Every block keeps the page measure and the column sits in the middle of the view, instead of
    hanging from its left edge. The cover is printed in two inks on the well, at 46:21, the ratio
    ADR-0151's Page draft fixed for every vault cover (answer 20a, 2026-11-01); it supersedes the
    height cap of the ADR-0146 amendment of the same day, made for the single page's Publish row. */
-#public-body > * {
+#public-body > *,
+#wikis-body > * {
   width: 100%;
   max-width: var(--measure);
   margin-inline: auto;
@@ -638,6 +737,12 @@ body.drawer-recall #public-bar {
 
 .lst-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: var(--fs-ctl); color: var(--text); }
 .lst-row p { flex: 1 1 22rem; margin: 0; }
+/* ADR-0157 point 9: the code the person checks against the gateway's page, read across a room */
+.lk-code { font: 500 2rem var(--mono); letter-spacing: 0.14em; color: var(--frost); white-space: nowrap; }
+#link-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#link-line b { color: var(--frost); font-weight: 500; }
+#link-line .pre-link { color: var(--accent); text-decoration-color: var(--accent); }
+.pp-res a { color: var(--frost); text-decoration-color: var(--accent); text-underline-offset: 3px; }
 .lst-say { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: var(--fs-ctl); line-height: 1.5; }
 .lst-say dt { color: var(--ash-dim); }
 .lst-say dd { margin: 0; color: var(--frost); }
@@ -724,6 +829,9 @@ body.drawer-recall #public-bar {
 .pp-box.wide .pg-rows li:first-child { border-top: 0; }
 .pp-box .pg-rows .st-btn { margin-left: auto; }
 .pp-box .pg-rows .st-btn + .st-btn { margin-left: 0; }
+/* Open a file… sits beside the count, both at the head's right */
+.pp-box h3:has(> .st-btn) { align-items: center; }
+.pp-box h3:has(> .st-btn) b { margin-left: auto; }
 .pp-box.wide ul.pg-chips { gap: 6px; }
 
 /* --- the handle, asked on the first visit (ADR-0143 point 7, amended 2026-11-02) ------------
@@ -739,8 +847,26 @@ body.drawer-recall #public-bar {
   z-index: 5;
   display: grid;
   place-items: center;
+  /* the question and Shared with you under it, together in the middle; safe, so a long list of
+     invitations scrolls from its top instead of losing it above the view */
+  align-content: safe center;
+  gap: 12px;
+  overflow-y: auto;
   padding: 20px;
   background: var(--scrim);
+}
+
+/* Shared with you needs no handle (ADR-0157 point 7): it sits on the question's sheet, live, in
+   the card's column */
+.pg-ask > .pp-box {
+  width: min(420px, 100%);
+  background: var(--sheet);
+}
+
+/* the bar over the question's scrim: the catalog needs no handle, so its tab stays in reach */
+#public-bar {
+  position: relative;
+  z-index: 6;
 }
 
 .pg-ask-card {

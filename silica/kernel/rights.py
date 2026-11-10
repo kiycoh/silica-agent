@@ -481,7 +481,9 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
                 "file": leaves["traced"].get(name), "group": "folder:" + _folder_of(p, conf["folder"]),
                 "location": _located(found)})
             row["notes"].append(p)
-        for url in shown_remote:
+        # A computer's remote image goes out as the link naming its host (ADR-0153 point 23b): its
+        # author answered on the computer, so this account is asked nothing and fetches nothing.
+        for url in shown_remote if not conf["from_link"] else ():
             row = remote.setdefault(url, _remote_row(url, vault, fetch))
             row["notes"].append(p)
     for row in local.values():
@@ -495,7 +497,16 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
         del n["text"], n["body"]
     return {"slug": slug, "folder": conf["folder"], "license": conf["license"], "visibility": conf["visibility"],
             "notes": notes, "files": files, "local": local, "remote": remote, "links": links,
-            "nowhere": nowhere, "asked": set(answers(vault))}
+            "nowhere": nowhere, "asked": set(answers(vault)),
+            # a linked computer's wiki: its answers by note, kept as the author's (ADR-0157 point 11)
+            "computer": bool(conf["from_link"]), "sent": conf["answers"]}
+
+
+def _sent(wiki: dict, p: str) -> dict:
+    """What the author's computer answered for note `p`; {} for none, and in a wiki of this vault's own."""
+    sent = wiki.get("sent")
+    a = sent.get(p.removeprefix(wiki["folder"] + "/")) if sent else None
+    return a if isinstance(a, dict) else {}
 
 
 def _located(path: Path) -> bool:
@@ -550,6 +561,11 @@ def decide(wiki: dict, ans: dict) -> dict:
     for key, img in wiki["local"].items():
         if not notes.intersection(img["notes"]):
             continue
+        # The computer's check let these out and sent no other (ADR-0157 point 11). This vault has
+        # no answer for them, so each would read as an image nobody answered for and stay out.
+        if wiki.get("computer") and img["src"].startswith(wiki["folder"] + "/assets/"):
+            local.add(key)
+            continue
         a = ans.get(img["file"] or img["group"], {})
         if is_free(a) and img["name"] not in a.get("off", []):
             local.add(key)
@@ -571,6 +587,9 @@ def decide(wiki: dict, ans: dict) -> dict:
     for p in notes:
         said = [f"{a['credit']}, {a['license']}" if a.get("credit") else a["license"]
                 for f in wiki["notes"][p]["files"] if (a := ans.get(f, {})).get("answer") == "open"]
+        # a computer's note carries its answer itself: the ledger naming its files stayed there
+        if (a := _sent(wiki, p)).get("answer") == "open" and a.get("license"):
+            said.append(f"{a['credit']}, {a['license']}" if a.get("credit") else a["license"])
         if said:
             note_credits[p] = "; ".join(said)
     return {"notes": notes, "local": local, "remote": remote, "files": files, "credits": credits,
@@ -617,6 +636,8 @@ def blocks(wiki: dict, ans: dict, plan: dict) -> list[str]:
     """Why this wiki cannot ask to enter Wikis (ADR-0153 points 9 and 16), in the screen's words."""
     if wiki["visibility"] == "private":
         return []
+    # No line for a note copied word for word (point 9, owner 2026-11-06): one made from a source
+    # answered Mine or Open is exempt, and `decide` keeps one from any other source out of the wiki.
     out = []
     if wiki["license"] == "not stated":
         out.append('It cannot ask to enter Wikis while its license is "not stated".')
@@ -625,7 +646,8 @@ def blocks(wiki: dict, ans: dict, plan: dict) -> list[str]:
         what = "the note in Other checks is" if personal == 1 else f"the {personal} notes in Other checks are"
         out.append(f"It can ask to enter Wikis once {what} fixed.")
     share_alike = any(ans.get(f, {}).get("license") == SHARE_ALIKE and is_free(ans.get(f, {}))
-                      for f in wiki["files"])
+                      for f in wiki["files"]) or any(_sent(wiki, p).get("license") == SHARE_ALIKE
+                                                     for p in plan["notes"])
     if share_alike and wiki["license"] != publish.SHARE_ALIKE_LICENSE:
         out.append(f"It can ask to enter Wikis once its license is {publish.SHARE_ALIKE_LICENSE}.")
     return out
@@ -642,6 +664,17 @@ def statement(wiki: dict, ans: dict, plan: dict, slugs: dict[str, str]) -> dict:
             row = {"answer": a["answer"], "license": a.get("license", ""), "credit": a.get("credit", ""),
                    "notes": count}
             sources.append({k: v for k, v in row.items() if v})
+    # A computer's answers by note, as its author gave them, every one: the review reads what the
+    # computer's check said (ADR-0157 point 11). Never a note's path, which can name a folder.
+    said: dict[tuple, int] = {}
+    for p in plan["notes"]:
+        if (a := _sent(wiki, p)).get("answer"):
+            k = (a["answer"], a.get("license", ""), a.get("credit", ""))
+            said[k] = said.get(k, 0) + 1
+    for (answer, license, credit), count in sorted(said.items()):
+        row = {"answer": answer, "license": license, "credit": credit, "notes": count}
+        # tagged, so the review tells the computer's word from an answer this account's ledger backs
+        sources.append({**{k: v for k, v in row.items() if v}, "by": "computer"})
     marked = [slugs[p] for p in sorted(plan["notes"]) if p in slugs and _marked(wiki, ans, p)]
     return {"sources": sources, "rewritten": marked}
 

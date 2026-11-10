@@ -22,6 +22,9 @@ import logging
 import os
 import re
 import shutil
+import tempfile
+import time
+import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -34,6 +37,8 @@ from silica.kernel.image_meta import strip_location
 from silica.kernel.text import note_parts
 from silica.kernel.text.render import render
 from silica.kernel.vault_files import find_image
+# one number for the file built here and the file saved_page opens (ADR-0157 Open 4)
+from silica.kernel.publish import WIKI_FILE_MAX
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +57,9 @@ _LANGS = {"italian": "it", "english": "en", "spanish": "es", "french": "fr",
 # shortcut: past this many linked notes the cover keeps the best linked ones, so the layout stays
 # near a second; reopen if a vault this large asks for every mark (count them in the caption)
 _COVER_MAX = 1500
+# Shown only where pages.css did not load, which is how a page opened inside the zip looks: its
+# sheet, its data and its neighbours are still packed (ADR-0157 point 5).
+_EXTRACT = '<p class="extract">Extract the whole zip first, then open index.html.</p>\n'
 # The local Silica a reader may save into (ADR-0151 point 8), `silica --gui`'s default port.
 LOCAL_APP = f"http://localhost:{GUI_PORT}"
 _BRAND = ('<svg viewBox="0 0 256 256" aria-hidden="true"><path class="i" d="M16 112 L144 112 L144 240 '
@@ -119,10 +127,11 @@ class _Site:
     Served under /@handle when the host says where, with the sheet at /_s/;
     plain files beside each other otherwise, so the folder also opens from
     disk. `lvl` is how deep the page being written sits: 0 the Page, 1 a
-    vault's folder."""
+    vault's folder. `file` is a wiki file's build (ADR-0157 point 5), which
+    has no host behind it."""
 
-    def __init__(self, h: str, base: str):
-        self.h, self.base = h, base
+    def __init__(self, h: str, base: str, file: bool = False):
+        self.h, self.base, self.file = h, base, file
         self.root = f"/@{h}" if base else ""
 
     def _up(self, lvl: int) -> str:
@@ -219,8 +228,12 @@ def _head(title: str, desc: str, site: _Site, lvl: int, *, canonical: str = "", 
           lang: str = "", kind: str = "website") -> str:
     meta = [f"<title>{_esc(title)}</title>",
             f'<meta name="description" content="{_esc(desc)}">',
-            f'<link rel="stylesheet" href="{_esc(site.static("pages.css", lvl))}">',
-            f'<script src="{_esc(site.static("pages.js", lvl))}" defer></script>']
+            f'<link rel="stylesheet" href="{_esc(site.static("pages.css", lvl))}">']
+    if site.file:
+        # The room's data as a script, since a page opened from disk may not fetch the files beside
+        # it (ADR-0157 point 6); first, because deferred scripts run in order and pages.js reads it.
+        meta.append('<script src="wiki-data.js" defer></script>')
+    meta.append(f'<script src="{_esc(site.static("pages.js", lvl))}" defer></script>')
     if canonical:
         meta += [f'<link rel="canonical" href="{_esc(canonical)}">',
                  f'<meta property="og:url" content="{_esc(canonical)}">']
@@ -238,7 +251,7 @@ def _head(title: str, desc: str, site: _Site, lvl: int, *, canonical: str = "", 
 def top(catalog: str, app: str, current: str = "", page: str = "", h: str = "") -> str:
     """The bar every public page shares, the catalog's included."""
     cur = ' aria-current="page"'
-    pages = f'<a href="{_esc(catalog)}"{cur if current == "pages" else ""}>Pages</a>' if catalog else ""
+    pages = f'<a href="{_esc(catalog)}"{cur if current == "pages" else ""}>Wikis</a>' if catalog else ""
     own = (f'<a class="opt" href="{_esc(page)}"{cur if current == "page" else ""}>@{_esc(h)}</a>'
            if page and h else "")
     brand = f'<a class="brand" href="{_esc(app)}/" aria-label="Silica">{_BRAND}<b>Silica</b></a>'
@@ -246,10 +259,11 @@ def top(catalog: str, app: str, current: str = "", page: str = "", h: str = "") 
             f'{_THEME}<a class="btn btn--small" href="{_esc(app)}/">Open Silica</a></nav></header></div>\n')
 
 
-def foot(left: str, app: str) -> str:
-    return (f'<footer class="foot wrap"><span>{left}</span><span><a href="{_esc(app)}/privacy">Privacy</a>'
-            f' · <a href="{_esc(app)}/terms">Terms</a> · <a href="{_esc(app)}/">Published with Silica</a>'
-            f'</span></footer>\n</body>\n</html>\n')
+def foot(left: str, app: str, file: bool = False) -> str:
+    # Privacy and Terms are the host's, and a wiki file has none (ADR-0157 point 5).
+    host = "" if file else f'<a href="{_esc(app)}/privacy">Privacy</a> · <a href="{_esc(app)}/terms">Terms</a> · '
+    return (f'<footer class="foot wrap"><span>{left}</span><span>{host}<a href="{_esc(app)}/">Published with '
+            f'Silica</a></span></footer>\n</body>\n</html>\n')
 
 
 def _desc(body: str) -> str:
@@ -352,11 +366,16 @@ def build(slug: str, vault: Path | None = None) -> dict:
     visibility says: served when Public, beside the served folder for the
     relay when Private (ADR-0151 points 3, 9). Returns what went out, for
     the view's line after Publish."""
-    from silica.driver import DRIVER
-    from silica.kernel.recall.resolve import answer_resolver, note_resolver
-    from silica.kernel.base import frontmatter as fm
+    from silica.config import hosted
 
     vault = vault or publish.vault_root()
+    if not hosted():
+        # Alone, a computer saves files; linked, it sends notes and its account builds them (ADR-0157
+        # points 4 and 10). Either way it writes nothing under live/, which a person may be serving.
+        from silica.kernel.account_link import NOT_LINKED
+
+        raise ValueError(NOT_LINKED if not publish.can_publish()
+                         else "A linked computer sends its notes to your account, which builds the pages.")
     h = publish.handle(vault)
     if not publish.available(vault):
         raise ValueError("this account has no public address yet")
@@ -365,6 +384,37 @@ def build(slug: str, vault: Path | None = None) -> dict:
     if conf["visibility"] == "off":
         raise ValueError("turn the wiki Public or Private before publishing it")
     private = conf["visibility"] == "private"
+    root = publish.site_root(h)
+    root.mkdir(parents=True, exist_ok=True)
+    build_dir = root / f".build-{slug}-{os.getpid()}"
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+    w = _write_wiki(slug, conf, vault, _Site(h, publish.page_url(vault)), build_dir, private)
+    stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    _readable(build_dir, root, private)
+    publish.swap_in(build_dir, root / ("private" if private else "live") / slug)
+    if not private:
+        shutil.rmtree(root / "paused" / slug, ignore_errors=True)
+    publish.mark_published(slug, w["manifest"]["published"], vault)
+    state = last_published(h) or {"vaults": {}}
+    # The reasons stay here, for the author: the manifest is public, and one of them says a note
+    # holds someone's personal data.
+    state["vaults"][slug] = {"published_at": stamp, "notes": w["shown"], "blocked": w["blocked"]}
+    (root / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
+    write_page(vault)
+    return {"vault": slug, "notes": len(w["shown"]), "links": w["manifest"]["count"]["links"],
+            "images": w["images"], "url": w["manifest"]["url"], "published_at": stamp, "private": private}
+
+
+def _write_wiki(slug: str, conf: dict, vault: Path, site: _Site, build_dir: Path, private: bool) -> dict:
+    """One wiki's files into `build_dir`, linked as `site` says: its pages (none when Private),
+    the readers' `.md`, `vault.json`, `notes.json` and the images its notes cite. Shared by a
+    Publish and a wiki file, so the check before Publish chooses the notes of both."""
+    from silica.driver import DRIVER
+    from silica.kernel.base import frontmatter as fm
+    from silica.kernel.recall.resolve import answer_resolver, note_resolver
+
+    h = site.h
     sel = publish.selection(vault)
     fms = sel["frontmatter"]
     # Here and not in the screen: the check before Publish only reads these answers, so a wiki
@@ -376,7 +426,6 @@ def build(slug: str, vault: Path | None = None) -> dict:
     on = set(public)
     titles = {p: note_parts.title_of(p, fms.get(p) or {}) for p in public}
     slugs = _slugs(public, titles)
-    site = _Site(h, publish.page_url(vault))
     vurl = publish.wiki_url(site.base, slug)
     lang = _LANGS.get(_language().strip().lower(), "")
 
@@ -393,23 +442,27 @@ def build(slug: str, vault: Path | None = None) -> dict:
             hit = shared_resolve(ref)
         return hit if hit in on else ""
 
-    root = publish.site_root(h)
-    root.mkdir(parents=True, exist_ok=True)
-    build_dir = root / f".build-{slug}-{os.getpid()}"
-    if build_dir.exists():
-        shutil.rmtree(build_dir)
     (build_dir / "assets").mkdir(parents=True)
 
     copied: dict[str, str] = {}
+    held = 0
 
     def copy_asset(target: str) -> str:
         """The vault's name for an image a published note cites, copied once."""
+        nonlocal held
         if target in copied:
             return copied[target]
         found = plan["files"].get(target) or find_image(str(vault), target)
         if found is None:
             copied[target] = ""
             return ""
+        # Images are what grows without bound, so a wiki file stops before reading the one that
+        # passes its cap, and a wiki citing gigabytes of photos never lands them on disk first.
+        # shortcut: the notes' text is counted only once written; count it per note if a refused
+        # wiki ever holds 100 MB of text
+        held += found.stat().st_size
+        if site.file and held > WIKI_FILE_MAX:
+            raise _past_cap()
         name = f"{len(copied) + 1}-{publish.slugify(found.stem) or 'image'}{found.suffix.lower()}"
         (build_dir / "assets" / name).write_bytes(strip_location(found.read_bytes()))
         copied[target] = name
@@ -465,12 +518,13 @@ def build(slug: str, vault: Path | None = None) -> dict:
     pairs = {(min(a, b), max(a, b)) for a, b in edges if a in rendered and b in rendered and a != b}
     c = cover(shown, pairs, titles)
     today = datetime.date.today().isoformat()
-    stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     blocked = rights.blocks(wiki, said, plan)
     manifest = {
         "v": 1, "handle": h, "slug": slug, "title": conf["title"], "line": conf["line"],
-        "license": conf["license"], "published": today, "listed": conf["listed"] and not private and not blocked,
+        "license": conf["license"], "published": today, "listed": conf["listed"] and not private and not blocked and not site.file,
         "blocked": bool(blocked), "rights": rights.statement(wiki, said, plan, slugs),
+        # the review reads that a linked computer sent it, whose check chose its notes (ADR-0157 point 11)
+        **({"from": "computer"} if conf["from_link"] else {}),
         "url": vurl,
         "count": {"notes": len(shown), "links": len(pairs), "drawn": len(c["n"]), "areas": len(c["areas"])},
         "areas": c["areas"],
@@ -501,7 +555,6 @@ def build(slug: str, vault: Path | None = None) -> dict:
 
     if private:
         (build_dir / "readers.json").write_text(json.dumps(conf["readers"]), encoding="utf-8")
-        dest = root / "private" / slug
     else:
         backlinks: dict[str, list[str]] = {p: [] for p in shown}
         for a, b in edges:
@@ -511,21 +564,76 @@ def build(slug: str, vault: Path | None = None) -> dict:
             _write_note(build_dir, p, rendered[p], titles, slugs, backlinks[p], shown, conf, site, slug, h,
                         lang, today)
         (build_dir / "index.html").write_text(_vault_page(manifest, c, site, h, lang), encoding="utf-8")
-        dest = root / "live" / slug
-    _readable(build_dir, root, private)
-    publish.swap_in(build_dir, dest)
-    if not private:
-        shutil.rmtree(root / "paused" / slug, ignore_errors=True)
-    publish.mark_published(slug, today, vault)
-    state = last_published(h) or {"vaults": {}}
-    # The reasons stay here, for the author: the manifest is public, and one of them says a note
-    # holds someone's personal data.
-    state["vaults"][slug] = {"published_at": stamp, "notes": shown, "blocked": blocked}
-    (root / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
-    write_page(vault)
-    return {"vault": slug, "notes": len(shown), "links": len(pairs),
-            "images": sum(1 for v in copied.values() if v), "url": vurl, "published_at": stamp,
-            "private": private}
+    return {"manifest": manifest, "notes_md": notes_md, "shown": shown, "blocked": blocked,
+            "images": sum(1 for v in copied.values() if v),
+            "diagram": any('<pre class="mermaid">' in r["html"] for r in rendered.values())}
+
+
+def build_file(slug: str, vault: Path | None = None) -> tuple[Path, dict]:
+    """A wiki file (ADR-0157 point 5): the wiki as a Public build with relative links, its data
+    as a script and a top `index.html` that opens it, zipped, in any visibility, Off included.
+    Nothing is written under the page's folder, so what is served, paused or relayed, its state
+    and the wiki's published date stay as they were. Returns the zip, alone in a folder under
+    ~/.silica/tmp the caller moves or removes, and {"name", "notes", "bytes"}, `bytes` being the
+    zip's size. Past WIKI_FILE_MAX unpacked it stops with ValueError and leaves nothing behind."""
+    vault = vault or publish.vault_root()
+    h = publish.handle(vault)
+    if not h:
+        # a hosted account before its handle is granted: the file says whose it is, and the
+        # Silica that opens it refuses one with no handle (ADR-0157 point 7)
+        raise ValueError("this account has no handle yet")
+    from silica.kernel.base.home import silica_tmp_dir
+
+    conf = publish.find(slug, vault)
+    # A build killed by a signal never reaches its cleanup, and nothing else empties ~/.silica/tmp
+    # of these. An hour is far past any build or download of 100 MB, so no live one is taken.
+    for old in silica_tmp_dir().glob("wiki-file-*"):
+        try:
+            if old.stat().st_mtime < time.time() - 3600:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass  # gone between the glob and the stat: a parallel build swept it first
+    # On disk under ~/.silica and not in the system's temp, which is RAM where /tmp is tmpfs (the
+    # owner's machine) and shared by every tenant on the hosted service.
+    tmp = Path(tempfile.mkdtemp(prefix="wiki-file-", dir=silica_tmp_dir()))
+    try:
+        tree = tmp / "wiki"
+        w = _write_wiki(slug, conf, vault, _Site(h, "", file=True), tree / slug, private=False)
+        # ASCII, so the script parses whatever charset a browser guesses for a file from disk
+        data = json.dumps({"vault.json": w["manifest"], "notes.json": w["notes_md"]}, separators=(",", ":"))
+        (tree / slug / "wiki-data.js").write_text(f"window.SILICA_WIKI={data};", encoding="utf-8")
+        to = _esc(f"{slug}/index.html")
+        # a link beside the refresh, for a reader whose browser does not follow one
+        (tree / "index.html").write_text(
+            '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+            f'<meta http-equiv="refresh" content="0; url={to}">\n<title>{_esc(conf["title"])} · @{_esc(h)}'
+            f'</title>\n<link rel="stylesheet" href="_s/pages.css">\n</head>\n<body>\n{_EXTRACT}'
+            f'<p><a href="{to}">Open {_esc(conf["title"])}</a></p>\n</body>\n</html>\n', encoding="utf-8")
+        static = static_files()
+        if not w["diagram"]:
+            static.pop("mermaid.min.js", None)  # 3.4 MB that pages.js loads only for a diagram
+        (tree / "_s").mkdir()
+        for name, blob in static.items():
+            (tree / "_s" / name).write_bytes(blob)
+        files = sorted(p for p in tree.rglob("*") if p.is_file())
+        size = sum(p.stat().st_size for p in files)
+        if size > WIKI_FILE_MAX:
+            raise _past_cap()
+        path = tmp / f"{slug}.zip"
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+            for p in files:
+                z.write(p, p.relative_to(tree).as_posix())
+        shutil.rmtree(tree)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    # the name lands in a Downloads folder: no character a file system refuses, no path in it
+    title = " ".join(re.sub(r'[\\/:*?"<>|\x00-\x1f]', " ", conf["title"]).split()) or slug
+    return path, {"name": f"{title} by {h}.zip", "notes": len(w["shown"]), "bytes": path.stat().st_size}
+
+
+def _past_cap() -> ValueError:
+    return ValueError(f"this wiki is past the {WIKI_FILE_MAX / 1e6:g} MB unpacked a wiki file may hold")
 
 
 def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, backlinks: list[str],
@@ -541,7 +649,7 @@ def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, bac
     head = _head(f"{titles[p]} · {conf['title']} · @{h}", _desc(r["body"]), site, 1, canonical=canonical,
                  md=f"{slug}.md", lang=lang, kind="article")
     crumb = ('<nav class="crumb" aria-label="Breadcrumb">'
-             + (f'<a href="{_esc(site.catalog())}">Pages</a> / ' if site.base else "")
+             + (f'<a href="{_esc(site.catalog())}">Wikis</a> / ' if site.base else "")
              + f'<a href="{_esc(site.page(1))}">@{_esc(h)}</a> / '
              f'<a href="{_esc(site.vault(vslug, 1))}">{_esc(conf["title"])}</a></nav>')
     banner = ""
@@ -572,7 +680,7 @@ def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, bac
     if more_html:
         side += (f'<div><h2>More from {_esc(conf["title"])}</h2><ul>{more_html}'
                  f'<li><a href="{_esc(site.vault(vslug, 1))}">All {fmt(len(shown))} notes</a></li></ul></div>')
-    page = (head + "<body>\n" + top(site.catalog(), _app(), page=site.page(1), h=h)
+    page = (head + "<body>\n" + (_EXTRACT if site.file else "") + top(site.catalog(), _app(), page=site.page(1), h=h)
             + f'<main class="sheet"{_room(site, vslug, slug)}><div class="art-grid"><article class="art">'
             + crumb + banner
             + f'<p class="meta">{byline}</p><h1>{_esc(titles[p])}</h1>'
@@ -580,7 +688,8 @@ def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, bac
             + (f'<p class="tags">{" · ".join(_esc(t) for t in tags)}</p>' if tags else "")
             + f'<div class="body">{r["html"]}</div>{actions}</article>'
             + (f'<aside class="side">{side}</aside>' if side else "") + "</div></main>\n"
-            + foot(f"A note @{_esc(h)} chose to publish.", _app()))
+            + foot(f"A wiki @{_esc(h)} shared as a file." if site.file else f"A note @{_esc(h)} chose to publish.",
+                   _app(), site.file))
     (build_dir / f"{slug}.html").write_text(page, encoding="utf-8")
 
 
@@ -620,14 +729,17 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
         + "".join(f'<li><a href="{_esc(site.note(vslug, s, 1))}">{_esc(t)}</a></li>'
                   for t, s in sorted(by_area.get(i, []), key=lambda x: x[0].lower()))
         + "</ul></details>" for i, name, size in rows)
+    # a file has no host to save from, but any Silica opens the zip itself (ADR-0157 point 7); every
+    # other build is the hosted service's, which has an address
     save = (_save_form(url, f"Save {_plural(count['notes'], 'note')} to Silica") if site.base else
-            '<p class="dim">Saving needs the wiki on a Silica host.</p>')
+            '<p class="dim">Using Silica? Keep it in your vault from Wikis → My wikis → Open a file, and '
+            'choose the zip this wiki came in.</p>')
     crumb = ('<nav class="crumb" aria-label="Breadcrumb">'
-             + (f'<a href="{_esc(site.catalog())}">Pages</a> / ' if site.base else "")
+             + (f'<a href="{_esc(site.catalog())}">Wikis</a> / ' if site.base else "")
              + f'<a href="{_esc(site.page(1))}">@{_esc(h)}</a> / {_esc(m["title"])}</nav>')
     head = _head(f"{m['title']} · @{h}", m["line"] or f"{_plural(count['notes'], 'note')} by @{h}", site, 1,
                  canonical=m["url"], lang=lang)
-    return (head + "<body>\n" + top(site.catalog(), _app(), page=site.page(1), h=h)
+    return (head + "<body>\n" + (_EXTRACT if site.file else "") + top(site.catalog(), _app(), page=site.page(1), h=h)
             + f'<main class="sheet"{_room(site, vslug)}><section class="wrap vp grid" aria-labelledby="vp-h">'
             + crumb
             + f'<figure class="vp-cover"><div class="well">{_svg(c)}</div><figcaption>{caption}</figcaption>'
@@ -641,7 +753,8 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
             f'<p>Choose what to save.</p></div>'
             f'<ul class="areas">{areas}</ul></div>'
             + f'<div class="vp-notes" id="notes"><h2>The notes</h2>{notes}</div>'
-            + "</section></main>\n" + foot(f"A wiki @{_esc(h)} chose to publish.", _app()))
+            + "</section></main>\n"
+            + foot(f"A wiki @{_esc(h)} {'shared as a file' if site.file else 'chose to publish'}.", _app(), site.file))
 
 
 def card(e: dict, href: str, graph: str, who: bool = True) -> str:
@@ -665,9 +778,15 @@ def write_page(vault: Path | None = None) -> None:
     from their published manifests, and `vaults.json`, which a vault's page
     reads for "Also by". One Public vault is one map to open, so `data-one`
     sends the script there (amendment of 2026-11-06, item 3). With no Public
-    vault the Page goes, so its address answers that there is no page; a
-    laptop's copy of the sheet goes with it."""
+    vault the Page goes, so its address answers that there is no page. The
+    hosted service's alone: a computer has no Page of its own (ADR-0157 point 4)."""
+    from silica.config import hosted
+
     vault = vault or publish.vault_root()
+    if not hosted():
+        # A computer's Page is its account's, on the host; its live/ is left to the person who may
+        # be serving it (ADR-0157, Consequences): no write, and no sweep of any of its files.
+        return
     h = publish.handle(vault)
     if not h:
         return
@@ -681,8 +800,10 @@ def write_page(vault: Path | None = None) -> None:
         except (OSError, ValueError):
             continue
     if live.is_dir():
+        # A wiki removed from the account, or Off or Private and its folder still here after a crash
+        # between two renames: its address answers that nothing is there. The host serves this
+        # live/, never a person, so nothing in it is anyone's to keep (ADR-0157, Consequences).
         for stale in [p for p in live.iterdir() if p.is_dir() and p.name not in public and p.name != "_s"]:
-            # a vault Off or Private whose folder stayed, after a crash between two renames
             shutil.rmtree(stale)
     if not entries:
         for name in ("index.html", "vaults.json"):
@@ -717,7 +838,12 @@ def write_page(vault: Path | None = None) -> None:
 
 def set_listed(slug: str, listed: bool, vault: Path | None = None) -> None:
     """Ask to list reaches the published manifest at once, since the host reads
-    the request there; the rest of the vault waits for Publish."""
+    the request there; the rest of the vault waits for Publish. Hosted alone: a computer's
+    request travels with its Publish, and its live/ is the person's (ADR-0157, Consequences)."""
+    from silica.config import hosted
+
+    if not hosted():
+        return
     vault = vault or publish.vault_root()
     h = publish.handle(vault)
     path = publish.site_root(h) / "live" / slug / "vault.json" if h else None

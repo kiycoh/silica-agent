@@ -54,7 +54,23 @@ def block(vault: Path) -> dict:
     except (OSError, yaml.YAMLError):
         return {}
     block = raw.get(PUBLIC_KEY) if isinstance(raw, dict) else None
-    return block if isinstance(block, dict) else {}
+    return _paired(block) if isinstance(block, dict) else {}
+
+
+_HALF = re.compile("[\ud800-\udfff]")
+
+
+def _paired(value):
+    """`value` with each surrogate pair read as its character. Before 2026-11-08 the writer put an
+    emoji as `\\ud83c\\udfa8`, which PyYAML reads as two lone halves that no response or page can
+    encode; a half with no partner has no character and reads as U+FFFD."""
+    if isinstance(value, str):
+        return value.encode("utf-16", "surrogatepass").decode("utf-16", "replace") if _HALF.search(value) else value
+    if isinstance(value, list):
+        return [_paired(v) for v in value]
+    if isinstance(value, dict):
+        return {_paired(k): _paired(v) for k, v in value.items()}
+    return value
 
 
 def slugify(text: str) -> str:
@@ -244,6 +260,10 @@ def available(vault: Path | None = None) -> bool:
 # would erase the rest of a downgraded account's rows at its next write.
 MAX_VAULTS = 20
 FREE_VAULTS = 3
+# ADR-0157 Open 4: a wiki file may not pass 100 MB unpacked. Decimal megabytes, as Caddy reads the
+# edge's `max_size 100MB`, so the limit the file is built under is the one its upload meets. Here
+# and not beside the opener (saved_page), since the build reading it sits under that layer.
+WIKI_FILE_MAX = 100_000_000
 VISIBILITY = ("off", "public", "private")
 # What a wiki built on a share-alike source must itself say (`rights.blocks`).
 SHARE_ALIKE_LICENSE = "CC BY-SA 4.0"
@@ -256,6 +276,9 @@ _RESERVED_SLUGS = {"index", "assets", "_s", "private", "paused", "vault"}
 # A handle, the host's rule too: the catalog reads its map with it, and app-public.js checks a
 # field against a copy (`tests/test_public_copies.py`) so a refusal needs no round trip.
 HANDLE_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,28}[a-z0-9])?$")
+# The gateway's link id, as Caddy's matcher lets it reach a tenant (silica-hosted deploy/Caddyfile,
+# `handle /link/publish*`). Always fullmatch: `$` also passes a trailing newline.
+LINK_ID = re.compile(r"[0-9a-f]{16}")
 
 
 def _clean_vault(raw) -> dict | None:
@@ -270,6 +293,8 @@ def _clean_vault(raw) -> dict | None:
     vis = raw.get("visibility")
     lic = raw.get("license")
     readers = r if isinstance(r := raw.get("readers"), list) else []
+    link = raw.get("from_link")
+    said = a if isinstance(a := raw.get("answers"), dict) else {}
     return {
         "folder": folder,
         "slug": slugify(text("slug", 60)) or slugify(folder.rsplit("/", 1)[-1]) or "vault",
@@ -282,6 +307,15 @@ def _clean_vault(raw) -> dict | None:
                            if isinstance(r, str) and HANDLE_RE.match(r.strip().lstrip("@").lower())}),
         "published": text("published", 40),
         "downgraded": raw.get("downgraded") is True,
+        # the linked computer this folder came from, and what its author answered for each note
+        # (ADR-0157 points 10 and 11); "" and {} for a folder of this account's own
+        "from_link": link if isinstance(link, str) and LINK_ID.fullmatch(link) else "",
+        # on a linked computer: the listing request its last Publish carried, so the view can say
+        # that one asked since has not reached the account yet
+        "sent_listed": raw.get("sent_listed") is True,
+        # the published date is the linked account's, set by a Publish sent there: it goes on unlink
+        "sent": raw.get("sent") is True,
+        "answers": {k: v for k, v in said.items() if isinstance(k, str) and isinstance(v, dict)},
     }
 
 
@@ -316,8 +350,11 @@ def _save_vaults(items: list[dict], vault: Path) -> None:
     """Write `vaults:` and drop ADR-0143's keys, which it replaces."""
     from silica.kernel.base.manifest import set_block_key, unset_block_key
 
-    keep = ("folder", "slug", "title", "line", "license", "visibility", "listed", "readers", "published")
-    rows = [{k: v[k] for k in keep if v.get(k) not in ("", [], None, False)}
+    # from_link above all: a row written without it would turn the computer's folder into one
+    # of the person's, and its next Publish would be refused (ADR-0157 point 10)
+    keep = ("folder", "slug", "title", "line", "license", "visibility", "listed", "readers", "published",
+            "from_link", "answers", "sent_listed", "sent")
+    rows = [{k: v[k] for k in keep if v.get(k) not in ("", [], {}, None, False)}
             | ({"downgraded": True} if v.get("downgraded") else {}) for v in items]
     set_block_key(vault, PUBLIC_KEY, "vaults", rows)
     for old in ("folders", "page"):
@@ -353,7 +390,9 @@ def private_allowed() -> str:
     from silica.config import hosted
 
     if not hosted():
-        return "hosted"
+        # A linked computer's account decides, and its receive refuses a Private that its tier
+        # does not list: the gateway never tells a computer the tier (ADR-0157 point 9)
+        return "ok" if can_publish() else "hosted"
     return "ok" if view_words() & {"all", "private"} else "paid"
 
 
@@ -411,15 +450,19 @@ def add_vault(folder: str, vault: Path | None = None) -> dict:
     for v in items:
         if _within(folder, v["folder"]) or _within(v["folder"], folder):
             raise ValueError(f"{folder} overlaps the wiki {v['title']} ({v['folder']})")
-    base = slugify(folder.rsplit("/", 1)[-1]) or "vault"
-    slug, n, taken = base, 2, {v["slug"] for v in items} | _RESERVED_SLUGS
-    while slug in taken:
-        slug, n = f"{base}-{n}", n + 1
-    new = _clean_vault({"folder": folder, "slug": slug})
+    new = _clean_vault({"folder": folder, "slug": _free_slug(folder.rsplit("/", 1)[-1], items)})
     assert new is not None  # the folder was refused above when empty, the one way it cleans to None
     items.append(new)
     _save_vaults(items, vault)
     return next(v for v in vaults(vault) if v["folder"] == folder)
+
+
+def _free_slug(name: str, items: list[dict]) -> str:
+    base = slugify(name) or "vault"
+    slug, n, taken = base, 2, {v["slug"] for v in items} | _RESERVED_SLUGS
+    while slug in taken:
+        slug, n = f"{base}-{n}", n + 1
+    return slug
 
 
 def update_vault(slug: str, changes: dict, vault: Path | None = None) -> dict:
@@ -459,10 +502,14 @@ def remove_vault(slug: str, vault: Path | None = None) -> None:
     v = next((x for x in items if x["slug"] == slug), None)
     if v is None:
         raise ValueError(f"no wiki {slug!r} on this page")
-    if v["visibility"] != "off":
+    # an unlinked computer reads a Public row as Off and offers no way to turn it Off (ADR-0157
+    # point 4); its served folder is left where it is, as below
+    if v["visibility"] != "off" and can_publish():
         raise ValueError("turn the wiki Off before removing it")
-    root = site_root(handle(vault))
-    shutil.rmtree(root / "paused" / slug, ignore_errors=True)
+    from silica.config import hosted
+
+    if hosted():  # a computer's paused/ is the person's, as set_visibility leaves it
+        shutil.rmtree(site_root(handle(vault)) / "paused" / slug, ignore_errors=True)
     _save_vaults([x for x in items if x["slug"] != slug], vault)
 
 
@@ -575,6 +622,15 @@ def set_note(path: str, on: bool, vault: Path | None = None) -> str:
                  else {k: v for k, v in fm.items() if k != "publish"}, items, dirs)
 
 
+def can_publish() -> bool:
+    """Whether this Silica can put a wiki out (ADR-0157 point 4): the hosted service always, a
+    computer only through the hosted account it is linked to. Alone, it saves wikis as files."""
+    from silica.config import hosted
+    from silica.kernel import account_link
+
+    return hosted() or account_link.state()["linked"]
+
+
 # --- where the files go -------------------------------------------------------
 
 def site_root(h: str | None = None) -> Path:
@@ -595,6 +651,11 @@ def set_visibility(slug: str, vis: str, vault: Path | None = None) -> dict:
     vault = vault or vault_root()
     if vis not in VISIBILITY:
         raise ValueError("a wiki is off, public or private")
+    # before Private's own refusal, which would send an unlinked computer to the hosted service
+    if vis != "off" and not can_publish():
+        from silica.kernel.account_link import NOT_LINKED
+
+        raise ValueError(NOT_LINKED)
     if vis == "private" and private_allowed() != "ok":
         raise ValueError("Private needs a paid account on Silica hosted"
                          if private_allowed() == "paid" else "Private works between accounts on Silica hosted")
@@ -604,8 +665,12 @@ def set_visibility(slug: str, vis: str, vault: Path | None = None) -> dict:
         raise ValueError(f"no wiki {slug!r} on this page")
     v["visibility"], v["downgraded"] = vis, False
     _save_vaults(items, vault)
+    from silica.config import hosted
+
     h = handle(vault)
-    if h:
+    # On a computer its live/ and paused/ are left to the person who may be serving them (ADR-0157,
+    # Consequences): the account's copy is turned on or off by a Publish, never by moving these.
+    if h and hosted():
         root = site_root(h)
         live, paused = root / "live" / slug, root / "paused" / slug
         if vis == "public" and not live.exists() and paused.exists():
@@ -645,3 +710,4 @@ def swap_in(build: Path, dest: Path) -> Path:
     if old.exists():
         shutil.rmtree(old)
     return dest
+

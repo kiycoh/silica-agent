@@ -36,6 +36,14 @@ def client(tmp_vault, tmp_path, monkeypatch):
     reset_manifest_cache()
 
 
+def _as_hosted(monkeypatch) -> None:
+    """Publish builds the pages on the hosted service alone; a computer sends its notes to the
+    account it is linked to (ADR-0157 point 10), which tests/test_link.py covers."""
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://wikis.test")
+
+
 def test_the_view_reports_each_vault_and_what_publish_would_send(client):
     tc, _ = client
     v = tc.get("/public").json()
@@ -55,7 +63,8 @@ def test_the_view_reports_each_vault_and_what_publish_would_send(client):
     assert tc.post("/public/vault/memory", json={"visibility": "private"}).status_code == 400
 
 
-def test_publish_turns_the_vault_public_and_writes_it_and_off_takes_it_down(client):
+def test_publish_turns_the_vault_public_and_writes_it_and_off_takes_it_down(client, monkeypatch):
+    _as_hosted(monkeypatch)
     tc, tmp = client
     tc.post("/public/vault", json={"folder": "Memory"})
     r = tc.post("/public/publish", json={"vault": "memory"}).json()
@@ -71,7 +80,8 @@ def test_publish_turns_the_vault_public_and_writes_it_and_off_takes_it_down(clie
     assert tc.post("/public/vault/memory/remove").json()["vaults"] == []
 
 
-def test_listed_reaches_the_published_manifest_at_once(client):
+def test_listed_reaches_the_published_manifest_at_once(client, monkeypatch):
+    _as_hosted(monkeypatch)
     import json
 
     tc, tmp = client
@@ -102,7 +112,8 @@ def test_the_view_says_what_the_host_said_of_each_wiki(client, monkeypatch):
     assert tc.get("/public").json()["vaults"][0]["review"] == {}
 
 
-def test_a_blocked_wiki_says_why_and_a_request_does_not_reach_its_manifest(client):
+def test_a_blocked_wiki_says_why_and_a_request_does_not_reach_its_manifest(client, monkeypatch):
+    _as_hosted(monkeypatch)
     import json
 
     tc, tmp = client
@@ -119,12 +130,13 @@ def test_a_blocked_wiki_says_why_and_a_request_does_not_reach_its_manifest(clien
     assert tc.get("/public").json()["vaults"][0]["blocked"] == []
 
 
-def test_the_view_and_the_cover_stay_on_what_the_vault_takes_whatever_the_answers_hold_back(client):
+def test_the_view_and_the_cover_stay_on_what_the_vault_takes_whatever_the_answers_hold_back(client, monkeypatch):
     """The drift named at `rights.counted`, as a person meets it: the screen says two, the
     build writes one, and an answer moves only the build."""
     from silica.kernel.write.provenance import append_record
 
     tc, tmp = client
+    _as_hosted(monkeypatch)  # the build, which the hosted service alone runs (ADR-0157 point 10)
     root = tmp / "vault"
     (root / "sources").mkdir()
     (root / "sources" / "Book.md").write_text('---\nsource_file: "/x/Book.pdf"\n---\nThe book.\n', encoding="utf-8")
@@ -654,3 +666,145 @@ def test_a_note_outside_the_wiki_cannot_be_marked(client, tmp_vault):
         assert r.status_code == 400
         r = tc.post("/public/check/note", json={"vault": "memory", "path": path, "on": False})
         assert r.status_code == 400
+
+
+# --- Save as a file (ADR-0157 point 5) ------------------------------------------
+
+def test_save_as_a_file_downloads_the_zip(client):
+    import io
+    import zipfile
+    from urllib.parse import quote
+
+    from silica.kernel.base.home import silica_tmp_dir
+
+    tc, _ = client
+    tc.post("/public/vault", json={"folder": "Memory"})
+    tc.post("/public/vault/memory", json={"title": "Memoria è"})
+    r = tc.get("/public/vault/memory/file")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
+    assert r.headers["content-disposition"] == "attachment; filename*=UTF-8''" + quote("Memoria è by marta.zip")
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert "index.html" in names and "memory/wiki-data.js" in names
+    # the zip was streamed from its own folder, which goes once it is sent
+    assert not list(silica_tmp_dir().glob("wiki-file-*"))
+    # a file publishes nothing
+    v = tc.get("/public").json()["vaults"][0]
+    assert v["visibility"] == "off" and not v["published"]
+    assert tc.get("/public/vault/nowhere/file").status_code == 400
+    assert tc.get("/public/vault/memory/file", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+
+
+def test_on_a_computer_the_file_lands_in_downloads(client, monkeypatch):
+    import os
+    import time
+    import zipfile
+
+    from silica.kernel.base.home import silica_tmp_dir
+    from silica.ui.web import public_routes
+
+    tc, tmp = client
+    dl = tmp / "Downloads"
+    dl.mkdir()
+    monkeypatch.setattr(public_routes, "_downloads", lambda: dl)
+    # a build killed by a signal leaves its folder; the next build clears what is past an hour
+    old, fresh = silica_tmp_dir() / "wiki-file-old", silica_tmp_dir() / "wiki-file-fresh"
+    old.mkdir()
+    fresh.mkdir()
+    hours_ago = time.time() - 7200
+    os.utime(old, (hours_ago, hours_ago))
+    tc.post("/public/vault", json={"folder": "Memory"})
+    tc.post("/public/vault/memory", json={"title": "Memoria"})
+    first = tc.post("/public/vault/memory/file").json()
+    assert first == {"path": str(dl / "Memoria by marta.zip"), "name": "Memoria by marta.zip", "folder": "Downloads",
+                     "notes": 2, "bytes": (dl / "Memoria by marta.zip").stat().st_size}
+    assert "memory/wiki-data.js" in zipfile.ZipFile(first["path"]).namelist()
+    # a second save never overwrites the first
+    second = tc.post("/public/vault/memory/file").json()
+    assert second["name"] == "Memoria by marta (2).zip" and Path(second["path"]).is_file()
+    assert Path(first["path"]).stat().st_size == first["bytes"]
+    assert sorted(p.name for p in silica_tmp_dir().glob("wiki-file-*")) == ["wiki-file-fresh"]
+    v = tc.get("/public").json()["vaults"][0]
+    assert v["visibility"] == "off" and not v["published"]
+    # the line names the folder the file is in, as the person's desktop names it
+    other = tmp / "Scaricati"
+    other.mkdir()
+    monkeypatch.setattr(public_routes, "_downloads", lambda: other)
+    assert tc.post("/public/vault/memory/file").json()["folder"] == "Scaricati"
+    monkeypatch.setattr(public_routes, "_downloads", lambda: dl)
+    assert tc.post("/public/vault/nowhere/file").status_code == 400
+    assert tc.post("/public/vault/memory/file", headers={"Origin": "https://evil.test"}).status_code == 403
+    # the hosted service has no Downloads of the person's: its browser downloads the GET
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    assert tc.post("/public/vault/memory/file").status_code == 404
+    assert tc.post("/public/reveal", json={"path": first["path"]}).status_code == 404
+    assert tc.get("/public/vault/memory/file").headers["content-type"] == "application/zip"
+    assert sorted(p.name for p in dl.iterdir()) == ["Memoria by marta (2).zip", "Memoria by marta.zip"]
+
+
+def test_reveal_refuses_a_path_outside_downloads(client, monkeypatch):
+    from silica.ui.web import public_routes
+
+    tc, tmp = client
+    dl = tmp / "Downloads"
+    dl.mkdir()
+    (dl / "a.zip").write_bytes(b"zip")
+    (tmp / "elsewhere.zip").write_bytes(b"zip")
+    (dl / "out").symlink_to(tmp)
+    opened = []
+    monkeypatch.setattr(public_routes, "_downloads", lambda: dl)
+    monkeypatch.setattr(public_routes, "_open_folder", opened.append)
+    # a path under a file names that file as its folder, and the opener would launch it
+    for path in (tmp / "elsewhere.zip", dl / ".." / "elsewhere.zip", dl / "out" / "elsewhere.zip", dl, "a.zip", "",
+                 dl / "a.zip" / "x", dl / "gone.zip"):
+        assert tc.post("/public/reveal", json={"path": str(path)}).status_code == 400, path
+    assert opened == []
+    assert tc.post("/public/reveal", json={"path": str(dl / "a.zip")}, headers={"Origin": "https://evil.test"}).status_code == 403
+    assert tc.post("/public/reveal", json={"path": str(dl / "a.zip")}).status_code == 200
+    assert opened == [dl.resolve()]
+
+
+def test_downloads_is_the_desktop_s_answer_unless_that_is_the_home_folder(tmp_path, monkeypatch):
+    """xdg-user-dir answers $HOME when no Downloads is set: saving there and saying
+    "in Downloads" would be false, so the home folder is no answer."""
+    from silica.ui.web import public_routes
+
+    home, bin_ = tmp_path / "home", tmp_path / "bin"
+    home.mkdir()
+    bin_.mkdir()
+    xdg = bin_ / "xdg-user-dir"
+    xdg.write_text('#!/bin/sh\necho "$ANSWER"\n', encoding="utf-8")
+    xdg.chmod(0o755)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", f"{bin_}:/usr/bin:/bin")
+    monkeypatch.setenv("ANSWER", str(home))
+    assert public_routes._downloads() == home / "Downloads" and (home / "Downloads").is_dir()
+    (home / "Scaricati").mkdir()
+    monkeypatch.setenv("ANSWER", str(home / "Scaricati"))
+    assert public_routes._downloads() == home / "Scaricati"
+    monkeypatch.setenv("PATH", "/nonexistent")
+    assert public_routes._downloads() == home / "Downloads"
+
+
+def test_a_file_leaves_out_what_publish_leaves_out_until_it_is_answered(client, tmp_vault, monkeypatch):
+    """The check runs for a file as for a Publish (ADR-0157 point 5): a note made from a file nobody
+    answered for stays out of both, and the answer brings it into both."""
+    import io
+    import zipfile
+
+    # where a Publish builds pages to compare with: the hosted service, whose file is a download
+    _as_hosted(monkeypatch)
+    tc, root = client
+    _with_a_book(tmp_vault, tc, root)
+
+    def pages() -> set[str]:
+        names = zipfile.ZipFile(io.BytesIO(tc.get("/public/vault/memory/file").content)).namelist()
+        return {n for n in names if n.startswith("memory/") and n.endswith(".html") and n != "memory/index.html"}
+
+    check = tc.get("/public/check", params={"vault": "memory"}).json()
+    assert check["ask"] is True and len(pages()) == check["count"]["notes"] == 1
+    assert "memory/forgetting-curve.html" not in pages()
+    assert tc.post("/public/publish", json={"vault": "memory"}).json()["result"]["notes"] == 1
+    tc.post("/public/check/answer", json={"vault": "memory", "key": "Book.pdf", "answer": "mine"})
+    assert len(pages()) == 2 and "memory/forgetting-curve.html" in pages()
+    assert tc.post("/public/publish", json={"vault": "memory"}).json()["result"]["notes"] == 2

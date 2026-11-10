@@ -28,7 +28,7 @@ def test_the_views_are_read_and_hosted_drops_what_it_hides(monkeypatch):
     monkeypatch.setenv("SILICA_HOSTED", "1")
     hosted = dict(panel(hosted=True))
     assert [t for t, _ in local["the views"]] == ["a chat", "Discover", "Explore", "Memorize", "Calendar",
-                                                  "My Wikis", "Examine", "a new note"]
+                                                  "Wikis", "Examine", "a new note"]
     assert "Examine" not in [t for t, _ in hosted["the views"]]
     assert "Examine" not in _rows(panel(hosted=True))
 

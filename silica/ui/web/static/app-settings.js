@@ -618,7 +618,12 @@ function renderAbout(host, data) {
   // No "updates": a tenant cannot update itself. No "report a bug": it opens
   // a public GitHub issue, and /bug_report is refused on hosted.
   if (data.hosted) {
-    if (document.documentElement.dataset.signout !== undefined) renderSignOutEverywhere(host);
+    // /link/* is the gateway's (ADR-0157 point 9), so it shares the sign-out gate:
+    // a hosted build without the gateway would answer both 404.
+    if (document.documentElement.dataset.signout !== undefined) {
+      renderSignOutEverywhere(host);
+      renderLinkedComputers(host);
+    }
     return;
   }
   stInfoRow(host, "updates", data.behind
@@ -643,7 +648,8 @@ function renderSignOutEverywhere(host) {
   row.dataset.search = "sign out everywhere session device account";
   const label = mkEl("div", "st-label");
   label.appendChild(mkEl("span", "st-name", "sign out everywhere"));
-  label.appendChild(mkEl("div", "st-help", "ends every session of this account, this window's too"));
+  // the gateway removes the links with the sessions (ADR-0157 point 9): a computer learns it at its next Publish
+  label.appendChild(mkEl("div", "st-help", "ends every session of this account, this window's too, and unlinks every computer linked to it"));
   row.appendChild(label);
   const form = mkEl("form", "st-ctl");
   form.method = "post";
@@ -653,6 +659,66 @@ function renderSignOutEverywhere(host) {
   form.appendChild(btn);
   row.appendChild(form);
   host.appendChild(row);
+}
+
+// By hand: toLocaleDateString("en-GB") spells September "Sept" on current ICU, and
+// the copy is "d Mon yyyy" on every browser.
+function stLinkDate(seconds) {
+  const d = new Date(seconds * 1000);
+  return `${d.getDate()} ${ST_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+// The computers whose Silica may publish to this account (ADR-0157 point 9). The
+// list is the gateway's; a link is its token's hash, so Remove is the only
+// control and the computer finds out at its next Publish.
+async function renderLinkedComputers(host) {
+  const el = mkEl("div", "st-connector");
+  el.appendChild(mkEl("div", "st-conn-title", "Linked computers"));
+  host.appendChild(el);
+  const line = (text) => el.appendChild(mkEl("div", "st-note-line", text));
+  const draw = async () => {
+    el.querySelectorAll(".st-row, .st-note-line").forEach((e) => e.remove());
+    let links;
+    try {
+      const r = await fetch("/link/list");
+      if (!r.ok) throw new Error(r.status);
+      links = await r.json();
+    } catch { line("Linked computers could not be read."); return; }
+    if (!links.length) {
+      line("No computer is linked. A Silica on a computer links from Wikis → My wikis → Link an account.");
+      return;
+    }
+    for (const l of links) {
+      const row = mkEl("div", "st-row");
+      row.dataset.search = "linked computers link remove wikis publish";
+      const label = mkEl("div", "st-label");
+      label.appendChild(mkEl("span", "st-name", `Linked ${stLinkDate(l.created)} · until ${stLinkDate(l.expires)}`));
+      row.appendChild(label);
+      const ctl = mkEl("div", "st-ctl");
+      const btn = mkEl("button", "st-btn st-safe", "Remove");
+      btn.type = "button";
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          const r = await fetch("/link/revoke", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: l.id }),
+          });
+          if (!r.ok) throw new Error(r.status);
+        } catch {
+          btn.disabled = false;
+          if (!el.querySelector(".st-note-line")) line("That computer could not be removed.");
+          return;
+        }
+        draw();
+      });
+      ctl.appendChild(btn);
+      row.appendChild(ctl);
+      el.appendChild(row);
+    }
+  };
+  await draw();
 }
 
 // The attached payload is built by the server, not read off this panel: the API

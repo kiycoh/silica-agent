@@ -254,6 +254,8 @@ LIVE: dict[str, Setting] = {row.key: row for row in (
     Setting("SILICA_GUI_SOCKET", type=str.strip, hosted=True),
     Setting("SILICA_HOST_DIR", type=str.strip, hosted=True),
     Setting("SILICA_INVITATIONS_DIR", type=str.strip, hosted=True),
+    # Where Open a file unpacks a wiki file (ADR-0157 point 7), beside the relay's folder above.
+    Setting("SILICA_FILE_INVITATIONS_DIR", type=str.strip),
     Setting("SILICA_VAULT_MAX_NOTES", type=str.strip, hosted=True),
     Setting("SILICA_VAULT_MAX_MB", type=str.strip, hosted=True),
     Setting("SILICA_AGENT_ID", type=str.strip),
@@ -264,6 +266,8 @@ LIVE: dict[str, Setting] = {row.key: row for row in (
     Setting("SILICA_PUBLIC_SAVE_URL", type=str.strip, doc=True, hosted=True),
     Setting("SILICA_PUBLIC_HOSTS", type=str.strip, doc=True, hosted=True),
     Setting("SILICA_PUBLIC_REPORT", type=str.strip, doc=True, hosted=True),
+    # The gateway a computer links to (ADR-0157 point 9); unset is the hosted service's own.
+    Setting("SILICA_LINK_HOST", type=str.strip),
     # The key each hosted provider reads, from the table the chain already uses,
     # and the one litellm reads by itself. SILICA_ZOTERO_API_KEY is written by a
     # grant mid-session (claim_env), so a field would keep it empty until restart.

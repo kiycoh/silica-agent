@@ -251,7 +251,7 @@ layers = [
   "silica.kernel.report : silica.kernel.organize",
   "silica.kernel.vault : silica.kernel.progress : silica.kernel.learn : silica.kernel.link : silica.kernel.public_site : silica.kernel.check : silica.kernel.user_memory : silica.kernel.vault_language : silica.kernel.graph : silica.kernel.outline",
   "silica.kernel.recall : silica.kernel.rights",
-  "silica.kernel.code : silica.kernel.calendar : silica.kernel.prep_delegation : silica.kernel.publish : silica.kernel.run_context : silica.kernel.vault_files",
+  "silica.kernel.code : silica.kernel.calendar : silica.kernel.prep_delegation : silica.kernel.publish : silica.kernel.account_link : silica.kernel.run_context : silica.kernel.vault_files",
   "silica.kernel.write : silica.kernel.proposed_skills",
   "silica.kernel.text : silica.kernel.context_builder : silica.kernel.image_meta : silica.kernel.partition : silica.kernel.prompts : silica.kernel.scrub : silica.kernel.system_lines : silica.kernel.vault_instructions : silica.kernel.contested_register : silica.kernel.distill_cache : silica.kernel.forms : silica.kernel.graph_diff : silica.kernel.job_records : silica.kernel.personas : silica.kernel.plans : silica.kernel.raws : silica.kernel.residue : silica.kernel.workqueue : silica.kernel.workspaces",
   "silica.driver",
