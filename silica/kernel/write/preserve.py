@@ -23,7 +23,6 @@ golden probe and the CI fixture test, which must run without a vault.
 from __future__ import annotations
 
 import enum
-import hashlib
 import logging
 import re
 import sys
@@ -352,7 +351,7 @@ def _untouched_draft(path: str, prior: str) -> bool:
     data, _raw, _body = frontmatter.split(prior)
     if not isinstance(data, dict) or "review" not in data:
         return False
-    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
+    from silica.kernel.write.undo_journal import active_vault, content_hash, get_undo_journal
 
     try:
         post = get_undo_journal().newest_post_hash(path, active_vault())
@@ -360,7 +359,7 @@ def _untouched_draft(path: str, prior: str) -> bool:
         # No journal, no grant: the write is judged like any other.
         logger.debug("preservation: journal unreadable for %s: %s", path, exc)
         return False
-    return post is not None and post == hashlib.sha256(prior.encode("utf-8")).hexdigest()
+    return post is not None and post == content_hash(prior)
 
 
 def check_write(path: str, before: str | None, after: str, *,
