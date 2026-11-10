@@ -54,15 +54,17 @@ from silica.kernel.report.overlays import (
     _EDGE_COLOR_PROPOSED_PAPER,
 )
 from silica.kernel.graph.graph_export import (
-    _EDGE_COLOR_AMBIGUOUS,
-    _EDGE_COLOR_AMBIGUOUS_PAPER,
-    _EDGE_COLOR_EXTRACTED,
-    _EDGE_COLOR_EXTRACTED_PAPER,
-    _EDGE_COLOR_SIMILAR,
-    _EDGE_COLOR_SIMILAR_PAPER,
     Community,
     SubArea,
     Zone,
+)
+from silica.kernel.graph.palette import (
+    EDGE_COLOR_AMBIGUOUS,
+    EDGE_COLOR_AMBIGUOUS_PAPER,
+    EDGE_COLOR_EXTRACTED,
+    EDGE_COLOR_EXTRACTED_PAPER,
+    EDGE_COLOR_SIMILAR,
+    EDGE_COLOR_SIMILAR_PAPER,
 )
 
 logger = logging.getLogger(__name__)
@@ -235,7 +237,7 @@ def _frame_context(
     similar_row = (
         f'<label class="filter-row" style="margin-top:4px" title="Embedding k-NN: notes pulled together by semantic similarity">'
         f'<input type="checkbox" id="cb-similar" checked onchange="updateEdgeFilter()">'
-        f'<div class="dot-edge" style="--c:{_EDGE_COLOR_SIMILAR};--cp:{_EDGE_COLOR_SIMILAR_PAPER}"></div>similar'
+        f'<div class="dot-edge" style="--c:{EDGE_COLOR_SIMILAR};--cp:{EDGE_COLOR_SIMILAR_PAPER}"></div>similar'
         f'<span class="ct">{n_similar}</span>'
         f'</label>'
     ) if n_similar else ""
@@ -292,7 +294,7 @@ def _frame_context(
         f'another, read from the DOI and arXiv ids in its reference list. Derived at every build '
         f'and never written into a note; the arrow points at the cited paper.">'
         f'<input type="checkbox" id="cb-cites" checked onchange="updateEdgeFilter()">'
-        f'<div class="dot-edge cites" style="--c:{_EDGE_COLOR_EXTRACTED};--cp:{_EDGE_COLOR_EXTRACTED_PAPER}"></div>'
+        f'<div class="dot-edge cites" style="--c:{EDGE_COLOR_EXTRACTED};--cp:{EDGE_COLOR_EXTRACTED_PAPER}"></div>'
         f'cites'
         f'<span class="ct">{n_cites}</span>'
         f'</label>'
@@ -498,8 +500,8 @@ def _frame_context(
         # The same constants paint the legend swatches below, so the JS reads
         # the edge colours from here and not from literals of its own.
         "colors": {
-            "extracted": _EDGE_COLOR_EXTRACTED,
-            "extracted_paper": _EDGE_COLOR_EXTRACTED_PAPER,
+            "extracted": EDGE_COLOR_EXTRACTED,
+            "extracted_paper": EDGE_COLOR_EXTRACTED_PAPER,
             "similar_particle": _EDGE_COLOR_SIMILAR_PARTICLE,
             "similar_particle_paper": _EDGE_COLOR_SIMILAR_PARTICLE_PAPER,
             "gap": _EDGE_COLOR_GAP,
@@ -519,10 +521,10 @@ def _frame_context(
         "n_gaps": n_gaps,
         "n_communities": n_communities,
         "n_areas": len(areas),
-        "color_extracted": _EDGE_COLOR_EXTRACTED,
-        "color_extracted_paper": _EDGE_COLOR_EXTRACTED_PAPER,
-        "color_ambiguous": _EDGE_COLOR_AMBIGUOUS,
-        "color_ambiguous_paper": _EDGE_COLOR_AMBIGUOUS_PAPER,
+        "color_extracted": EDGE_COLOR_EXTRACTED,
+        "color_extracted_paper": EDGE_COLOR_EXTRACTED_PAPER,
+        "color_ambiguous": EDGE_COLOR_AMBIGUOUS,
+        "color_ambiguous_paper": EDGE_COLOR_AMBIGUOUS_PAPER,
         "color_gap": _EDGE_COLOR_GAP,
         "color_gap_paper": _EDGE_COLOR_GAP_PAPER,
         "tree_html": tree_html,
@@ -586,7 +588,7 @@ def render_html(
 # alpha channel outright. So the colour is blended against the void here, once,
 # and both renderers get an opaque colour that already looks faint.
 #
-# It is derived UPWARD from the line, not downward. The line is _EDGE_COLOR_SIMILAR
+# It is derived UPWARD from the line, not downward. The line is EDGE_COLOR_SIMILAR
 # at opacity 0.35, which over --void lands at about #08405E; a particle at or
 # below that is a moving dot you cannot see. This sits a step above it — the same
 # azure blended at 0.65 — which is the whole budget the effect gets: enough that
@@ -595,7 +597,7 @@ _EDGE_COLOR_SIMILAR_PARTICLE = "#056E9A"  # one step up from the line's apparent
 
 # The paper pair. Same derivation, opposite direction: a photon that cannot use
 # alpha has to be blended against the floor it will sit on, and on paper that
-# blend goes toward white. The similar particle is _EDGE_COLOR_SIMILAR_PAPER
+# blend goes toward white. The similar particle is EDGE_COLOR_SIMILAR_PAPER
 # blended one step DOWN from its line's apparent value, because on a light floor
 # a faint dot is a dark one — the reverse of the crystal case above and the
 # reason this is a second constant rather than the same value reused.
@@ -795,10 +797,11 @@ def export_graph(
         files = file_layer(first_group=len(communities))
     except Exception as exc:
         logger.warning("graph_view: file layer skipped (%s)", exc)
-    from silica.kernel.graph.graph_export import Community, _community_color
+    from silica.kernel.graph.graph_export import Community
+    from silica.kernel.graph.palette import community_color
 
-    file_areas = [Community(id=g, label=label, color=_community_color(g),
-                            color_paper=_community_color(g, on_paper=True), size=n)
+    file_areas = [Community(id=g, label=label, color=community_color(g),
+                            color_paper=community_color(g, on_paper=True), size=n)
                   for g, label, n in files["areas"]]
 
     html_out = render_html(

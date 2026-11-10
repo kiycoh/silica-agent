@@ -25,7 +25,7 @@ from typing import Any
 from silica.kernel.base.syntax import FENCE_LINE_RE
 from silica.kernel.calendar.daily import daily_date, daily_notes, daily_rule
 from silica.kernel.calendar.tasks import FIELD_START
-from silica.kernel.graph.graph_export import _NODE_DEFAULT_COLOR, similar_edge
+from silica.kernel.graph.palette import NODE_DEFAULT_COLOR, similar_edge
 
 logger = logging.getLogger(__name__)
 
@@ -209,4 +209,4 @@ def neutral_lone_dailies(nodes: list[dict]) -> None:
             size[n.get("group", -1)] = size.get(n.get("group", -1), 0) + 1
     for n in nodes:
         if n.get("type") == "daily" and (n.get("group", -1) < 0 or size[n["group"]] == 1):
-            n["color"] = dict(_NODE_DEFAULT_COLOR)
+            n["color"] = dict(NODE_DEFAULT_COLOR)

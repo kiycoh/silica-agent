@@ -314,12 +314,12 @@ def note_structure(canon: str) -> dict:
 def _cut_figure(layout: dict) -> dict:
     """The cut's neighbourhood dressed for the drawer: names, and each area's
     hue in both themes, the frame's own (ADR-0075, Place)."""
-    from silica.kernel.graph.graph_export import area_color
+    from silica.kernel.graph.palette import community_color
 
     nodes = [{**{k: v for k, v in n.items() if k != "id"}, **row(n["id"])} for n in layout["nodes"]]
     areas = sorted({n["area"] for n in nodes if n["area"] >= 0})
     return {"nodes": nodes, "edges": layout["edges"],
-            "colors": {a: [area_color(a), area_color(a, on_paper=True)] for a in areas}}
+            "colors": {a: [community_color(a), community_color(a, on_paper=True)] for a in areas}}
 
 
 def note_ladder(canon: str, *, near: int = 2, per_rung: int = 3) -> dict:

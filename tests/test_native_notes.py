@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from silica.kernel.graph import daily_layer, graph_export
+from silica.kernel.graph import daily_layer, graph_export, palette
 from silica.kernel.recall import embed
 from tests.test_daily_layer import _Store
 from tests.test_zotero_graph_frame import STATIC, _pure, needs_node
@@ -53,7 +53,7 @@ def test_a_native_note_and_its_links_are_not_in_the_counted_graph():
 
 def _plan_star():
     """A plan linking every note of a vault whose own links form two pairs."""
-    grey = graph_export._NODE_DEFAULT_COLOR   # what build_graph_data gives every node
+    grey = palette.NODE_DEFAULT_COLOR   # what build_graph_data gives every node
     notes = [{"id": f"{x}.md", "label": x, "type": "note", "path": f"{x}.md", "size": 16,
               "color": dict(grey)} for x in "abcd"]
     plan = {"id": "Plans/P.md", "label": "P", "type": "plan", "path": "Plans/P.md", "size": 16,
@@ -88,7 +88,7 @@ def test_the_export_draws_the_plan_and_counts_none_of_its_links(monkeypatch, tmp
     # ...in no area, at the base size, and joining no two areas: without the
     # plan, a-b and c-d are two areas, and with it counted they were one.
     assert plan["group"] == -1 and plan["size"] == 16
-    assert plan["color"] == graph_export._NODE_DEFAULT_COLOR
+    assert plan["color"] == palette.NODE_DEFAULT_COLOR
     groups = {seen["nodes"][f"{x}.md"]["group"] for x in "abcd"}
     assert len(groups) == 2 and -1 not in groups
     # The area is named after one of its notes, never after the plan.

@@ -2352,13 +2352,13 @@ def test_community_colour_has_a_paper_band():
     The dark band is picked to survive a near-black floor; reusing it on paper
     puts every community dot at roughly the contrast of the page it sits on.
     """
-    from silica.kernel.graph.graph_export import _community_color, _zone_color
+    from silica.kernel.graph.palette import community_color, zone_color
 
     for i in range(6):
-        assert _community_color(i) != _community_color(i, on_paper=True)
-        assert _zone_color(i) != _zone_color(i, on_paper=True)
+        assert community_color(i) != community_color(i, on_paper=True)
+        assert zone_color(i) != zone_color(i, on_paper=True)
     # and the two partitions still do not share a colour key (ADR-0023)
-    assert _community_color(3, on_paper=True) != _zone_color(3, on_paper=True)
+    assert community_color(3, on_paper=True) != zone_color(3, on_paper=True)
 
 
 def test_health_hides_the_hosts_converters_from_a_tenant(client, monkeypatch):

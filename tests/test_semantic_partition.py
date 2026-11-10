@@ -14,6 +14,7 @@ import orjson
 import pytest
 
 from silica.kernel.graph import graph_export as ge
+from silica.kernel.graph import palette
 
 
 def _nodes(*ids):
@@ -89,7 +90,7 @@ def test_no_embed_index_means_absent_not_disguised(snapshot):
 
 def test_the_two_partitions_share_no_colour_key():
     """Same id, two partitions, two colours — a swatch names one layer only."""
-    assert all(ge._zone_color(i) != ge._community_color(i) for i in range(32))
+    assert all(palette.zone_color(i) != palette.community_color(i) for i in range(32))
 
 
 def test_id_spaces_live_in_separate_files():

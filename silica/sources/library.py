@@ -330,7 +330,7 @@ def file_layer(first_group: int) -> dict:
     and the vault's files, so a vector build landing redraws the edges."""
     from silica.config import CONFIG, hosted
     from silica.kernel import raws as raw_index
-    from silica.kernel.graph.graph_export import _community_color, similar_edge
+    from silica.kernel.graph.palette import community_color, similar_edge
 
     if hosted() or not CONFIG.vault_path:
         return {"nodes": [], "edges": [], "areas": []}
@@ -361,7 +361,7 @@ def file_layer(first_group: int) -> dict:
     group = {a: first_group + i for i, a in enumerate(names)}
 
     def colour(g: int, read: bool) -> dict:
-        c, paper = _community_color(g), _community_color(g, on_paper=True)
+        c, paper = community_color(g), community_color(g, on_paper=True)
         if not read:
             c, paper = _muted(c), _muted(paper)
         return {"background": c, "border": c, "background_paper": paper,

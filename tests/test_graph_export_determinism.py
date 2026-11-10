@@ -9,7 +9,7 @@ hash-dependent, so E(vault) drifted run to run on an unchanged vault.
 Freezing the order fixed WHICH partition we land on but not what each part is
 CALLED: `louvain_communities` returns its list of sets in a per-process order,
 so three runs on an unchanged vault numbered the same 78-member community 60,
-61, 60. The id is not cosmetic — `_community_color` is keyed on it (a community
+61, 60. The id is not cosmetic — `palette.community_color` is keyed on it (a community
 changed colour between runs) and `clusters_ctx.json` persists it for readers in
 other processes.
 """

@@ -12,7 +12,8 @@ import json
 from unittest.mock import patch
 
 
-from silica.kernel.graph.graph_export import Community, _community_color, detect_communities
+from silica.kernel.graph.graph_export import Community, detect_communities
+from silica.kernel.graph.palette import community_color
 from silica.tools.graph_view import render_html
 
 
@@ -87,7 +88,7 @@ class TestCommunityFallback:
         edges = [_edge("e0", "A", "B"), _edge("e1", "C", "D")]
         result = detect_communities(nodes, edges)
         for c in result:
-            expected_color = _community_color(c.id)
+            expected_color = community_color(c.id)
             assert c.color == expected_color
 
     def test_community_dataclass_fields(self):
@@ -189,7 +190,7 @@ class TestRenderHtmlCommunities:
         return Community(
             id=cid,
             label=label,
-            color=_community_color(cid),
+            color=community_color(cid),
             size=size,
         )
 

@@ -140,11 +140,11 @@ def test_shape_ships_the_areas_reading_and_the_colours_bridges_paints_with(clien
     """ADR-0060: an area carries the colour its notes wear on the graph, so a
     disc and the dots it stands for agree. The zone rows it shipped beside them
     went with the graph's zones (ADR-0136)."""
-    from silica.kernel.graph.graph_export import _community_color
+    from silica.kernel.graph.palette import community_color
 
     _two_triangles(tmp_vault, "[[A]] [[B]] [[D]]")
     s = client.get("/shape").json()
     assert "zone_bridges" not in s and "zones" not in s
     assert [(a["color"], a["color_paper"]) for a in s["areas"]] == [
-        (_community_color(a["id"]), _community_color(a["id"], on_paper=True)) for a in s["areas"]]
+        (community_color(a["id"]), community_color(a["id"], on_paper=True)) for a in s["areas"]]
     assert "bridges" not in s, "a row read a note each for a surface that is gone (ADR-0152)"
