@@ -30,9 +30,10 @@ def _model_vault_line(model_slug: str, worker_slug: str, vault: str) -> Text:
 def print_home() -> None:
     """Banner + model/vault line. Shown at launch and after /clear."""
     vault = Path(CONFIG.vault_path).name if CONFIG.vault_path else (CONFIG.vault_name or "—")
+    from silica.model.providers import resolve_role
+
     model_slug = (CONFIG.model or "(not configured)").rsplit("/", 1)[-1]
-    worker_model = CONFIG.worker_model or CONFIG.model or "(not configured)"
-    worker_slug = worker_model.rsplit("/", 1)[-1]
+    worker_slug = (resolve_role("worker")[0] or "(not configured)").rsplit("/", 1)[-1]
 
     CONSOLE.print()
     print_banner()

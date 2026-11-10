@@ -537,6 +537,8 @@ def run_distiller(
     # network round trip to replay a stored reply. Fingerprints only under the
     # flag: entry_key serializes the full context payload, a per-note cost the
     # default-off live path must not pay.
+    from silica.model.providers import resolve_role
+
     cache_ns = cache_key = None
     if distill_cache.enabled():
         cache_ns = distill_cache.prompt_fingerprint(prompt_text)
@@ -545,8 +547,7 @@ def run_distiller(
             "schema": "structure" if (two_pass or structure_only) else "full",
             "two_pass": two_pass,
             "escalate": escalate,
-            "model": (CONFIG.distill_escalation_model if escalate
-                      else CONFIG.worker_model) or CONFIG.model,
+            "model": resolve_role("escalation" if escalate else "worker")[0],
             # max_tokens deliberately out of the key. It is derived
             # from live provider limits, so including it would turn an
             # unreachable provider into a cache miss instead of a replay. Put
@@ -576,7 +577,6 @@ def run_distiller(
     explicit_ceiling = ceiling > 0
     if not context_window or not ceiling:
         from silica.model.limits import model_limits
-        from silica.model.providers import resolve_role
         w_model, _key = resolve_role("escalation" if escalate else "worker")
         window, out_cap = model_limits(w_model.split("/", 1)[0], w_model)
         context_window = context_window or window or 262144

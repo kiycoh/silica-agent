@@ -339,6 +339,7 @@ def build(leaf: str, *, language: str | None = None, ask: Callable[..., dict] | 
     an interrupted build resumes where it stopped with the skeleton it had.
     """
     from silica.config import CONFIG
+    from silica.model.providers import resolve_role
     ask = ask or ol._default_ask
     leaf_raw = (Path(CONFIG.vault_path) / leaf).read_text(encoding="utf-8")
     sha = _sha(leaf_raw)
@@ -380,7 +381,7 @@ def build(leaf: str, *, language: str | None = None, ask: Callable[..., dict] | 
     relations, rel_dropped = _relations(ideas, secs, stem)
     history = (old.get("claims") or []) + (old.get("archived") or [])
     meta = {"leaf": leaf, "leaf_sha256": sha, "built": datetime.now().isoformat(timespec="seconds"),
-            "model": model or CONFIG.worker_model or CONFIG.model or "", "ideas": ideas}
+            "model": model or resolve_role("worker")[0], "ideas": ideas}
 
     def _inventory() -> dict:
         claims = [c for s in secs if s["section"] in done for c in done[s["section"]]["claims"]] + relations

@@ -171,6 +171,23 @@ class TestReplayInsteadOfReRoll:
 
         assert len(fake.calls) == 1
 
+    def test_the_key_names_the_model_the_call_runs_on(self, distill, monkeypatch):
+        """A bare worker id with no provider runs on the router (resolve_role),
+        so a new router model is a new key: the key used to name the bare id,
+        and replayed the old router's reply as the new one's."""
+        from silica.config import CONFIG
+
+        monkeypatch.setenv("SILICA_DISTILL_CACHE", "1")
+        monkeypatch.setattr(CONFIG, "_provider", None)
+        monkeypatch.setattr(CONFIG, "worker_model", "qwen-small")
+        monkeypatch.setattr(CONFIG, "worker_provider", None)
+        monkeypatch.setattr(CONFIG, "model", "openrouter/a/one")
+        distill([REPLY])
+        monkeypatch.setattr(CONFIG, "model", "openrouter/a/two")
+        fake, _ = distill([REPLY])
+
+        assert len(fake.calls) == 1
+
     def test_a_failed_reply_is_never_stored(self, distill, monkeypatch):
         """Caching an error would freeze a transient provider fault into the
         corpus for every later run of that arm."""

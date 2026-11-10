@@ -24,6 +24,7 @@ def skill_after_turn(text: str, messages: list[dict], reserved) -> tuple[dict | 
     names the commands a proposal may not shadow."""
     from silica.obs import narration as _narr
     from silica.kernel import proposed_skills as ps
+    from silica.model.providers import resolve_role
     from silica.kernel import user_memory
 
     from silica.kernel.learn.offer import says_lost
@@ -40,7 +41,7 @@ def skill_after_turn(text: str, messages: list[dict], reserved) -> tuple[dict | 
         evidence = ps.detect(text, messages, vault, _narr.NARRATOR.sid)
         if evidence is not None:
             drafted = ps.draft(evidence["asks"], CONFIG)
-            name = ps.stage(vault, drafted, evidence, CONFIG.worker_model or CONFIG.model or "",
+            name = ps.stage(vault, drafted, evidence, resolve_role("worker")[0],
                             reserved=reserved) if drafted else None
             if name:
                 return {"kind": "skill", "text": f"/{name} written from a request you made in "
