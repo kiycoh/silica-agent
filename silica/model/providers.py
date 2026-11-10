@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from silica.model import llm
 from silica.model.limits import base_url
 from silica.model.llm import LLMResponse, openrouter_routing
-from silica.config import ensure_prefix
+from silica.config import ROLE_FIELDS, ensure_prefix, role_provider
 from silica.provider_table import PROVIDERS
 from silica.metrics import emit, ms_since, number, outcome_of
 
@@ -396,13 +396,6 @@ def local_rerank_model(config: Any) -> str:
     return config.local_rerank_model or LOCAL_RERANK_MODEL
 
 
-# The config fields behind each role: (model, provider).
-_ROLES = {
-    "worker": ("worker_model", "worker_provider"),
-    "judge": ("judge_model", "judge_provider"),
-    "escalation": ("distill_escalation_model", "distill_escalation_provider"),
-    "vision": ("vision_model", "vision_provider"),
-}
 # Lanes run on a role and ask their transport for something of their own (get_provider).
 _LANE_ROLE = {"distiller": "worker", "outline": "worker"}
 
@@ -429,16 +422,11 @@ def resolve_role(role: str = "router", config: Any = None) -> tuple[str, str]:
 
         config = CONFIG
     role = _LANE_ROLE.get(role, role)
-    fields = _ROLES.get(role)
     # `or ""` on every read: these fields are Optional on the config, and the
     # router fallback below is a falsiness test either way.
-    model = (getattr(config, fields[0]) or "") if fields else ""
+    model = (getattr(config, ROLE_FIELDS[role][0]) or "") if role in ROLE_FIELDS else ""
     router_provider = config.provider or ""
-    provider = (getattr(config, fields[1]) or "") if fields else ""
-    if role == "vision":
-        # The one role that inherits the chat's provider: hosted, a vision model
-        # is one variable (config.vision_model), and it must not need a second.
-        provider = provider or router_provider
+    provider = role_provider(config, role) if role in ROLE_FIELDS else ""
     # An id with no prefix and no provider beside it names no endpoint, and litellm
     # would refuse the call. It always meant the router here, so a config that worked
     # keeps working. Any prefix counts, not only PROVIDER_PREFIXES: litellm resolves far
