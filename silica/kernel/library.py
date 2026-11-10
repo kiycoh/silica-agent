@@ -88,7 +88,7 @@ SPLIT_OVER = 30         # a step over this many pages is cut ...
 RUN = 15                # ... into runs of this many, the steps of a book with nothing to cut at
 # 8, 30 and 15 are starting values, not measured (ADR-0156, Not decided).
 
-_chapters_memo: dict[str, tuple[tuple, list[dict]]] = {}
+_chapters_memo: dict[str, tuple[tuple, dict]] = {}
 
 
 def _outline(full: Path) -> tuple[int, list[tuple[str, int]]]:
@@ -141,6 +141,7 @@ def ladder(n: int, outline: list[tuple[str, int]], openings: list[tuple[str, int
         source, starts = "chapters", sorted({p: t for t, p in openings}.items())
     else:
         source, starts = "pages", []
+    steps: list[dict]
     if not starts:
         steps = [{"title": "", "from": a, "to": min(n, a + RUN - 1)} for a in range(1, n + 1, RUN)]
     else:
@@ -310,7 +311,7 @@ def _book_vectors(core, docs: list[str], first_lines: dict[str, list[str]]) -> d
         return {}
     meta, rows = loaded
     codes = np.frombuffer(rows.codes, dtype=np.int8).reshape(-1, rows.dim)
-    scales = np.frombuffer(rows.scales, dtype=np.float32)
+    scales = np.asarray(rows.scales, dtype=np.float32)
     out: dict[str, list[float]] = {}
     for rel in docs:
         d = meta["docs"].get(rel)
@@ -394,7 +395,7 @@ def file_layer(first_group: int) -> dict:
         counts: dict[str, int] = {}
         for s in members:
             counts[area[s + "/x"]] = counts.get(area[s + "/x"], 0) + len(sets[s])
-        g = group[max(counts, key=counts.get)]
+        g = group[max(counts, key=lambda a: counts[a])]
         nodes.append({"id": f"edition:{label}", "type": "edition", "path": photos[0], "label": label,
                       "group": g, "color": colour(g, False), "state": "unread", "act": "ocr", "sets": members,
                       "pages": len(photos), "size": round(12 + 6 * math.log2(1 + len(photos) / 40), 1)})
