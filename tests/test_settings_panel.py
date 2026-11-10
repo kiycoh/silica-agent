@@ -160,6 +160,23 @@ def test_changing_the_provider_writes_its_whole_group_at_once(env_file, monkeypa
     assert "SILICA_MODEL=openrouter/" in text
 
 
+def test_a_live_value_is_the_one_the_next_boot_reads(env_file, monkeypatch):
+    """The panel sets a field through its settings row's type: a name typed
+    with spaces was set with them, and stamped on the page, until a restart
+    read it through str.strip."""
+    from silica.config import SETTINGS
+
+    monkeypatch.setattr(CONFIG, "user_name", CONFIG.user_name)
+    monkeypatch.setattr(CONFIG, "max_context_tokens", CONFIG.max_context_tokens)
+    monkeypatch.setenv("SILICA_USER_NAME", "")   # apply() writes os.environ: restored after
+    monkeypatch.setenv("SILICA_MAX_CONTEXT", "")
+
+    assert st.apply("SILICA_USER_NAME", "  Ada  ")["ok"]
+    assert CONFIG.user_name == "Ada" == SETTINGS["SILICA_USER_NAME"].read()
+    assert st.apply("SILICA_MAX_CONTEXT", " 42000 ")["ok"]
+    assert CONFIG.max_context_tokens == 42000
+
+
 def test_adopt_vault_rebuilds_the_driver_on_the_new_path(tmp_vault, tmp_path):
     """The nine steps as one call: a live process holds a driver, an overlay, a
     manifest and vault-scoped caches, and they all still answer for the old

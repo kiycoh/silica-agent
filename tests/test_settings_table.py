@@ -37,15 +37,15 @@ def test_env_example_and_the_table_agree_both_ways():
     assert sorted(example ^ {r.key for r in SETTINGS.values() if r.doc}) == []
 
 
-def test_panel_rows_and_the_table_agree_both_ways():
+def test_every_panel_row_is_a_row_of_the_table():
+    """A panel row names its key, and reads its field and its type from the
+    table: what it does not name is the readonly rows and safe mode, which are
+    no settings."""
     from silica.ui.web import settings as panel
 
-    rows = {r.key: r for section in panel.sections().values() for r in section
+    rows = {r.key for section in panel.sections().values() for r in section
             if r.kind != "readonly" and r.key != panel.settings_ops.SAFE_MODE_KEY}
-    assert sorted(set(rows) ^ {r.key for r in SETTINGS.values() if r.panel}) == []
-    for key, row in rows.items():
-        # `_provider` behind the `provider` property, the one the panel assigns.
-        assert row.attr == SETTINGS[key].field.lstrip("_"), key
+    assert sorted(rows - set(SETTINGS)) == []
 
 
 def test_the_doctor_names_only_keys_that_exist():
