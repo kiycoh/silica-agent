@@ -30,7 +30,7 @@ from urllib.parse import quote
 
 from silica.config import GUI_PORT, live_env, public_save_url
 from silica.kernel import publish, rights
-from silica.kernel.base.formats import SHOWN_IMAGE_EXTS
+from silica.kernel.base.formats import SHOWN_IMAGE_EXTS, WEB_IMAGE_EXTS
 from silica.kernel.base.markdown import strip_ofm_meta
 from silica.kernel.base.syntax import WIKILINK_PREVIEW_RE, WIKILINK_WHOLE_RE
 from silica.kernel.image_meta import strip_location
@@ -456,7 +456,10 @@ def _write_wiki(slug: str, conf: dict, vault: Path, site: _Site, build_dir: Path
         # file of that name nobody reviewed went out.
         key = rights._name_key(target)
         found = plan["files"].get(target) or (vault / wiki["local"][key]["src"] if key in plan["local"] else None)
-        if found is None or not found.is_file():
+        # Open a file keeps only the types saved_page._ASSET takes, so a .bmp or .svg in a wiki file
+        # left its note pointing at an image the reader never got. Left out as a missing image is:
+        # the page keeps its alt text and the reader's .md loses the embed, in a browser too.
+        if found is None or not found.is_file() or (site.file and found.suffix.lower() not in WEB_IMAGE_EXTS):
             copied[target] = ""
             return ""
         # Images are what grows without bound, so a wiki file stops before reading the one that
@@ -466,7 +469,8 @@ def _write_wiki(slug: str, conf: dict, vault: Path, site: _Site, build_dir: Path
         held += found.stat().st_size
         if site.file and held > WIKI_FILE_MAX:
             raise _past_cap()
-        name = f"{len(copied) + 1}-{publish.slugify(found.stem) or 'image'}{found.suffix.lower()}"
+        # capped as linked_publish._pack names a copy: the opener's _ASSET takes 121 characters
+        name = f"{len(copied) + 1}-{publish.slugify(found.stem)[:100] or 'image'}{found.suffix.lower()}"
         (build_dir / "assets" / name).write_bytes(strip_location(found.read_bytes()))
         copied[target] = name
         return name
