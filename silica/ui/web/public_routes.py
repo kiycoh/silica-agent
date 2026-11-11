@@ -575,6 +575,14 @@ def public_reveal(payload: dict):
 # changes only what is made of them. One process per account, so one screen.
 _WIKI: dict[str, dict] = {}
 
+# The check fetches a wiki's remote images one after another (rights.read_wiki), each allowed
+# web_fetch's 30 s a step and 120 s a body, and a failed one is fetched again at every check.
+# Past this the rest stay links until the next check, so a wiki citing a dozen dead hosts opens
+# its screen inside the hosted edge's 125 s cut (linked_publish._refusal) and not after 6 minutes.
+# shortcut: the fetch in flight at the deadline still runs to web_fetch's limits, 90 s worst on a
+# dead host; pass the deadline into web_fetch if a check is ever cut at the edge with this in place.
+_FETCH_SECONDS = 60
+
 
 def _thumbnail(img: dict) -> str:
     """Where the screen reads an image: a kept copy from the route below, the vault's through
@@ -588,7 +596,14 @@ def _sheet(slug: str, *, fresh: bool = False) -> dict:
 
     if fresh or slug not in _WIKI:
         _WIKI.clear()
-        _WIKI[slug] = rights.read_wiki(slug, fetch=fetch_figure)
+        end = time.monotonic() + _FETCH_SECONDS
+
+        def fetch(url: str) -> dict:
+            if time.monotonic() >= end:
+                return {"data": b"", "type": "", "why": "Not read in time"}
+            return fetch_figure(url)
+
+        _WIKI[slug] = rights.read_wiki(slug, fetch=fetch)
     return rights.sheet(_WIKI[slug], rights.answers(), _thumbnail)
 
 

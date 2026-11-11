@@ -705,3 +705,18 @@ def test_an_image_many_notes_cite_is_fetched_once_and_read_once(stats, tmp_vault
     asked: list[str] = []
     _sheet(fetch=lambda u: asked.append(u) or {"data": b"", "type": "", "why": "Could not be read"})
     assert asked == [url] and read.count("Pasted image 1.png") == 1
+
+
+def test_the_check_stops_fetching_at_its_deadline_and_the_rest_stay_links(stats, tmp_vault, monkeypatch):
+    from silica.sources.discover import read
+    from silica.ui.web import public_routes
+
+    _web(tmp_vault)
+    asked: list[str] = []
+    monkeypatch.setattr(read, "fetch_figure", lambda u: asked.append(u) or _png(u))
+    monkeypatch.setattr(public_routes, "_FETCH_SECONDS", 0)
+    sites = [g for g in public_routes._sheet("stats", fresh=True)["groups"] if g["kind"] == "site"]
+    assert asked == [] and sites
+    monkeypatch.setattr(public_routes, "_FETCH_SECONDS", 60)
+    public_routes._sheet("stats", fresh=True)
+    assert len(asked) == 2
