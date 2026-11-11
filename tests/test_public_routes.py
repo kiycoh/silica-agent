@@ -834,3 +834,16 @@ def test_a_turn_on_whose_build_fails_leaves_the_wiki_off_and_its_old_copy_paused
             tc.post("/public/publish", json={"vault": "memory"})
     assert tc.get("/public").json()["vaults"][0]["visibility"] == "off"
     assert not (root / "live" / "memory").exists() and (root / "paused" / "memory").is_dir()
+
+
+def test_a_save_the_disk_refuses_says_so_and_not_that_the_page_was_unreachable(client, monkeypatch):
+    from silica.sources import saved_page
+
+    tc, _ = client
+
+    def full(*a, **kw):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(saved_page, "save_invitation", full)
+    r = tc.post("/vault/invitations/save", json={"author": "sara", "vault": "tesi"})
+    assert r.status_code == 500 and "No space left on device" in r.text and "could not be read" not in r.text

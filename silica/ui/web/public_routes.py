@@ -700,6 +700,12 @@ async def _write_turn(fn, *args, **kwargs):
             out = await asyncio.to_thread(fn, *args, **kwargs)
         except ValueError as exc:
             raise Refused(400, exc)
+        except OSError as exc:
+            # This vault's disk, full or not writable, partway through the notes: not the page's
+            # host, which the 502 below would blame. httpx wraps its socket errors, and web_fetch
+            # turns a name that does not resolve into a ValueError, so neither lands here.
+            logger.warning("save failed: %s: %s", type(exc).__name__, exc)
+            raise HTTPException(500, f"the notes could not be written here ({exc.strerror or exc})")
         except Exception as exc:
             logger.warning("save failed: %s: %s", type(exc).__name__, exc)
             raise HTTPException(502, "that page could not be read right now")
