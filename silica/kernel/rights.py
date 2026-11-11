@@ -585,8 +585,11 @@ def decide(wiki: dict, ans: dict) -> dict:
 
     note_credits: dict[str, str] = {}
     for p in notes:
+        # Open is saved before its license is chosen (save_answer keeps only what was said), and
+        # a note marked as its author's goes out meanwhile: a credit names a license or nothing.
         said = [f"{a['credit']}, {a['license']}" if a.get("credit") else a["license"]
-                for f in wiki["notes"][p]["files"] if (a := ans.get(f, {})).get("answer") == "open"]
+                for f in wiki["notes"][p]["files"]
+                if (a := ans.get(f, {})).get("answer") == "open" and a.get("license")]
         # a computer's note carries its answer itself: the ledger naming its files stayed there
         if (a := _sent(wiki, p)).get("answer") == "open" and a.get("license"):
             said.append(f"{a['credit']}, {a['license']}" if a.get("credit") else a["license"])

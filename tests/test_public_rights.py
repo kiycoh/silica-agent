@@ -663,3 +663,16 @@ def test_an_address_with_brackets_is_fetched_whole(stats, tmp_vault):
 
     _sheet(fetch=fetch)
     assert asked == [url]
+
+
+def test_open_pressed_before_a_license_holds_a_marked_note_as_it_was_and_breaks_nothing(stats, tmp_vault):
+    """Open is saved with no license until one is chosen, the order the screen invites."""
+    from silica.kernel import rights
+
+    _written(stats, "Stats/Bayes.md")
+    tmp_vault.note("Stats/Bayes.md", "In my own words, after the exam.\n")
+    rights.set_rewritten("Stats/Bayes.md", True)
+    _say(ROSS, "open")
+    assert _sheet()["files"]
+    _build()
+    assert "bayes.html" in _names(stats)
