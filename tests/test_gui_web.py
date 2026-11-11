@@ -1089,6 +1089,21 @@ def test_linkify_pathlike_md_token_becomes_link_with_clean_name():
     assert ">mind-maps</a>" in html
 
 
+def test_linkify_reads_a_spaced_markdown_link_as_the_note_it_names():
+    from silica.ui.web.render import linkify
+
+    # CommonMark takes no space in a link destination, so a model's page
+    # citation came out as raw brackets (2026-11-11). The PDF resolves through
+    # the note converted from it, which sits beside it under its stem.
+    index = {"Inbox/BERT, Pre-training": "Inbox/BERT, Pre-training.md"}
+    html = linkify("at [p. 2](Inbox/BERT, Pre-training.pdf) and `[p. 3](Inbox/BERT, Pre-training.pdf)`",
+                   index.get)
+    assert '<a class="note-link" data-path="Inbox/BERT, Pre-training.md">p. 2</a>' in html
+    assert "<code>[p. 3](Inbox/BERT, Pre-training.pdf)</code>" in html  # code stays as written
+    # nothing names it: left as written, no guess
+    assert "[x](Gone dir/y.pdf)" in linkify("[x](Gone dir/y.pdf)", index.get)
+
+
 def test_linkify_bare_word_is_never_linked():
     from silica.ui.web.render import linkify
 
