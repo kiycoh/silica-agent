@@ -351,7 +351,7 @@ def test_no_description_the_demo_sends_points_at_a_tool_it_withholds(monkeypatch
     assert not {n for n in TOOLS if "_" in n and re.search(rf"\b{n}\b", text)} - set(DEMO_TOOLS)
     # what is left of each reads as a sentence
     desc = {n: s["function"]["description"] for n, s in sent.items()}
-    assert "append with silica_patch_note. Checkpointed" in desc["silica_write_note"]
+    assert "append or rewrite with silica_patch_note. Checkpointed" in desc["silica_write_note"]
     assert "use silica_write_note. Every successful patch" in desc["silica_patch_note"]
     assert desc["silica_vault_report"].endswith("escalate (IssueCards, human judgment).")
     vault = sent["silica_recall"]["function"]["parameters"]["properties"]["vault"]["description"]
