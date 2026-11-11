@@ -144,6 +144,11 @@ def _call_worker(config, system_prompt: str, user_message: str) -> NoteContent:
         tools=None,
         response_schema=NoteContent,
         max_tokens=live_env("WIKI_MAX_TOKENS"),
+        # Streamed for the deadline, which then resets per chunk: one subsystem
+        # note takes 3 to 4 minutes on the production model, and the 130 s
+        # wall clock of a non-streaming call (CONFIG.llm_timeout) cut every
+        # one, so /wiki wrote nothing (2026-11-11).
+        on_delta=lambda _kind, _text: None,
     )
     return NoteContent(content=parse_content(response.text or ""))
 

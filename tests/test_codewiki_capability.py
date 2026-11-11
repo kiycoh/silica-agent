@@ -39,8 +39,9 @@ class _FakeProvider:
         self._text = text
         self.messages = None
 
-    def call_llm(self, messages, tools=None, response_schema=None, max_tokens=0):
+    def call_llm(self, messages, tools=None, response_schema=None, max_tokens=0, on_delta=None):
         self.messages = messages
+        self.on_delta = on_delta
         return _FakeResp(self._text)
 
 
@@ -66,6 +67,7 @@ def test_generate_subsystem_note_grounds_prompt(monkeypatch):
     text = render_digest(d)
     note = generate_subsystem_note(d, text, config=None)
     assert note.content.startswith("## kernel")
+    assert callable(fake.on_delta)           # streamed: the deadline is per chunk
     user_msg = fake.messages[1]["content"]
     assert text in user_msg                  # the digest IS the grounding
     assert "kernel" in fake.messages[0]["content"] or "kernel" in user_msg
