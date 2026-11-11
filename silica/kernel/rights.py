@@ -457,6 +457,11 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
     _mark_edits(notes, vault)
 
     on_disk = images_by_name(vault)
+    if conf["from_link"]:
+        # A computer numbers its images from 1 in every wiki it sends (linked_publish._pack), so two
+        # received wikis both hold `1-image.png`; by name alone the second showed the first's file,
+        # which `decide` then held back as nobody's. This wiki's notes point at its own copies.
+        on_disk.update(images_by_name(vault / conf["folder"] / "assets"))
     local: dict[str, dict] = {}
     remote: dict[str, dict] = {}
     titles = {Path(p).stem.casefold(): p for p in paths}
