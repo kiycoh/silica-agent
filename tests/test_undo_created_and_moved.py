@@ -160,3 +160,19 @@ def test_a_failed_move_leaves_no_restore_point(vault):
     res = silica_move("Missing note", "Archive")
     assert "error" in res
     assert get_undo_journal().last_chat_move(CONFIG.vault_path) is None
+
+
+def test_a_note_written_where_the_move_left_is_undone_before_the_move(vault):
+    # The chat renamed a note, then wrote a new one at the path it freed; the
+    # turn's revert sent /undo per card and the move back ran first, refused
+    # because the newer note held its path (demo recording, 2026-11-11).
+    from silica.tools.notes import silica_write_note
+    from silica.tools.wrapped import silica_move
+
+    before = {p: p.read_bytes() for p in vault.rglob("*.md")}
+    assert silica_move("Autoencoders", "Corso/Autoencoders - old.md").get("success")
+    assert silica_write_note("Corso/Autoencoders.md", "# Autoencoders\n\nnew text\n").get("success")
+
+    direct("/undo Corso/Autoencoders.md", [])
+    direct("/undo Corso/Autoencoders - old.md", [])
+    assert {p: p.read_bytes() for p in vault.rglob("*.md")} == before

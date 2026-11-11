@@ -379,7 +379,12 @@ function claimRefs(t, touched, failed) {
     if (effect !== "read") for (const r of refs) if (why.refused || !touched.has(r)) failed.set(r, why);
     return;
   }
-  for (const r of refs) if (effect !== "read" || !touched.has(r)) touched.set(r, effect);
+  // A mutation moves its note to the end: the map keeps notes in the order of
+  // their last change, which is the order the bulk revert takes back in reverse.
+  for (const r of refs) {
+    if (effect !== "read") touched.delete(r);
+    if (!touched.has(r)) touched.set(r, effect);
+  }
 }
 
 // The footer of a turn: a card per mutation, a disabled-with-reason card per
@@ -406,9 +411,11 @@ function turnFooter(touched, failed) {
       u.title = "run /undo for every note this turn touched";
       // One /undo per note, each once the last has ended: a bare /undo takes
       // back only the newest action, so the button reverted one change of N,
-      // and send() refuses while a turn runs.
+      // and send() refuses while a turn runs. Newest first: a note written where
+      // a move left blocks the move back until it is gone, and a note created
+      // then moved has to come back before its creation is undone.
       armThenRun(u, label, `click again to revert ${mutations.length}`, async () => {
-        for (const [ref] of mutations) {
+        for (const [ref] of [...mutations].reverse()) {
           const card = [...w.querySelectorAll(".wcard")].find((c) => c.dataset.ref === ref);
           if (card) {
             card.classList.add("reverting");
