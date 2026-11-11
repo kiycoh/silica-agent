@@ -676,3 +676,17 @@ def test_open_pressed_before_a_license_holds_a_marked_note_as_it_was_and_breaks_
     assert _sheet()["files"]
     _build()
     assert "bayes.html" in _names(stats)
+
+
+def test_an_image_many_notes_cite_is_fetched_once_and_read_once(stats, tmp_vault, monkeypatch):
+    from silica.kernel import rights
+
+    url = "https://dead.test/banner.png"
+    for n in range(3):
+        tmp_vault.note(f"Stats/Cite {n}.md", f"![]({url})\n\n![[Pasted image 1.png]]\n")
+    read: list[str] = []
+    located = rights._located
+    monkeypatch.setattr(rights, "_located", lambda p: read.append(p.name) or located(p))
+    asked: list[str] = []
+    _sheet(fetch=lambda u: asked.append(u) or {"data": b"", "type": "", "why": "Could not be read"})
+    assert asked == [url] and read.count("Pasted image 1.png") == 1

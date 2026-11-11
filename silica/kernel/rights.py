@@ -476,16 +476,21 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
             found = on_disk.get(name)
             if found is None:
                 continue
-            row = local.setdefault(name, {
-                "name": found.name, "src": found.relative_to(vault).as_posix(), "notes": [],
-                "file": leaves["traced"].get(name), "group": "folder:" + _folder_of(p, conf["folder"]),
-                "location": _located(found)})
-            row["notes"].append(p)
+            # Built once a name and not through setdefault, whose default is evaluated on every
+            # call: a logo 500 notes embed was read whole 500 times.
+            if name not in local:
+                local[name] = {
+                    "name": found.name, "src": found.relative_to(vault).as_posix(), "notes": [],
+                    "file": leaves["traced"].get(name), "group": "folder:" + _folder_of(p, conf["folder"]),
+                    "location": _located(found)}
+            local[name]["notes"].append(p)
         # A computer's remote image goes out as the link naming its host (ADR-0153 point 23b): its
         # author answered on the computer, so this account is asked nothing and fetches nothing.
         for url in shown_remote if not conf["from_link"] else ():
-            row = remote.setdefault(url, _remote_row(url, vault, fetch))
-            row["notes"].append(p)
+            # once an address: a dead host ten notes cite cost ten 30 s timeouts
+            if url not in remote:
+                remote[url] = _remote_row(url, vault, fetch)
+            remote[url]["notes"].append(p)
     for row in local.values():
         if row["file"] and row["file"] not in files:
             files[row["file"]] = {"notes": [], "images": [], "credit": leaves["credits"].get(row["file"], "")}
