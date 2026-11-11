@@ -2112,7 +2112,7 @@ function proseLines(md) {
     const end = rows.findIndex((r, k) => k > 0 && r.trimEnd() === "---");
     if (end > 0) i = end + 1;
   }
-  let fence = false, comment = false;
+  let fence = false, comment = false, refs = false;
   for (; i < rows.length; i++) {
     let l = rows[i].trim();
     if (l.startsWith("```")) { fence = !fence; continue; }
@@ -2123,7 +2123,12 @@ function proseLines(md) {
     // A quote's or a callout's body is the note's own prose; a callout's head
     // is only its type.
     l = l.replace(/^(>\s*)+/, "");
-    if (!l || /^(#|\||!\[|\$\$|\[!)/.test(l)) continue;
+    // A Sources section and a footnote's definition say where the note came
+    // from, not what it says: an answer's "Sources:" line shares a paper's
+    // title with them first, and the citation marked the sources/ row
+    // (2026-11-11).
+    if (/^#{1,6}\s/.test(l)) refs = /^#{1,6}\s+(sources|references)\s*$/i.test(l);
+    if (!l || refs || /^(#|\||!\[|\$\$|\[!|\[\^)/.test(l)) continue;
     const plain = l.replace(/^([-*+]|\d+\.)\s+/, "")
       .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1")
       .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[*_`=]+/g, "");
