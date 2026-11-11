@@ -304,7 +304,19 @@ async def public_publish(payload: dict | None = None):
         if hosted():
             if turn_on:
                 publish.set_visibility(slug, "public")
-            out = await asyncio.to_thread(build, slug)
+            try:
+                out = await asyncio.to_thread(build, slug)
+            except Exception:
+                # Turning on put the paused copy back at its address before the build ran, so a
+                # build that fails served the notes struck since; the wiki goes back Off. Its
+                # "Off since Free" line is not restored: set_visibility clears it either way.
+                if turn_on:
+                    try:
+                        publish.set_visibility(slug, "off")
+                    except Exception as undo:
+                        # Logged and not raised: the build's error is the one the person must read.
+                        logger.warning("publish: %s not turned back off (%s: %s)", slug, type(undo).__name__, undo)
+                raise
         else:
             # "Turn off on your account" sends the Off wiki as it is, so its copy there leaves its
             # address; otherwise an Off wiki goes out Public, and the row turns Public only once the
