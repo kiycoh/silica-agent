@@ -36,7 +36,6 @@ from silica.kernel.base.syntax import WIKILINK_PREVIEW_RE, WIKILINK_WHOLE_RE
 from silica.kernel.image_meta import strip_location
 from silica.kernel.text import note_parts
 from silica.kernel.text.render import render
-from silica.kernel.vault_files import find_image
 # one number for the file built here and the file saved_page opens (ADR-0157 Open 4)
 from silica.kernel.publish import WIKI_FILE_MAX
 
@@ -452,8 +451,12 @@ def _write_wiki(slug: str, conf: dict, vault: Path, site: _Site, build_dir: Path
         nonlocal held
         if target in copied:
             return copied[target]
-        found = plan["files"].get(target) or find_image(str(vault), target)
-        if found is None:
+        # The file the check showed for this name (rights.read_wiki), never the path as written
+        # looked up again: `find_image` resolves `Private/x.png` or `.trash/x.png` itself, and a
+        # file of that name nobody reviewed went out.
+        key = rights._name_key(target)
+        found = plan["files"].get(target) or (vault / wiki["local"][key]["src"] if key in plan["local"] else None)
+        if found is None or not found.is_file():
             copied[target] = ""
             return ""
         # Images are what grows without bound, so a wiki file stops before reading the one that

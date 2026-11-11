@@ -665,6 +665,21 @@ def test_an_address_with_brackets_is_fetched_whole(stats, tmp_vault):
     assert asked == [url]
 
 
+# --- what the build copies is what the check read ---------------------------------
+
+def test_the_build_copies_the_image_the_check_showed_and_not_another_of_its_name(stats, tmp_vault):
+    """The check shows one file for a name (vault_files.images_by_name); a note naming another
+    file of that name by its path published that one, which nobody saw."""
+    (stats / "Private").mkdir()
+    (stats / "Private" / "Pasted image 1.png").write_bytes(PNG + b"never shown")
+    tmp_vault.note("Stats/Descriptive/Box plot.md", "Quartiles.\n\n![[Private/Pasted image 1.png]]\n")
+    [shown] = [i for g in _sheet()["groups"] for i in g["images"] if i["name"] == "Pasted image 1.png"]
+    assert "Private" not in shown["src"]
+    _say("folder:Stats/Descriptive", "mine")
+    _build()
+    assert [p.read_bytes() for p in (_live(stats) / "assets").iterdir()] == [PNG + b"Pasted image 1.png"]
+
+
 def test_open_pressed_before_a_license_holds_a_marked_note_as_it_was_and_breaks_nothing(stats, tmp_vault):
     """Open is saved with no license until one is chosen, the order the screen invites."""
     from silica.kernel import rights
