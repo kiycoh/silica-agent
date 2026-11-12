@@ -72,7 +72,7 @@ def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
         if sig:
             sigs[nid] = sig
 
-    out = [DuplicatePair(source=a, target=b, score=round(score, 4))
+    out = [DuplicatePair(source=a, target=b, score=round(score, 4), cosine=False)
            for a, b, score in banded_duplicate_pairs(sigs, threshold=DUP_THRESHOLD)]
     out.sort(key=_pair_key)
     return out

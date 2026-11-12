@@ -119,10 +119,15 @@ def curate(c: Call) -> Result:
         outcome_breakdown = ", ".join(f"{v} {k}" for k, v in outcome.items()) or "no changes"
         out.print(f"  Applied — dispatched [bold]{dispatched}[/] → outcomes: {outcome_breakdown}")
     else:
+        from rich.markup import escape
+
         out.print(f"  Plan — [bold]{total}[/] item(s): {breakdown}")
         for it in res.get("items", []):
-            pair = f" ↔ {it['partner']}" if it.get("partner") else ""
-            out.print(f"  · [bold]{it['kind']}[/]  {it['target']}{pair}")
+            pair = f" ↔ {escape(it['partner'])}" if it.get("partner") else ""
+            # The reason each pair was proposed: a duplicate's percentage, an
+            # autolink's shared concepts (ADR-0164).
+            why = f"  [dim]{escape(it['reason'])}[/]" if it.get("reason") else ""
+            out.print(f"  · [bold]{it['kind']}[/]  {escape(it['target'])}{pair}{why}")
         out.print('  Run [bold]/curate --apply[/] to execute, or ask e.g. "apply only dedup".')
     return out
 

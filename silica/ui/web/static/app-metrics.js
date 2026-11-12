@@ -1825,9 +1825,12 @@ function renderMetrics(d) {
   }
   const props = [
     ["Duplicate pairs", "embeddings propose · graph disposes", d.duplicates,
-     [{ key: "pair", label: "Pair" }, { key: "score", label: "Cosine", num: true },
+     [{ key: "pair", label: "Pair" }, { key: "alike", label: "Similar", num: true },
       { key: "band", label: "Band", nowrap: true }],
-     (x) => ({ pair: x.a + " ↔ " + x.b, score: x.score, band: x.confirmed ? "merge?" : "link", _path: x.a_path }),
+     // The cosine as a percentage (ADR-0164); a pair found by its wording alone,
+     // with no vectors in the vault, says so instead of printing a number.
+     (x) => ({ pair: x.a + " ↔ " + x.b, alike: x.similarity != null ? x.similarity + "%" : "same wording",
+               band: x.confirmed ? "merge?" : "link", _path: x.a_path }),
      (T.confirmed_duplicates || 0) + (T.duplicate_pairs || 0), "pairs"],
     ["Autolink candidates", "co-mentioned in text, never linked", d.autolinks,
      [{ key: "pair", label: "Pair" }, { key: "shared", label: "Shared concepts" },

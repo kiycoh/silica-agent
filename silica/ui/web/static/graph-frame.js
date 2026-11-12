@@ -2294,6 +2294,9 @@ function fillLinkTag(tag, l) {
     more = '<div class="ln">Shares ' + escHtml(l.shared.join(", ")) + "</div>";
   if (l.type === "GAP" && a && b)
     more = '<div class="ln">' + escHtml(areaOf(a) || "No area") + " and " + escHtml(areaOf(b) || "No area") + "</div>";
+  // The cosine of the two notes as a percentage (ADR-0164), set by the export.
+  if (l.type === "SIMILAR" && typeof l.similarity === "number")
+    more = '<div class="ln">' + l.similarity + "% similar</div>";
   tag.innerHTML = '<div class="ends">' + escHtml(linkName(l.from)) + "<i>→</i>" + escHtml(linkName(l.to)) +
     '</div><div class="kind"></div>' + more;
   tag.querySelector(".kind").textContent = linkKind(l);

@@ -174,19 +174,22 @@ def test_suggested_skips_notes_that_are_already_linked(client, monkeypatch):
     vault.note("A.md", "# A\n\nLinks to [[B]].\n")
     vault.note("B.md", "# B\n")
     vault.note("Far.md", "# Far\n")
+    vault.note("Kin.md", "# Kin\n")
 
     monkeypatch.setattr(
         "silica.kernel.report.related.related",
         lambda note, k=5, memory=True: {"results": [
-            {"path": "B", "name": "B", "score": 0.91, "distance": 1},      # linked
-            {"path": "Far", "name": "Far", "score": 0.77, "distance": None},  # unreachable
+            {"path": "B", "name": "B", "score": 0.91, "similarity": 88, "distance": 1},      # linked
+            {"path": "Far", "name": "Far", "score": 0.016, "similarity": 77, "distance": None},
+            {"path": "Kin", "name": "Kin", "score": 0.015, "distance": 3},  # co-occurrence alone
         ]},
     )
     sug = api.get("/context", params={"path": "A.md"}).json()["suggested"]
     notes = [s for s in sug if s["kind"] == "note"]
-    assert [s["name"] for s in notes] == ["Far"]
+    assert [s["name"] for s in notes] == ["Far", "Kin"]
     assert notes[0]["path"] == "Far.md"          # resolved back to a graph key
-    assert "unreachable" in notes[0]["why"]
-    # The fused score, which silica_related's payload drops for the model since
-    # 2026-11-04 (survey card C2): read through the tool, every row said 0.00.
-    assert notes[0]["score"] == 0.77 and notes[0]["why"] == "unreachable · score 0.77"
+    # ADR-0164: the cosine as a percentage where the embedding leg proposed the
+    # note, and the reason, never a number, where only shared concepts did. The
+    # fused score is an order and is printed nowhere.
+    assert notes[0]["similarity"] == 77 and notes[0]["why"] == "unreachable · 77% similar"
+    assert notes[1]["similarity"] is None and notes[1]["why"] == "3 hops away · shares concepts"

@@ -454,7 +454,7 @@ async function openCentre(path, pos, { fromUrl = false } = {}) {
   nvStrip.replaceChildren();
   const strip = noteTopEl(data);
   if (strip) nvStrip.append(strip);
-  ed.load(data.text, { top: nvTop, missing: data.broken || [] });
+  ed.load(data.text, { top: nvTop, foot: similarFoot(data.path, ed), missing: data.broken || [] });
   nvTitle.value = noteStem(data.path);
   titleSay("");
   formOn = true;

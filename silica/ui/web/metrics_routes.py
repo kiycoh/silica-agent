@@ -11,6 +11,7 @@ import time
 from fastapi import APIRouter
 
 from silica.config import CONFIG
+from silica.kernel.recall.relatedness import similarity_percent
 from silica.kernel.report import brief, vault_shape
 from silica.kernel.text import note_parts
 from silica.ui.web.failures import explain as _failure
@@ -342,13 +343,17 @@ def metrics(proposals: bool = False):
         # Confirmed first — those are the merge candidates; the borderline band
         # is only "link, don't merge". Neither list is capped by the report, and
         # on a real vault they run to the hundreds, so the slice happens here.
+        # `similarity` is the cosine as the card prints it, None for a pair the
+        # MinHash leg proposed, whose score is no cosine (ADR-0164).
         "duplicates": ([
             {"a": short(d.source), "b": short(d.target), "a_path": d.source,
-             "b_path": d.target, "score": d.score, "confirmed": True}
+             "b_path": d.target, "score": d.score, "confirmed": True,
+             "similarity": similarity_percent(d.score) if d.cosine else None}
             for d in report.confirmed_duplicate_pairs
         ] + [
             {"a": short(d.source), "b": short(d.target), "a_path": d.source,
-             "b_path": d.target, "score": d.score, "confirmed": False}
+             "b_path": d.target, "score": d.score, "confirmed": False,
+             "similarity": similarity_percent(d.score) if d.cosine else None}
             for d in report.duplicate_pairs
         ])[:_METRICS_ROWS],
         # Sliced like every other uncapped list: the report caps the

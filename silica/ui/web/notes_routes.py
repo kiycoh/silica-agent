@@ -210,6 +210,24 @@ def note_raw(path: str = ""):
             "broken": _broken_links(text, resolve)}
 
 
+@router.get("/note/similar")
+def note_similar(path: str = ""):
+    """The notes nearest this one by cosine, for the list after its last line
+    (ADR-0164 point 2). `notes` is null when the vault or this note has no
+    vectors, which hides the list. Stored vectors only: opening a note makes no
+    model call, and so this route is no view's and no demo refuses it."""
+    from silica.kernel.recall.relatedness import similar_notes
+
+    resolve = note_resolver()
+    canon = resolve(path)
+    near = similar_notes(canon) if canon else None
+    if near is None:
+        return {"notes": None}
+    # Store keys carry no `.md`; the drawer opens a note by its vault path.
+    return {"notes": [{"name": r.name, "path": p, "similarity": r.similarity}
+                      for r in near if (p := resolve(r.path))]}
+
+
 @router.get("/raw")
 def raw_file(path: str = "", download: bool = False):
     """The raw a note names (ADR-0129 point 1): the PDF the drawer frames, or

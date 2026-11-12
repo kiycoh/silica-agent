@@ -119,6 +119,9 @@ def related(note: str, k: int = 5, memory: bool = True) -> dict[str, Any]:
                 "evidence": r.evidence,
                 **({"embed": round(r.embed_score, 3)}
                    if r.embed_score is not None else {}),
+                # What a surface prints for that cosine (ADR-0164): worked out
+                # once here, so no reader derives it from `evidence` or `embed`.
+                **({"similarity": r.similarity} if r.similarity is not None else {}),
                 **({"cooccur": int(round(r.cooccur_weight))}
                    if r.cooccur_weight is not None else {}),
                 **(

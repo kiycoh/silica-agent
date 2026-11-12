@@ -92,23 +92,25 @@ def test_the_two_offers_are_two_sections(tmp_path):
                     "backlinks": [{"name": "Corso", "path": "Corso.md"}]},
         "suggested": [
             {"name": "Gradient descent", "path": "", "kind": "ghost", "why": "never written"},
-            {"name": "Rete", "path": "R.md", "kind": "note", "why": "2 hops away", "score": 0.81},
+            {"name": "Rete", "path": "R.md", "kind": "note", "why": "3 hops away · 81% similar",
+             "similarity": 81},
         ],
     }
     d = _project_node(tmp_path, {"path": "ML.md"}, ctx)
     assert [r["name"] for r in d["missing"]] == ["Gradient descent"]
     assert [r["name"] for r in d["similar"]] == ["Rete"]
-    assert d["similar"][0]["score"] == 0.81   # the meter draws a real number
+    assert d["similar"][0]["similarity"] == 81   # a field, never parsed out of `why`
+    assert next(r for r in d["neighbours"] if r["name"] == "Rete")["similarity"] == 81
     assert len(d["out"]) == 1 and len(d["from"]) == 1
     assert d["loading"] is False
 
 
-def test_the_score_the_meter_draws_is_a_field_and_not_a_parsed_sentence():
-    """`why` says "score 0.81" in words. Reading the number back out of a display
-    string is how a sentence becomes an API: reword it and the bar goes blank."""
+def test_the_figure_a_row_prints_is_a_field_and_not_a_parsed_sentence():
+    """`why` says "81% similar" in words. Reading the number back out of a display
+    string is how a sentence becomes an API: reword it and the figure goes blank."""
     src = (ROOT / "silica" / "kernel" / "report" / "note_context.py").read_text()
     suggested = _block(src, "def suggested(", "def note_structure(")
-    assert '"score": float(' in suggested
+    assert '"similarity": pct' in suggested
     # and the panel never reads a number back out of the sentence. It draws no
     # meter any more (ADR-0075): on the note the change was measured on, eight
     # scores between 0.02 and 0.03 drew eight bars at the 6% floor, "weak"

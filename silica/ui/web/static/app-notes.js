@@ -1215,7 +1215,7 @@ async function openNote(path, line, facts) {
   if (rawFor !== data.path) rawFor = null;
   const top = noteTopEl(data);
   rawTop = data.raw && !data.paper && !data.saved ? top : null;
-  ed.load(data.text, { top, missing: data.broken || [] });
+  ed.load(data.text, { top, foot: similarFoot(data.path, ed), missing: data.broken || [] });
   paintFoot(drawerNote);
   focusGraphNode(data.path);
   showDrawer(data.title || data.path);
@@ -1560,6 +1560,35 @@ function noteTopEl(data) {
   return data.paper ? paperStripEl(data.paper)
     : data.saved && typeof savedStripEl === "function" ? savedStripEl(data.saved)
     : data.raw ? fillRawStrip(mkEl("div", ""), data.raw, data.path, false) : null;
+}
+
+// The notes nearest this one by what they say, after its last line (ADR-0164
+// point 2), each with its cosine as a percentage. Handed to the editor empty and
+// hidden, filled when /note/similar answers: hidden it stays when the vault has
+// no vectors or no note clears the embedder's floor.
+function similarFoot(path, ed) {
+  const box = mkEl("nav", "note-similar");
+  box.hidden = true;
+  box.setAttribute("aria-label", "similar notes");
+  fetch("/note/similar?path=" + encodeURIComponent(path))
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      if (!d || !d.notes || !d.notes.length) return;
+      box.appendChild(mkEl("div", "note-similar-h", "Similar notes"));
+      for (const n of d.notes) {
+        const b = mkEl("button", "note-similar-row");
+        b.type = "button";
+        b.append(mkEl("span", "note-similar-t", n.name), mkEl("span", "note-similar-p", n.similarity + "%"));
+        b.addEventListener("click", () => openNote(n.path));
+        box.appendChild(b);
+      }
+      box.hidden = false;
+      ed.view.requestMeasure(); // the block grew under a measured document
+    })
+    // The list is a courtesy under the text: a failed read leaves it hidden,
+    // which is how a vault without vectors already looks.
+    .catch(() => {});
+  return box;
 }
 
 // A paper's byline and its doors to Zotero, the PDF and the DOI, over the

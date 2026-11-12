@@ -64,6 +64,10 @@ class DuplicatePair:        # PROPOSED — cosine-close pair (band depends on wh
     source: str
     target: str
     score: float
+    # False when the MinHash leg proposed it (no vectors): `score` is then an
+    # estimated Jaccard of the wording, which no surface may print as the
+    # percentage that means a cosine (ADR-0164).
+    cosine: bool = True
 
 
 # --- Co-occurrence vs wikilink delta (PROPOSED, embedder-free) -------------
