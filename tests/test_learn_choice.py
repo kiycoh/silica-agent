@@ -16,7 +16,7 @@ from silica.kernel.learn import grade, items, mastery, reasons
 from tests.run_command import expansion as expand
 from tests.test_learn_items import vault  # noqa: F401
 
-LINE = "Il margine geometrico limita l'errore atteso del classificatore"
+LINE = "Il margine geometrico e' la distanza dall'iperpiano e limita l'errore atteso del classificatore"
 RIGHT = "la distanza dall'iperpiano"
 
 
@@ -27,6 +27,8 @@ def test_a_wrong_option_that_repeats_the_answer_another_option_or_the_line_is_tu
     got = items.choices(RIGHT, wrong + ["il bias del modello"], [LINE])
     assert sorted(got["options"]) == sorted([RIGHT, "il numero di vettori", "la norma dei pesi", "il bias del modello"])
     assert got["options"][got["key"]] == RIGHT
+    # picked, the answer is the key with no grader after it: one the line does not hold is asked in writing
+    assert items.choices("il numero di vettori di supporto", ["a b", "c d", "e f"], [LINE]) == {}
     again = items.reshuffled(got)
     assert sorted(again["options"]) == sorted(got["options"]) and again["options"][again["key"]] == RIGHT
     # the answer's form shared, a word apart is another answer; the answer with

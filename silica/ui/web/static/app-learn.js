@@ -3053,7 +3053,7 @@ async function lrSubmit(told) {
   lrRender();
   clearTimeout(lrGradeTimer);
   let fallback = false;
-  lrGradeTimer = setTimeout(() => { fallback = true; lrSelfGradeFallback(it); }, LR_GRADE_WAIT_MS);
+  if (pick == null) lrGradeTimer = setTimeout(() => { fallback = true; lrSelfGradeFallback(it); }, LR_GRADE_WAIT_MS);
   let v;
   try {
     v = await apiPost("/learn/answer", { id: s.id, i: it.i, production, conf: s.conf, hints: s.hintsUsed[it.i] || 0, told, modality, pick });
@@ -3434,7 +3434,7 @@ function lrMissedList(wrap, r) {
   const pts = byPoint ? r.points.filter((p) => p.status !== "met") : [];
   // a retest is told on its missed question's row, never a row of its own (ADR-0135 point 4)
   // one the session ended before was never asked: it read "asked again, missed"
-  const again = new Map(r.items.filter((x) => x.retest && x.status !== "open").map((x) => [x.path, x.status === "met" ? "met" : "missed"]));
+  const again = new Map(r.items.filter((x) => x.retest && x.status !== "open").map((x) => [x.path, ["met", "assisted"].includes(x.status) ? x.status : "missed"]));
   const items = byPoint ? [] : r.items.filter((x) => !x.retest && ["missed", "assisted", "skipped"].includes(x.status));
   const n = pts.length + items.length;
   // a skip is not a miss (ADR-0061), nor is a point the session ended before: both
@@ -3452,7 +3452,8 @@ function lrMissedList(wrap, r) {
   const sub = [t3 ? `${t3.met} of ${t3.points} met without help` : "", t3?.assisted ? `${t3.assisted} more with help, not counted` : "",
     skippedN ? `${skippedN} skipped, not counted as wrong` : ""].filter(Boolean).join(" · ");
   if (sub) sec.appendChild(mkEl("p", "lr-help", sub));
-  if (again.size) sec.appendChild(mkEl("p", "lr-help", `Asked again before the end: ${[...again.values()].filter((v) => v === "met").length} of ${again.size} met`));
+  const helped = [...again.values()].filter((v) => v === "assisted").length;
+  if (again.size) sec.appendChild(mkEl("p", "lr-help", `Asked again before the end: ${[...again.values()].filter((v) => v === "met").length} of ${again.size} met${helped ? `, ${helped} with help` : ""}`));
   for (const p of pts) {
     const it = r.items.find((x) => x.point?.i === p.i && x.span?.line) || r.items.find((x) => x.point?.i === p.i);
     sec.appendChild(lrMissedRow(p.status, p.heading ? `${p.kind}, under ${p.heading}` : p.kind, r.note, it?.span, noteStem(r.note)));
@@ -3479,6 +3480,7 @@ function lrMissedRow(status, what, path, span, title, again) {
   const read = lrBtn("lr-link", inSource ? "Read it in the source" : "Read it in the note", () => openNote(file, span?.line));
   read.setAttribute("aria-label", `Read ${inSource ? noteStem(file) : title}${span?.line ? ` at line ${span.line}` : ""}`);
   const back = again === "met" ? ["asked again, met", "comes back when it falls due"]
+    : again === "assisted" ? ["asked again, met with help", LR_COMES_BACK[status]]
     : again === "missed" ? ["asked again, missed", LR_COMES_BACK[status]] : [LR_COMES_BACK[status]];
   acts.append(read, mkEl("span", "lr-help", [LR_STATUS_WORD[status], ...back].filter(Boolean).join(" · ")));
   row.appendChild(acts);

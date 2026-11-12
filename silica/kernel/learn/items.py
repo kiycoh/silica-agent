@@ -523,10 +523,25 @@ def _near(a: str, b: str) -> bool:
     return not (wa - wb) or not (wb - wa)
 
 
+def _held(answer: str, support: list[str]) -> bool:
+    """Whether the line holds the answer: half its words of four letters or
+    more (all its words when it has none) are words of `support`. Written, an
+    answer is graded against the span and a model's ANSWER is only the
+    grader's reference; picked, ANSWER is the key, with no grader after it.
+    shortcut: words, not meaning; on 2026-12-12 read the missed picks of the
+    ledger's choice lines against their lines, and check meaning if one key
+    the line does not hold is among them."""
+    said = set(re.findall(r"\w+", " ".join(norm(t) for t in support)))
+    words = re.findall(r"\w+", norm(answer))
+    long = [w for w in words if len(w) >= 4] or words
+    return bool(long) and sum(w in said for w in long) >= len(long) / 2
+
+
 def choices(answer: str, wrong: list[str], support: list[str], why: dict[str, str] | None = None) -> dict:
     """What an item is asked with as a choice: the answer and three wrong
-    options, shuffled, `key` the answer's place; {} when fewer than three
-    wrong ones pass, and the item is then asked in writing only.
+    options, shuffled, `key` the answer's place; {} when the line does not
+    hold the answer or fewer than three wrong ones pass, and the item is then
+    asked in writing only.
 
     A wrong option passes when it is not the answer said again, nor another
     wrong option said again, nor said word for word by the line the item rests
@@ -534,7 +549,12 @@ def choices(answer: str, wrong: list[str], support: list[str], why: dict[str, st
     for word, not the provenance gate's fuzzy match: that would turn away a
     wrong option for sharing most of the line's words, as a good one about the
     same subject does. `why` holds a line for a wrong option whose origin is
-    known without a model; it rides as `wrong_why`."""
+    known without a model; it rides as `wrong_why`.
+
+    shortcut: nothing checks that a wrong option is false where it stands (a
+    cloze's other bold term can fit its blank too) nor that the answer is not
+    the longest of the four; read the first 100 choice lines of a real ledger
+    by 2026-12-12 and add the check whose miss they show."""
     answer = " ".join(str(answer or "").split())
     kept: list[str] = []
     for w in wrong:
@@ -542,7 +562,7 @@ def choices(answer: str, wrong: list[str], support: list[str], why: dict[str, st
         if (w and len(kept) < 3 and not _near(w, answer) and not any(_near(w, k) for k in kept)
                 and not any(t and _stated(w, t) for t in support)):
             kept.append(w)
-    if not answer or len(kept) < 3:
+    if not answer or len(kept) < 3 or not _held(answer, support):
         return {}
     options = [answer, *kept]
     random.shuffle(options)
