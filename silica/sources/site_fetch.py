@@ -108,7 +108,7 @@ def _bounded(head: str, blocks: list[str], total: int, how: str = "") -> str:
     total = max(total, len(kept))
     if not total:
         return head
-    said = (f"All {total:,} comments{how}." if len(kept) == total
+    said = (f"1 comment{how}." if total == len(kept) == 1 else f"All {total:,} comments{how}." if len(kept) == total
             else f"{len(kept):,} of {total:,} comments{how}; {total - len(kept):,} left out.")
     return "\n\n".join([head, f"## Comments\n\n{said}", *kept])
 

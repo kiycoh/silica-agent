@@ -152,6 +152,13 @@ def test_reddits_refusal_is_named_and_nothing_is_written(served, status, words, 
     assert sorted(vault.rglob("*")) == before
 
 
+def test_one_comment_is_counted_as_one(served):
+    table, _ = served
+    table["https://www.reddit.com/"] = _resp(_thread([_comment("c1", "alice", "Only me.")]))
+    text = sf.page("https://redd.it/abc123").text
+    assert "1 comment, top first and 3 levels deep." in text and "All 1 comments" not in text
+
+
 def test_a_code_fence_left_open_closes_where_its_post_or_comment_ends(served):
     """Reddit closes a fence at the end of the comment that opened it; the note
     did not, and every comment after it, with the note's Sources, read as code
