@@ -63,9 +63,11 @@ Silica is single-user: one person, one vault. There are no per-person permission
 - `/mail import` keeps only the threads you took part in, from a mail client's export or Google Takeout, and writes nothing until `--apply`.
 - In a git repository, `/wiki` writes an `ARCHITECTURE.md` plus a note per subsystem under `docs/silica/`, and `/stale` flags the notes whose code changed shape since.
 
-**Ask, with the sources in view.** An answer comes from your notes and shows which ones.
+**Ask, with the sources in view.** An answer comes from your notes and shows which ones; what they do not hold is labelled as general knowledge.
 
-- `/explain`, `/compare`, `/summarize` and the chat answer from your notes and cite them. What the vault does not hold is refused, not filled in; `/web` is the explicit way out, cited from the pages it actually opened.
+- `/explain`, `/compare`, `/summarize` and the chat answer from your notes and cite them. When the notes hold nothing on a question, the chat says so in one line, then answers from the model's own knowledge inside a block headed "From general knowledge, not your notes", never mixed into cited sentences. The line under the answer says "partly from general knowledge", and warns when that block came before any search of your notes. Commands and Memorize answer from the notes alone. Turn off Settings › Session › general knowledge (`SILICA_GENERAL_KNOWLEDGE=False`) for the strict chat: cited or refused. `/web` answers from the web, cited from the pages it actually opened.
+- `/council "<question>"` puts one question to several models over one search of your notes. Each member answers from the same passages, with the same rules; the chat model then writes what they agree on, where they disagree and which member said what, every claim cited, with each member's own answer folded underneath. You name the members, 2 to 5, in `SILICA_COUNCIL_MODELS` or Settings › Brains; Silica picks none. A member that fails or runs out of time is named and skipped, and the line under the answer counts each member's calls and tokens. Not on the server in this version.
+- `/page "<what>"` builds a self-contained HTML page from your notes into `Pages/`, or a small site in `Pages/<name>/`, its CSS and scripts inline, with a footer naming the notes it came from. It opens in the app and in its own window inside a sandbox that reaches nothing outside the page. Its write card reverts it, and "Revise this page: ..." in the chat writes a new version with a card of its own.
 - Each cited note gets a number. Clicking it opens the note at the line closest to the paragraph that cites it, when enough of their words match; pointing at it lights every paragraph that cites the same note.
 - A line under the answer counts the notes read, the steps and the seconds, and lists under "not cited" the notes it read and did not cite.
 - A number in the answer that is in no note the chat read and in nothing you typed is listed under it: "numbers not in what this turn read".
@@ -165,7 +167,7 @@ Small samples, a flash-class judge, 2 of LoCoMo's 10 conversations: not comparab
 Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://github.com/kiycoh/silica-core), the retrieval engine Silica is built on, with no model in the loop.
 
 <details>
-<summary><b>All 63 commands</b></summary>
+<summary><b>All 69 commands</b></summary>
 
 <br/>
 
@@ -177,6 +179,7 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/nucleate <file...> [--target=DIR] [--hub=H]` | bring files in: notes via Injector FSM, code as skeleton stubs |
 | `/promote [<key>]` | session memory -> a note: list what keeps recurring, promote one through the gate |
 | `/web [keywords]` | answer from the web instead of the vault, cited; bare /web re-asks your last question |
+| `/council "<question>"` | one search of the vault, the same question to 2 to 5 models of `SILICA_COUNCIL_MODELS`, and a cited synthesis of where they agree and disagree, each member's answer folded under it |
 | `/organize "<intent>" [--scope=FOLDER] [--file=taxonomy.yaml] [--merge] [--move-uncategorized] [--apply]` | classify and reorganize vault notes according to a taxonomy |
 | `/summarize <note|folder...>` | read-only digest of one or more notes in chat (key points, tables) |
 | `/explain "<concept>" [--level=intro|expert]` | explain a concept grounded in the vault, at the chosen register |
@@ -184,6 +187,7 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/quiz [note|folder] [--n=10]` | active-recall quiz; graded answers resurface the notes you miss. No target = review queue |
 | `/flashcards <note|folder> [--n=12] [--save=<path>]` | question-and-answer cards from the notes' checked points; `--save` writes them for the Spaced Repetition plugin |
 | `/slides <note|folder> [--save=<path>]` | a slide deck of what the notes say; `--save` writes it for Obsidian's Slides |
+| `/page "<what>"` | a self-contained HTML page, or a small site, built from the notes into `Pages/`; opens sandboxed in the app |
 | `/memorize [plan] [--n=8] [--plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]] [--teach <note>] [--status [plan]]` | a study session graded against the source line, a plan note to continue or write, a teach-back, or the readings in one line; the Memorize tab is the same engine with a screen; `/learn`, its name before, still runs it |
 | `/relate <note> [--n=8]` | typed relationship map: how/why one note relates to its vault neighbors |
 | `/schematize <note|folder|topic> [--save=<path>]` | Markdown table schematizing a note, folder, or topic |
