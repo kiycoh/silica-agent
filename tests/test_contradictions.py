@@ -59,7 +59,7 @@ def test_the_other_holds_files_this_notes_words_and_keeps_the_winner_in_place():
     assert "> [!note] Contradiction from [[B]]" in live and "Wednesday" in live
     assert f"Resolved {TODAY}: [[B]] holds." in live
     assert f"\n{MINE}\n" not in live and f"> [!quote] Superseded {TODAY} by [[B]]\n> {MINE}" in filed
-    assert "Intro line here." in live and "Another closing line." in live
+    assert "Intro line here.\n\nAnother closing line." in live  # one blank line where the paragraph stood
     assert cx.records(out) == []
 
 
@@ -96,6 +96,14 @@ def test_a_flag_settles_this_or_other_and_refuses_both():
     assert f"Resolved {TODAY}: this note holds." in out.split("## Superseded")[1] and cx.records(out) == []
 
 
+def test_a_note_whose_only_properties_were_the_contest_keeps_no_empty_block():
+    flagged = mark_contested("# Founding\n\nFounded in 1987.\n", "flagged: wrong year (by user, 2026-11-02)")
+    out = cx.settle(flagged, cx.records(flagged)[0]["ref"], "this", TODAY)
+    assert out.startswith("# Founding") and "{}" not in out
+    imported = mark_contested("Body.\n\n" + contested_callout("Other.", "s.md") + "\n", "source: s.md")
+    assert cx.settle(imported, "source: s.md", "this", TODAY).startswith("Body.")
+
+
 def test_an_imported_record_settles_this_through_the_old_resolver():
     out = cx.settle(IMPORTED, "source: notes-2026.md", "this", TODAY)
     assert f"Resolved {TODAY}: this note holds." in out and cx.records(out) == []
@@ -107,6 +115,14 @@ def test_has_record_reads_a_settled_pair_and_the_other_sides_line():
     assert cx.has_record("..\n" + cx.side_line("A", "this", TODAY) + "\n", "A")
     assert cx.side_line("A", "both", TODAY, "in winter") == (
         f"> [!note] Contradiction with [[A]] resolved {TODAY}: both hold when in winter.")
+
+
+def test_a_whole_note_passage_is_focused_on_the_block_that_answers():
+    theirs = "# Launch plan\n\nThe public launch is set for March 3.\n\nThe pricing page goes live early.\n"
+    passage = "Launch plan The public launch is set for March 3. The pricing page goes live early."
+    assert cx._focus(theirs, passage, "The board moved the public launch to April 14.") == (
+        3, "The public launch is set for March 3.")
+    assert cx._focus(theirs, "words found nowhere", "x") == (0, "words found nowhere")
 
 
 def _cache(vault: Path, path: str, line: int, at: str, passage: str) -> None:

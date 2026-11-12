@@ -471,4 +471,6 @@ def resolve_contested(
     else:
         data.pop(CONTESTED_KEY, None)
         data.pop(CONTRADICTIONS_KEY, None)
-    return frontmatter.dump(data, new_body)
+    # A note whose only properties were the contest keeps no block: dumped
+    # empty it read `{}`, a block no YAML reader takes for properties.
+    return frontmatter.dump(data, new_body) if data else new_body.lstrip("\n")

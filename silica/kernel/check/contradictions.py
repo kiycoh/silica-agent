@@ -172,14 +172,14 @@ def _drop_ref(content: str, ref: str) -> str:
     else:
         data.pop(CONTESTED_KEY, None)
         data.pop(CONTRADICTIONS_KEY, None)
-    return frontmatter.dump(data, body)
+    return frontmatter.dump(data, body) if data else body.lstrip("\n")  # no `{}` block (resolve_contested)
 
 
 def _file(content: str, block: list[str]) -> str:
     """`block` under `## Superseded`, created at the end when absent."""
     data, _raw, body = frontmatter.split(content)
     filed = merge_moc_section(body, SUPERSEDED_MARKER, block)
-    return frontmatter.dump(data, filed) if data is not None else filed
+    return frontmatter.dump(data, filed) if data else filed
 
 
 def settle(content: str, ref: str, holds: str, today: str, *, condition: str = "", who: str = "user") -> str:
@@ -231,6 +231,9 @@ def settle(content: str, ref: str, holds: str, today: str, *, condition: str = "
         if found is not None:
             kept = text.split("\n")
             del kept[found.line - 1:found.end]
+            at = found.line - 1
+            if 0 < at < len(kept) and not kept[at].strip() and not kept[at - 1].strip():
+                del kept[at]  # the paragraph's blank line goes with it, not two in a row
             text = "\n".join(kept)
             lost = [stamp(valid_to=today, resolved_by=who), f"> [!quote] Superseded {today} by {rec['other']}",
                     f"> {rec['mine']}", ""]
@@ -325,11 +328,30 @@ def proposals_of(vault: str, path: str, text: str) -> list[dict[str, Any]]:
             continue  # the other note is gone or unreadable: nothing to set beside this one
         if has_record(text, name) or has_record(theirs, _name(path)):
             continue
+        their_line, their = _focus(theirs, str(f.get("passage") or ""), b.text)
         out.append({"path": path, "line": b.line, "end": b.end, "mine": b.text, "at": f["at"],
                     "other_path": other_path, "other": f"[[{name}]]",
-                    "their_line": int(other_line) if other_line.isdigit() else 0,
-                    "their": str(f.get("passage") or "")})
+                    "their_line": their_line or (int(other_line) if other_line.isdigit() else 0),
+                    "their": their})
     return out
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"\w+", text.casefold()) if len(w) > 3}
+
+
+def _focus(theirs: str, passage: str, mine: str) -> tuple[int, str]:
+    """(line, words) of the block of the other note the verdict rests on: of
+    the blocks the judged passage holds, the one sharing most words with this
+    note's. The judge reads a short note whole (ADR-0110), so its passage is
+    the whole note at line 1, title included, and a record quoting all of it
+    would set a page beside a sentence. (0, passage) when no block matches."""
+    flat = " ".join(passage.replace("…", " ").split())
+    held = [b for b in blk.split(theirs)[0] if " ".join(b.text.split()[:6]) in flat]
+    if not held:
+        return 0, passage
+    best = max(held, key=lambda b: len(_words(b.text) & _words(mine)))
+    return best.line, best.text
 
 
 def proposals(vault: str, folder: str = "") -> list[dict[str, Any]]:
