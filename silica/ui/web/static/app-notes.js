@@ -1578,7 +1578,7 @@ function similarFoot(path, ed) {
       for (const n of d.notes) {
         const b = mkEl("button", "note-similar-row");
         b.type = "button";
-        b.append(mkEl("span", "note-similar-t", n.name), mkEl("span", "note-similar-p", n.similarity + "%"));
+        b.append(mkEl("span", "note-similar-p", n.similarity + "%"), mkEl("span", "note-similar-t", n.name));
         b.addEventListener("click", () => openNote(n.path));
         box.appendChild(b);
       }

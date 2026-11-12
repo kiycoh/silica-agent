@@ -11,7 +11,7 @@ from silica.session.words import int_flag, positional, str_flag
 
 
 def review(c: Call) -> Result:
-    """/review [apply <id…|kind|all> | dismiss <id…|kind>] — the one review
+    """/review [apply <id…|kind|all> | dismiss <id…|kind>]: the one review
     queue (ADR-0165): every proposal waiting for a yes or a no, by kind. The
     deferred store's refused writes are one kind; /curate, /aliases and
     /organize's dry runs and /stale's code lane are the others. A yes lands as
@@ -53,13 +53,13 @@ def review(c: Call) -> Result:
         out.print("  Nothing waits for review. The dry runs of /curate, /aliases and "
                   "/organize fill it; refused writes and stale notes arrive by themselves.")
         return out
-    out.print(f"  [bold]Review queue — {len(pending)} proposal(s):[/]")
+    out.print(f"  [bold]Review queue, {len(pending)} proposal(s):[/]")
     for name, kind in kinds.items():
         rows = [p for p in pending if p.kind == name]
         if not rows:
             continue
-        note = (" — a yes runs the worker model" if kind.spends_model
-                else " — accepted by id or name, never by all" if not kind.in_all else "")
+        note = (": a yes runs the worker model" if kind.spends_model
+                else ": accepted by id or name, never by all" if not kind.in_all else "")
         out.print(f"  [bold]{kind.label}[/] ({len(rows)}){note}")
         for p in rows:
             out.print(f"    · [bold]{p.id[:8]}[/]  {escape(p.title)}  [dim]{escape(p.why)}[/]")

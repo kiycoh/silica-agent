@@ -1078,7 +1078,9 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 }
 
 /* The similar notes after the note's last line (ADR-0164): the Links rows of
-   the details (.nb-row), a name in the text's ink and its cosine as Data. */
+   the details (.nb-row), its cosine as Data and then a name in the text's ink.
+   The figure leads because the block is as wide as the note's widest line: a
+   code line that scrolls sideways took a right-hand figure out of view. */
 .note-similar {
   margin: 2.2rem 0 0.5rem;
   border-top: 1px solid var(--line);
@@ -1093,8 +1095,8 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 
 .note-similar-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.75rem;
+  grid-template-columns: 3.4em minmax(0, 1fr);
+  gap: 0.6rem;
   align-items: baseline;
   width: 100%;
   padding: 0.35rem 0;

@@ -224,3 +224,31 @@ def test_the_command_lists_by_kind_and_refuses_a_yes_in_the_demo(tmp_vault, kind
     monkeypatch.setattr("silica.config.demo", lambda: True)
     out = dispatch("/review apply all", [])
     assert out.error and "demo" in out.error
+
+
+def test_the_panel_lists_lands_a_yes_and_sends_a_model_yes_to_the_chat(tmp_vault, kinds):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from silica.config import CONFIG
+    from silica.ui.web import server
+
+    api, vault = TestClient(server.app), CONFIG.vault_path
+    tmp_vault.note("A.md", "# A\n")
+    move = Proposal(id=proposal_id("move", "A.md", "Done/A.md"), kind="move", title="Move A to Done",
+                    why="rules", notes=("A.md",), data={"from": "A.md", "to": "Done/A.md"})
+    orphan = Proposal(id=proposal_id("orphan", "A.md"), kind="orphan", title="Connect A",
+                      why="nothing links to it", notes=("A.md",), data={"target": "A.md"})
+    queue.offer(vault, "move", [move])
+    queue.offer(vault, "orphan", [orphan])
+    d = api.get("/metrics/review").json()
+    assert {k["name"]: len(k["items"]) for k in d["kinds"]}["move"] == 1 and d["batches"] == []
+    refused = api.post("/metrics/review/apply", json={"ids": [move.id, orphan.id]})
+    assert refused.status_code == 409 and refused.json()["code"] == "in_chat"
+    landed = api.post("/metrics/review/apply", json={"ids": [move.id]}).json()
+    assert landed["applied"] == [move.id] and landed["run"]
+    assert api.get("/metrics/review").json()["batches"][0]["run"] == landed["run"]
+    assert api.post("/metrics/review/revert", json={"run": landed["run"]}).json()["restored"]
+    assert api.post("/metrics/review/revert", json={"run": "nope"}).status_code == 404
+    assert api.post("/metrics/review/dismiss", json={"ids": [orphan.id]}).json()["dismissed"] == [orphan.id]
+    assert api.post("/metrics/review/apply", json={"ids": [orphan.id]}).status_code == 404

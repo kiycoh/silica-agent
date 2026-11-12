@@ -608,9 +608,10 @@ def neighbours_above(query_path: str, floor: float) -> list[str] | None:
 
 
 # The floor a note's similar notes clear when its embedder's row names none
-# (config.EMBEDDER_DEFAULTS `similar_at`, ADR-0164 point 3). Read off pairs on
-# the owner's 2,083-note vault under jina (2026-11-12): from 0.60 up a pair is
-# the same subject seen twice, under it a sibling topic. 0.60 cuts 0.42% of all
+# (config.EMBEDDER_DEFAULTS `similar_at`, ADR-0164 point 3). Read off pairs under
+# jina on 2026-11-12, on the 94-note test vault and on the owner's 2,083-note
+# one: from 0.60 up a pair is one subject seen twice, under it a sibling topic
+# (two poets of one century, two importers). 0.60 cuts 0.42% of all
 # pairs of the 729-note vault under jina; the same share cuts 0.60 under pplx,
 # 0.84 under EmbeddingGemma 2 and 0.64 under the store whose all-pairs median
 # is Qwen's, which is this default.
