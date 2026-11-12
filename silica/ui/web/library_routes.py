@@ -58,6 +58,28 @@ def vault_file(path: str = "", download: bool = False):
                         content_disposition_type="attachment" if attach else "inline")
 
 
+@router.get("/file/cover")
+def file_cover(path: str = ""):
+    """A rail row's cover (ADR-0163), by the file's path as /file takes it."""
+    return cover_response(_vault_file(path))
+
+
+# /asset's sandbox and nosniff, and asked again each time: the address names
+# the file, not the drawing, and a file changed under it draws a new cover.
+_COVER_HEADERS = {**render.ASSET_HEADERS, "Cache-Control": "private, no-cache"}
+
+
+def cover_response(found: Path):
+    """The cover of a vault file a route has already let through, or 404 for
+    a file that has none, which the page draws as its title's tile."""
+    from silica.sources import covers
+
+    got = covers.cover(found)
+    if got is None:
+        raise HTTPException(404)
+    return FileResponse(got[0], media_type=got[1], headers=_COVER_HEADERS)
+
+
 @router.get("/file/chapters")
 def file_chapters(path: str = ""):
     """A vault PDF's chapters for the drawer's info view (ADR-0156 point 6):

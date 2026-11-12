@@ -309,7 +309,7 @@ async def vault_fetch(payload: dict):
         except SiteRefused as exc:
             # Reddit's wall or GitHub's limit, in words written for the person
             # (ADR-0162), where the sentence below would say only "could not".
-            row.update(status="refused", reason=str(exc))
+            row.update(status="refused", reason=exc.said)
         except Exception as exc:
             # Not only ValueError: httpx raises its own on a refused connection or
             # a timeout, and either is this link refused, not a 500. The reason

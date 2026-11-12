@@ -104,7 +104,11 @@ class Refused(ValueError):
 
 class SiteRefused(ValueError):
     """A site adapter's refusal (ADR-0162), in words written for the person:
-    the vault's + shows them as the row's reason, as it does YouTube's wall."""
+    the vault's + shows `said` as the row's reason, as it does YouTube's wall."""
+
+    def __init__(self, said: str) -> None:
+        super().__init__(said)
+        self.said = said
 
 
 def youtube_cookies() -> Path | None:
