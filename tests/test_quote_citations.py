@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -69,14 +70,24 @@ def _write(concept: str, body: str, bank: dict, trace: list[str], *, quote_ids: 
     return rel
 
 
-def _nucleate(monkeypatch, files: list[str], ask) -> object:
+def _nucleate(monkeypatch, files: list[str], ask) -> Any:
+    """A /nucleate as the lane runs it by default: looked-up bodies, no cached
+    prefix, whatever the developer's environment says. The Coordinator's work
+    queue is a list here: what it would hand the workers is seen, not run."""
+    import types
+
     from silica.router.orchestrator import InjectorFSM
     from silica.router.warning_ledger import WarningLedger
 
     monkeypatch.setattr("silica.config.CONFIG.nucleate_lane", "outline")
+    monkeypatch.delenv("SILICA_OUTLINE_BODIES", raising=False)
+    monkeypatch.delenv("SILICA_OUTLINE_CACHE", raising=False)
     monkeypatch.setattr(ol, "_default_ask", ask)
-    fsm = InjectorFSM(inbox_files=files, target_dir="Research")
+    fsm: Any = InjectorFSM(inbox_files=files, target_dir="Research")
     fsm.warning_ledger = WarningLedger()
+    queued: list = []
+    fsm.work_queue = types.SimpleNamespace(enqueue=queued.append)
+    fsm.queued = queued
     fsm.run()
     return fsm
 
@@ -95,8 +106,8 @@ def test_a_web_search_note_nucleates_byte_for_byte_as_before(tmp_vault, monkeypa
     only once the gate has run or the owner has said arm A may move."""
     seen: list = []
     rel = _write("What do mitochondria do?", BODY, BANK, TRACE, quote_ids=False)
-    _nucleate(monkeypatch, [rel], _ask(seen, ("Mitochondria make the ATP a cell spends.",
-                                              "Mitochondrial DNA comes from the mother.")))
+    fsm = _nucleate(monkeypatch, [rel], _ask(seen, ("Mitochondria make the ATP a cell spends.",
+                                                    "Mitochondrial DNA comes from the mother.")))
 
     # The prompt is the stage's own constant, with nothing appended.
     assert [s for s, _ in seen] == [ol.STAGE_A.format(lang="English", rels=", ".join(ol.RELATIONS))]
@@ -105,6 +116,8 @@ def test_a_web_search_note_nucleates_byte_for_byte_as_before(tmp_vault, monkeypa
     blob += [f"##### {p.relative_to(vault)}\n{p.read_text(encoding='utf-8')}" for p in sorted(vault.rglob("*.md"))]
     got = re.sub(r"run [0-9a-f]{8}", "run <id>", re.sub(r"\d{4}-\d{2}-\d{2}", "<date>", "\n".join(blob)))
     assert got == FIXTURE.read_text(encoding="utf-8")
+    # A thin note still goes to the expand worker, as before point 9.
+    assert "expand" in {item.kind for item in fsm.queued}
 
 
 def test_only_a_part_written_with_quote_ids_carries_the_stamp(tmp_vault):
@@ -195,8 +208,10 @@ def test_the_stages_that_write_a_line_are_told_to_keep_the_markers_only_for_a_pa
                 return {"bodies": {"Cell energy": "Cells run on ATP [Q1]."}}
             return {"edges": []}
 
-        ol.run_outliner(source_text=src, source_basename="p.md", target="T", hub="H", language="English",
-                        vault_outline=[], ask=ask, quote_ids=quote_ids)
+        res = ol.run_outliner(source_text=src, source_basename="p.md", target="T", hub="H",
+                              language="English", vault_outline=[], ask=ask, quote_ids=quote_ids)
+        # A body the model writes reaches the op with its marker as written.
+        assert "Cells run on ATP [Q1]." in next(o["snippet"] for o in res["updates"] if o["heading"] == "Cell energy")
         return seen
 
     plain, part = run(False), run(True)
@@ -259,6 +274,11 @@ def test_every_claim_line_of_a_nucleated_part_resolves_to_a_quote_and_its_url(tm
     # The claim's phantom Q7 went, and the run says so.
     maternal = _read("Research/Maternal inheritance.md")
     assert "> Mitochondrial DNA comes from the mother[^mito-What-do-mitochondria-do-Q2]." in maternal
+    # The quotes' definitions link the leaf: no bare link beside them.
+    assert "\n[[sources/mito/What do mitochondria do]]\n" not in _read("Research/Cell energy.md")
+    # A thin note of a part is not handed to the expand worker, which would
+    # re-author it after CLEANUP and write over the keyed markers.
+    assert "expand" not in {item.kind for item in fsm.queued}
     # One phantom, copied with its claim to three lines: the note's, the
     # spine's row and the spine's index of the file.
     assert fsm.run_state.files_summary[-1]["phantom_quotes"] == 3
@@ -365,6 +385,12 @@ def test_rerunning_the_rewrite_is_a_no_op():
 def test_the_lines_attribute_lines_keeps_out_of_keep_their_marker(line):
     note = f"---\nsummary: a [Q1] in the frontmatter\n---\n# T\n\n{line}\n\n## Sources\n[Q1] after the claims\n"
     assert pv.attribute_quotes(note, _QBANK, "leaf", _LINK) == (note, [], 0)
+
+
+def test_a_link_named_like_a_quote_is_not_a_marker():
+    note = "# T\n\nSee [[Q1]] and [Q3](https://x.example) for the claim [Q3].\n"
+    out, _, _ = pv.attribute_quotes(note, _QBANK, "leaf", _LINK)
+    assert out == "# T\n\nSee [[Q1]] and [Q3](https://x.example) for the claim[^leaf-Q3].\n"
 
 
 def test_a_marker_opening_a_list_item_keeps_the_item():

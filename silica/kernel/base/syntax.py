@@ -155,8 +155,9 @@ PATH_TOKEN_RE = re.compile(r"[^\s\[\]]*(?:/[^\s\[\]]*|\.md)")
 
 # A deep research's citation of the banked quotes a sentence stands on, `[Q3]`
 # or `[Q3, Q7]` (ADR-0158 point 9), with the whitespace before it, which goes
-# when the marker does. The ids are the one group.
-QUOTE_MARK_RE = re.compile(r"\s*\[(Q\d+(?:\s*,\s*Q\d+)*)\]")
+# when the marker does. The ids are the one group. Not inside `[[Q1]]`, a link
+# to a note named Q1, nor `[Q1](url)`, a link whose words are Q1.
+QUOTE_MARK_RE = re.compile(r"\s*(?<!\[)\[(Q\d+(?:\s*,\s*Q\d+)*)\](?![\](])")
 
 # --- code -------------------------------------------------------------------
 

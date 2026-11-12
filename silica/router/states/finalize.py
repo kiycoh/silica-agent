@@ -628,10 +628,11 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
                 continue  # re-ingest no-op
             # The definition carries the link, so it is the entry: a bare copy
             # beside it listed every leaf twice in reading view. The bare link
-            # is the entry only while nothing in the note cites the leaf.
+            # is the entry only while nothing in the note cites the leaf, and a
+            # quote's definition cites it too.
             # Inside the block, not at EOF: a patch appended after the block
             # used to push the next link under whatever section came last.
-            entry = f"{marker}: {link}" if add_def else ("" if linked else link)
+            entry = f"{marker}: {link}" if add_def else ("" if linked or quote_defs else link)
             new = append_source(attributed, entry) if entry else attributed
             for definition in quote_defs:
                 new = append_source(new, definition)
