@@ -103,14 +103,14 @@ ${graph_css}</style>
       <label class="filter-row" title="A [[wikilink]] whose target file exists.">
         <input type="checkbox" id="cb-extracted" checked onchange="updateEdgeFilter()">
         <div class="dot-edge" style="--c:${color_extracted};--cp:${color_extracted_paper}"></div>
-        resolved
+        links
         <span class="ct">${n_extracted}</span>
       </label>
       ${requires_row}
       <label class="filter-row" style="margin-top:4px" title="A [[wikilink]] pointing at a name no file carries: the link is written, the note is not. Its ghost is drawn with it.">
         <input type="checkbox" id="cb-ambiguous" onchange="updateEdgeFilter()">
         <div class="dot-edge" style="--c:${color_ambiguous};--cp:${color_ambiguous_paper}"></div>
-        unresolved
+        links to missing notes
         <span class="ct">${n_ambiguous}</span>
       </label>
       ${similar_row}
@@ -121,7 +121,7 @@ ${graph_css}</style>
         <label class="filter-row" title="Well-formed areas with no links between them: a bridge could go here">
           <input type="checkbox" id="cb-gaps" checked onchange="updateEdgeFilter()">
           <div class="dot-edge dashed" style="--c:${color_gap};--cp:${color_gap_paper}"></div>
-          structural gaps
+          gaps between areas
           <span class="ct">${n_gaps}</span>
         </label>
         ${proposed_row}
@@ -149,7 +149,7 @@ ${graph_css}</style>
       <!-- No switch of its own: a ghost is the far end of an unresolved link,
            so it is drawn with that row and dims with it here. -->
       <div class="filter-row" id="st-ghost-row" title="Something links here and no file carries the name. Drawn with the unresolved links, and only with them.">
-        <span class="dot ghost" style="border-radius:50%"></span>ghost<span class="ct" id="st-ghost"></span>
+        <span class="dot ghost" style="border-radius:50%"></span>missing note<span class="ct" id="st-ghost"></span>
       </div>
       <!-- A legend row like the three above it: the ring it names is always
            drawn, so there is nothing here to switch. It is rendered server-side
@@ -172,7 +172,7 @@ ${graph_css}</style>
            app's scope picker follows. Clicking it again gives the vault back. -->
       <details id="areas-fold">
         <summary class="filter-row" title="Louvain over the resolved wikilinks: the vault as you linked it. Open to scope the graph to one area.">
-          <span class="dot all"></span>structural areas<span class="ct">${n_areas}</span>
+          <span class="dot all"></span>areas<span class="ct">${n_areas}</span>
         </summary>
         <div class="fold-body">
           ${discourse_badge}

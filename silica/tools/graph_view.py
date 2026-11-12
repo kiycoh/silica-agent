@@ -253,7 +253,7 @@ def _frame_context(
         f'proposal is not drawn.">'
         f'<input type="checkbox" id="cb-proposed" onchange="updateEdgeFilter()">'
         f'<div class="dot-edge dashed" style="--c:{_EDGE_COLOR_PROPOSED};--cp:{_EDGE_COLOR_PROPOSED_PAPER}"></div>'
-        f'proposed links'
+        f'suggested links'
         f'<span class="ct">{n_proposed}</span>'
         f'</label>'
     ) if n_proposed else ""
@@ -354,7 +354,7 @@ def _frame_context(
         f'<div class="filter-row" title="Removing this note disconnects the graph: every path '
         f'between the notes it strands and the rest goes through it. Always ringed in 2D and '
         f'named on hover in 3D; the Work panel says what each one carries.">'
-        f'<span class="ring" style="border-color:var(--warn)"></span>load-bearing'
+        f'<span class="ring" style="border-color:var(--warn)"></span>holds parts together'
         f'<span class="ct">{n_cut}</span>'
         f'</div>'
     ) if n_cut else ""
