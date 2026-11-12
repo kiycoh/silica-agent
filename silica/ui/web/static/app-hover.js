@@ -72,7 +72,7 @@
     document.body.append(pop);
     place(pop, a);
     a.setAttribute("aria-describedby", "hv-pop");
-    if (typeof renderMermaid === "function") renderMermaid(body); // diagrams and molecules, as the reader's
+    renderMermaid(body); // diagrams and molecules, as the reader's
   }
 
   function point(a) {
