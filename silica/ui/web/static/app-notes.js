@@ -300,6 +300,12 @@ attachMenu.addEventListener("click", (e) => {
   // and previewed in Settings › Skills, where an installed one is managed.
   if (item.id === "am-skill") { skWriteSkill(input.value); return; }
   // ADR-0158 point 8: the words in the box become the research's question.
+  if (item.id === "am-document") {
+    dcOpen({ params: { length: "", audience: "", register: "narrative", language: "", focus: input.value.trim() } });
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    return;
+  }
   if (item.id === "am-research") {
     rsOpen({ question: input.value.trim() });
     input.value = "";

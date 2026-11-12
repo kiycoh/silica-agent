@@ -540,6 +540,11 @@
   font-size: 13.5px;
 }
 
+.dc-ch .rs-x {
+  grid-column: 4;
+  padding: 0 0.3rem;
+}
+
 .dc-ch.dropped .dc-title {
   color: var(--ash-dim);
   text-decoration: line-through;

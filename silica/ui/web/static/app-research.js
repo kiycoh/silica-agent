@@ -55,8 +55,10 @@ function rsOpenNote() {
 
 // One card at a time, in the conversation where the person asked for it, in
 // the column a message's text takes (`.rs-msg` pads and centres as `.msg` does).
-function rsCard() {
-  let card = log.querySelector(".rs-card:not(.rs-sent)");
+// `fresh` opens a second card below instead of taking the open one over: the
+// outline's "Research the gaps" must leave the outline where it is.
+function rsCard(fresh = false) {
+  let card = fresh ? null : log.querySelector(".rs-card:not(.rs-sent)");
   if (!card) {
     const wrap = mkEl("div", "rs-msg");
     card = mkEl("section", "rs-card");
@@ -69,11 +71,11 @@ function rsCard() {
   return card;
 }
 
-function rsOpen(prefill = {}) {
+function rsOpen(prefill = {}, fresh = false) {
   const shape = prefill.shape || "literature";
   const st = { shape, question: "", depth: "standard", scholarly: shape === "literature", ...prefill };
   if (st.shape === "anchored" && !st.note) st.note = rsOpenNote();
-  rsForm(rsCard(), st);
+  rsForm(rsCard(fresh), st);
 }
 
 function rsHead(card, title, aside) {
