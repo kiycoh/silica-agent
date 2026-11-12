@@ -511,10 +511,11 @@ def test_a_reloaded_chat_draws_no_image_from_another_origin(client):
 
 def test_on_the_server_the_page_draws_only_its_own_images(client, monkeypatch):
     tc, _ = client
-    assert "content-security-policy" not in tc.get("/").headers
+    # every frame the app draws stays on its origin, a chat page's too (ADR-0171)
+    assert tc.get("/").headers["content-security-policy"] == "frame-src 'self'"
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
-    assert tc.get("/").headers["content-security-policy"] == "img-src 'self' data: blob:"
+    assert tc.get("/").headers["content-security-policy"] == "frame-src 'self'; img-src 'self' data: blob:"
 
 
 def test_the_asset_route_keeps_its_own_policy_on_the_server(client, tmp_vault, monkeypatch):

@@ -1382,9 +1382,16 @@ function syncFileView() {
     study.addEventListener("click", () => fileStudy(f, study));
     head.append(study);
   }
-  head.append(Object.assign(document.createElement("a"), page
-    ? { className: "wk-paper-a", textContent: "Open in a new window", href: pageUrl(f.path), target: "_blank", rel: "noopener" }
-    : { className: "wk-paper-a", textContent: "Download", href: fileUrl(f.path, "&download=1") }));
+  if (page) {
+    // Full window is this frame, in the app's page, whose policy keeps the page
+    // on this origin (security.APP_FRAMES): a tab of its own has no such holder.
+    const full = mkEl("button", "wk-paper-a", "Full window");
+    full.type = "button";
+    full.addEventListener("click", () => $("#raw-frame").requestFullscreen()
+      .catch(() => notify("the browser did not open the page full window")));
+    head.append(full);
+  } else head.append(Object.assign(document.createElement("a"),
+    { className: "wk-paper-a", textContent: "Download", href: fileUrl(f.path, "&download=1") }));
   const pdf = /\.pdf$/i.test(name), pic = FILE_PICTURE.test(name);
   const frame = $("#raw-frame"), img = $("#raw-img"), url = page ? pageUrl(f.path) : fileUrl(f.path);
   const listing = pdf && detailsOn;

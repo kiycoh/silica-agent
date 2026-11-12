@@ -38,6 +38,11 @@ class TestNetwork:
         "<script>new WebSocket(u)</script>",
         '<a href="https://example.org">out</a>',
         '<meta http-equiv="refresh" content="0; url=https://x">',
+        # a navigation of the page's own frame carries data out in the address
+        '<script>location = "/x?d=" + document.title</script>',
+        "<script>top.location.href = u</script>",
+        "<script>document.location.assign(u)</script>",
+        "<script>window.open(u)</script>",
     ])
     def test_a_request_to_anywhere_is_named(self, html):
         assert pages.network_refs(html)
@@ -45,7 +50,8 @@ class TestNetwork:
     def test_what_stays_inside_passes(self):
         html = ('<svg xmlns="http://www.w3.org/2000/svg"></svg><img src="../a.png">'
                 '<img src="data:image/png;base64,AA"><a href="other.html">next</a>'
-                "<p>see https://doi.org/10.1/x in the text</p><a href=\"#top\">top</a>")
+                "<p>see https://doi.org/10.1/x in the text</p><a href=\"#top\">top</a>"
+                "<script>if (location == x) location.hash = '#a';</script>")
         assert pages.network_refs(html) == []
 
 

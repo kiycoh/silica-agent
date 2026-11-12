@@ -29,15 +29,20 @@ logger = logging.getLogger(__name__)
 PAGES_DIR = "Pages"
 
 # What a page may not reach for (ADR-0171 point 3): anything on another host.
-# The route's CSP already blocks every request, so this is for the model, which
-# is told why its page would break instead of finding out from a blank frame.
-# An `xmlns` and a URL in the text are no request, and pass.
+# The route's CSP blocks every request but one: the page's script navigating its
+# own frame, which carries data out in the address and which only the app's
+# frame-src holds (security.APP_FRAMES), in the app and not in a tab of its own.
+# So the plain spellings of a navigation are refused here too; an obfuscated one
+# passes this check, and that is the frame-src's to stop. An `xmlns` and a URL
+# in the text are no request, and pass.
 _REMOTE = r"""\s*["']?\s*(?:(?:https?|wss?|ftp):)?//"""
 _NETWORK = re.compile(
     r"\b(?:src|href|srcset|poster|action|formaction|data|background|xlink:href|ping|manifest)\s*=" + _REMOTE
     + r"|\burl\s*(?:\(|=)" + _REMOTE
     + r"""|@import\s+["']\s*(?:(?:https?|wss?|ftp):)?//"""
-    + r"|\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts)\s*\(",
+    + r"|\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts)\s*\("
+    + r"|\blocation\s*(?:=(?!=)|\.\s*(?:href\s*=(?!=)|assign\s*\(|replace\s*\())|\bwindow\s*\.\s*open\s*\("
+    + r"""|http-equiv\s*=\s*["']?\s*refresh""",
     re.IGNORECASE)
 
 # Written by code and replaced on each write, so a revision cannot keep a stale list.
@@ -99,10 +104,11 @@ def write_page(vault: Path, path: str, html: str, sources: list[str]) -> dict:
     except ValueError as e:
         return {"error": f"Refused path '{path}': {e}"}
     if bad := network_refs(html):
-        return {"error": "Not written: a page reaches nothing outside itself, and the viewer blocks "
-                         f"every request, so this would break: {', '.join(dict.fromkeys(bad))[:300]}. "
-                         "Inline the CSS, JS, fonts and images (data: URIs), or link a vault image by "
-                         "a relative path."}
+        return {"error": "Not written: a page reaches nothing outside itself and goes nowhere but "
+                         f"to its own pages, and the viewer blocks the rest: {', '.join(dict.fromkeys(bad))[:300]}. "
+                         "Inline the CSS, JS, fonts and images (data: URIs), link a vault image or "
+                         "another page of the site by a relative path, and move between parts of a "
+                         "page without changing its address."}
     if "<" not in (html or ""):
         return {"error": "Not written: `html` holds no HTML document"}
     text = with_footer(html, sources)
