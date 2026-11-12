@@ -496,6 +496,9 @@ class _MathMLProbe(HTMLParser):
         self.foreign = True
 
 
+_LONG_ARROW_MI = re.compile(r"<mi>(&#x027F[5-9A-C];)</mi>")
+
+
 def mathml(tex: str, display: bool) -> str:
     """LaTeX -> MathML, rendered natively by the browser (no client JS/fonts).
     A failed conversion degrades to the escaped source in a code span, and so
@@ -509,6 +512,9 @@ def mathml(tex: str, display: bool) -> str:
         # cannot read raises here, and the whole formula shows as its source.
         out = convert(mhchem.expand(tex) if "\\ce" in tex or "\\pu" in tex else tex,
                       display="block" if display else "inline")
+        # latex2mathml writes the long arrows (U+27F5..U+27FC: \longrightarrow, \implies,
+        # \iff) as identifiers, which take no spacing: mhchem's `->` drew B⟶C touching.
+        out = _LONG_ARROW_MI.sub(r"<mo>\1</mo>", out)
         probe = _MathMLProbe()
         probe.feed(out)
         probe.close()
