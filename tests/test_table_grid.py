@@ -49,6 +49,8 @@ ROWS = [
     "| [[Note|alias]] | $|x|$ | a \\| b |",
     "| **x** |  | [y](https://e.org/?a|b) |",
     "| `a|b` | c | d |",
+    "| Coffee | $5 | x |",  # a price: a `$` that never closes is text
+    "| [[x | y | z |",  # a link that never closes is text
 ]
 
 
@@ -65,8 +67,10 @@ def _server_cells(row: str) -> int:
 
 def test_the_split_agrees_with_the_servers_render(tmp_path):
     got = _run(tmp_path, [["cells", r] for r in ROWS])
-    assert [len(c) for c in got] == [_server_cells(r) for r in ROWS] == [3, 3, 3, 4, 4]
+    assert [len(c) for c in got] == [_server_cells(r) for r in ROWS] == [3, 3, 3, 4, 4, 3, 3]
     assert got[2] == [" [[Note|alias]] ", " $|x|$ ", " a \\| b "]
+    # the text, not only the count: a cell taken one pipe too far writes over its neighbour
+    assert got[5] == [" Coffee ", " $5 ", " x "] and got[6] == [" [[x ", " y ", " z "]
     # a row the server splits wider than its head makes the table no grid: drawn, and edited as text
     head = "| h1 | h2 | h3 |\n|---|---|---|\n"
     assert _run(tmp_path, [["model", head + ROWS[4]], ["model", head + ROWS[2]]])[0] is None

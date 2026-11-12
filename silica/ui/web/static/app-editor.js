@@ -231,8 +231,10 @@
     for (let i = start; i < line.length; i++) {
       const ch = line[i];
       if (ch === "\\") i++;
-      else if (ch === "$") math = !math;
-      else if (!math && line.startsWith("[[", i)) { wiki++; i++; }
+      // Math and a link open only where they close, as the server's patterns match:
+      // the `$5` of a price is text, and its cell ends at the next pipe.
+      else if (ch === "$") math = math ? false : line[i + 1] !== "$" && line[i - 1] !== "$" && line.indexOf("$", i + 2) > 0;
+      else if (!math && line.startsWith("[[", i) && line.indexOf("]]", i + 2) > 0) { wiki++; i++; }
       else if (!math && wiki && line.startsWith("]]", i)) { wiki--; i++; }
       else if (ch === "|" && !math && !wiki) { cells.push([start, i]); start = i + 1; }
     }
