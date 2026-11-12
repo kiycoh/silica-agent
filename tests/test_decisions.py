@@ -121,3 +121,23 @@ def test_the_chat_tool_names_its_note_and_stamps_it_as_written_by_silica(vault):
     assert data["decision"] is True and data["AI"] is True
     assert "error" in silica_decide(path="Decisions/Pick a host.md", decision="again")
     assert "error" in silica_decide(path="Decisions/Bad.md", decision="x", review_on="tomorrow")
+
+
+def test_undo_takes_back_an_outcome_and_leaves_the_decision(vault):
+    from tests.run_command import direct
+
+    direct("/decide Keep the old printer", [])
+    note = vault / "Decisions/Keep the old printer.md"
+    before = note.read_text()
+    assert direct("/outcome \"Keep the old printer\" it jammed twice --status reversed", [])
+    assert dc.read("x.md", note.read_text())["status"] == "reversed"
+    assert direct("/undo Decisions/Keep the old printer.md", [])
+    assert note.exists() and dc.read("x.md", note.read_text())["outcomes"] == []
+    assert frontmatter.split(note.read_text())[2] == frontmatter.split(before)[2]
+
+
+def test_the_chat_can_load_the_decision_tool():
+    import silica.cli  # noqa: F401  registers every tool
+    from silica.agent.constraints import CHAT_CORE, chat_deferred
+
+    assert "silica_decide" in chat_deferred() and "silica_decide" not in CHAT_CORE

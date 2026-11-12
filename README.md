@@ -112,7 +112,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 
 - Each write is a card in the chat with its revert. When the check is unsure, the card says why, shows the changed lines and asks you to keep or revert it.
 - `/undo` one note, `/revert <run-id>` one run, `/revert --source paper.pdf` everything one document produced, however far it spread. A deleted note waits in the trash until you bring it back or delete it for good.
-- When a new source contradicts a note, the contradiction stays written on the note until you resolve it; `/contested` lists them with their age, and the dot on SILICA counts them. `/contradictions` lists what the source checks found between your notes, without writing anything. The note's drawer sets both sides side by side, each opening at its line, and settles one in four ways: this note holds, the other holds, both hold under a condition you write, or keep it open. The outcome and its date stay in the note as text, and one undo takes back every note it touched.
+- When a new source contradicts a note, the contradiction stays written on the note until you resolve it; `/contested` lists them with their age; while one is open the dot on SILICA lights, and its menu lists them. `/contradictions` lists what the source checks found between your notes, without writing anything. The note's drawer sets both sides side by side, each opening at its line, and settles one in four ways: this note holds, the other holds, both hold under a condition you write, or keep it open. The outcome and its date stay in the note as text, and one undo takes back every note it touched.
 - A flashcard whose answer is not in the note it cites is dropped before you see it; a slide point that is not in its note is named under the deck.
 - `/verify` vouches for a note as you, bound to its text. `/stale` lists the notes whose source changed and the notes Silica wrote that were since edited by hand.
 
@@ -235,7 +235,7 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/plans` | list plans/ notes grouped by status: (todo\|in-progress\|blocked\|done) |
 | `/path <noteA> <noteB>` | shortest reading path between two notes (wikilinks + co-occurrence) |
 | `/contested` | list the open contradictions, each with its age and both sides; the app's note drawer settles them |
-| `/contradictions [folder] [--check]` | contradictions the source checks found between notes, proposed and never written; --check first checks the notes never checked |
+| `/contradictions [folder] [--check]` | contradictions the source checks found between notes, proposed and never written; --check first checks the notes never checked, 40 at a time |
 | `/verify <note> [--clear] [--as "<name>"]` | vouch for a note as a person (OKF verified, bound to the body); --clear withdraws, --as signs with a name |
 | `/check <note>` | read a note you wrote against the vault, block by block: what a source contradicts or overstates, links, identifiers, dates and quotations, by grade; never edits it. In the app, `check sources` in the note's menu underlines the text |
 

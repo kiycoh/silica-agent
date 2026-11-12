@@ -74,16 +74,18 @@ def _callouts(lines: list[str], stop: int) -> list[tuple[int, int, str]]:
     return out
 
 
+_META = (MINE, FOUND, KEPT, "Conflicts with this note.")
+
+
 def _parse(callout: list[str]) -> dict[str, Any]:
-    """The other side's words and the meta lines of one callout. The meta is
-    what follows the last empty `>` line; an import's callout has only the
-    "Conflicts with this note" line there."""
+    """The other side's words and the meta lines of one callout. A meta line
+    is told by how it starts, not by where it stands: each is its own
+    paragraph, so Obsidian shows them apart, and an import's quote may hold
+    empty lines of its own."""
     inner = [re.sub(r"^>\s?", "", ln) for ln in callout[1:]]
-    blanks = [k for k, x in enumerate(inner) if not x.strip()]
-    cut = blanks[-1] if blanks else len(inner)
-    meta = inner[cut + 1:]
+    meta = [x for x in inner if x.startswith(_META)]
     found = next((m for x in meta if (m := _FOUND_RE.match(x))), None)
-    return {"their": "\n".join(inner[:cut]).strip(),
+    return {"their": "\n".join(x for x in inner if not x.startswith(_META)).strip(),
             "mine": next((x[len(MINE):].strip() for x in meta if x.startswith(MINE)), ""),
             "found": found.group("date") if found else "",
             "how": found.group("how") if found else "",
@@ -134,16 +136,20 @@ def records(content: str) -> list[dict[str, Any]]:
 
 def callout(other: str, their: str, mine: str, today: str, how: str = FOUND_BY) -> str:
     """A new record's callout: the import's shape, with this note's words and
-    the day it was found after the empty line. No em dash in the header, which
-    the import's still carries; the start pattern reads both."""
+    the day it was found after the quote, each line a paragraph of its own.
+    No em dash in the header, which the import's still carries; the start
+    pattern reads both."""
     quoted = [f"> {ln}".rstrip() for ln in their.strip().splitlines()] or [">"]
-    return "\n".join([f"> [!warning] Contradiction from {other}", *quoted, ">", f"> {MINE}{mine.strip()}",
-                      f"> {FOUND}{today} {how}.", f"> Conflicts with this note. {_UNRESOLVED_TAIL}"])
+    return "\n".join([f"> [!warning] Contradiction from {other}", *quoted, ">", f"> {MINE}{mine.strip()}", ">",
+                      f"> {FOUND}{today} {how}.", ">", f"> Conflicts with this note. {_UNRESOLVED_TAIL}"])
 
 
 def add_record(content: str, other: str, their: str, mine: str, today: str, how: str = FOUND_BY) -> str:
     """`content` with a new open record against `other`: the callout at the end
     of the live body and the entry in `contradictions:`."""
+    # shortcut: one entry per note and other side, so two contests of one pair
+    # are settled together; split the ref by claim once a person reports a pair
+    # with two (none known on 2026-11-12).
     return mark_contested(append_before_superseded(content, "\n" + callout(other, their, mine, today, how) + "\n"),
                           f"source: {other}")
 
@@ -221,7 +227,7 @@ def settle(content: str, ref: str, holds: str, today: str, *, condition: str = "
         return content
     first, last = head + c[0], head + c[1] - 1
     if holds == "open":
-        return "\n".join(lines[:last] + [f"> {KEPT}{today}."] + lines[last:])
+        return "\n".join(lines[:last] + [f"> {KEPT}{today}.", ">"] + lines[last:])
     lines[first] = lines[first].replace("[!warning]", "[!note]", 1)
     lines[last] = lines[last].replace(_UNRESOLVED_TAIL, f"Resolved {today}: {said(holds, rec['other'], condition)}.")
     text = "\n".join(lines)
@@ -318,6 +324,9 @@ def proposals_of(vault: str, path: str, text: str) -> list[dict[str, Any]]:
     out = []
     for f in findings:
         other_path, _, other_line = str(f.get("at") or "").rpartition(":")
+        # shortcut: found by the line the last check saw, so a block that moved
+        # with its words unchanged drops out until the next check; match by the
+        # cached block text instead if a person misses one (none known 2026-11-12).
         b = at_line.get(int(f.get("line") or 0))
         if f.get("kind") != "contradicted" or not other_path or b is None:
             continue

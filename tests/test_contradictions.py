@@ -177,3 +177,27 @@ def test_keeping_a_proposal_open_writes_the_record_and_lists_it(pair):
     assert lines[r["mine_line"] - 1] == MINE and (r["other_path"], r["their_line"]) == ("Work/B.md", 5)
     with pytest.raises(LookupError):
         cx.resolve(str(pair), "Work/A.md", "this", at=p["at"], line=p["line"])
+
+
+def test_the_commands_list_without_a_model_and_undo_takes_a_settle_back(pair, monkeypatch, capsys):
+    from silica.session import check as check_wiring
+    from tests.run_command import direct
+
+    def no_model(*a, **kw):
+        raise AssertionError("listing must not run the check")
+
+    monkeypatch.setattr(check_wiring, "run", no_model)
+    assert direct("/contradictions Work", [])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "1 contradiction proposed under Work, nothing written" in out and "Work/A.md:7" in out
+    (p,) = cx.proposals(str(pair))
+    cx.resolve(str(pair), "Work/A.md", "open", at=p["at"], line=p["line"])
+    assert direct("/contested", [])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "1 open contradiction" in out and "against [[B]]" in out and "today" in out
+    assert f"this note: {MINE}" in out and "conflicts with: source: [[B]]" in out
+    (r,) = cx.records((pair / "Work/A.md").read_text())
+    cx.resolve(str(pair), "Work/A.md", "this", ref=r["ref"])
+    assert cx.records((pair / "Work/A.md").read_text()) == []
+    assert direct("/undo Work/A.md", [])
+    assert cx.records((pair / "Work/A.md").read_text())[0]["ref"] == "source: [[B]]"

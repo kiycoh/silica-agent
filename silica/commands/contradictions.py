@@ -7,6 +7,8 @@ from __future__ import annotations
 from silica.command_table import Call, Result
 from silica.session.words import positional
 
+CHECK_CAP = 40  # never-checked notes one `--check` runs; the rest wait for the next
+
 
 def _short(text: str, n: int = 140) -> str:
     flat = " ".join(text.split())
@@ -38,6 +40,12 @@ def contradictions(c: Call) -> Result:
     fresh = [rel for rel in notes if not read_cache(vault, rel)]
     where = folder or "the vault"
     if "--check" in c.args:
+        # A run that cannot be stopped from the chat, so it stops itself: at
+        # ADR-0110's estimate (about $0.00008 a block) 40 notes of 20 blocks is
+        # about $0.06, and the line below names what is left for the next run.
+        # shortcut: no cancel between notes; wire `cancelled` once a sweep runs
+        # as a job (ADR-0099) or a person asks to stop one.
+        left, fresh = fresh[CHECK_CAP:], fresh[:CHECK_CAP]
         for n, rel in enumerate(fresh, 1):
             try:
                 report = check_wiring.run(rel)
@@ -49,7 +57,7 @@ def contradictions(c: Call) -> Result:
             hit = sum(f["kind"] == "contradicted" for f in report["findings"])
             out.print(f"  {n}/{len(fresh)} {escape(rel)}: {report['blocks']} blocks"
                       f"{f', {hit} contradicted' if hit else ''}")
-        fresh = []
+        fresh = left
     found = cx.proposals(vault, folder)
     if not found:
         out.print(f"  No contradiction proposed under {escape(where)}.")
@@ -63,6 +71,6 @@ def contradictions(c: Call) -> Result:
                   "this note holds, the other holds, both hold when, or keep it open.")
     if fresh:
         out.print(f"  [dim]{len(fresh)} of {len(notes)} notes under {escape(where)} were never checked: "
-                  f"/contradictions {escape(folder + ' ' if folder else '')}--check checks them, one model call "
-                  "per block the rules do not settle.[/]")
+                  f"/contradictions {escape(folder + ' ' if folder else '')}--check checks {CHECK_CAP} at a time, "
+                  "one model call per block the rules do not settle.[/]")
     return out

@@ -557,7 +557,7 @@ COMMANDS: tuple[Command, ...] = (
         group="direct",
         usage="[folder] [--check]",
         summary="contradictions the source checks found between notes, proposed and never written; "
-                "--check first checks the notes never checked",
+                "--check first checks the notes never checked, 40 at a time",
         examples=("/contradictions Projects", "/contradictions Projects --check"),
         handler="silica.commands.contradictions:contradictions", demo_off=True,
     ),
