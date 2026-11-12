@@ -684,18 +684,19 @@ def note_history_restore(payload: dict):
 
 
 @router.get("/page/{path:path}")
-def page(path: str):
+def page(path: str, request: Request):
     """A page the chat wrote (ADR-0171), by its vault path, and any vault image it
     names by a relative one: path-shaped, so a site's links and its images resolve
     against the page as they do on disk. Every account's, on the server too: the
-    page runs in its own origin (render.PAGE_HEADERS), never the app's."""
+    page runs in its own origin (render.page_headers), never the app's."""
     from silica.kernel.write.pages import is_page, page_file
 
     if is_page(path):
         found = page_file(Path(CONFIG.vault_path), path)
         if found is None:
             raise HTTPException(status_code=404)
-        return FileResponse(found, media_type="text/html", headers=render.PAGE_HEADERS)
+        return FileResponse(found, media_type="text/html",
+                            headers=render.page_headers(request.headers.get("host", "")))
     return asset(path)
 
 
