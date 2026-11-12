@@ -16,10 +16,6 @@ from silica.session.words import int_flag, positional, str_flag
 logger = logging.getLogger(__name__)
 
 
-# /contested scan memo: (epoch, rows) — the scan parses every note's
-# frontmatter, so it runs once per file-state epoch.
-_CONTESTED_SCAN_MEMO: dict[tuple[str, str], list] = {}
-
 
 def find(c: Call) -> Result:
     """/find <query> [--k=N] [--min-trust=T] [--lifecycle=L] — semantic search,
@@ -139,39 +135,32 @@ def path(c: Call) -> Result:
 
 
 def contested(c: Call) -> Result:
-    """/contested — notes flagged with an unresolved contradiction."""
+    """/contested — the open contradictions, each with its age and both sides
+    (ADR-0166 point 4). Read off the notes once per file-state epoch."""
     out = c.out
-    from silica.driver import DRIVER
-    from silica.kernel.base import layout
-    from silica.kernel.write.contested import CONTESTED_KEY, CONTRADICTIONS_KEY
+    from rich.markup import escape
 
-    def scan() -> list[tuple[str, list[str]]]:
-        found = []
-        for ref in DRIVER.list_files(""):
-            try:
-                props = DRIVER.props_of(ref.path)
-            except UNREADABLE:
-                continue  # attachments / unreadable frontmatter — not contested
-            if props and props.get(CONTESTED_KEY):
-                contras = [str(x) for x in (props.get(CONTRADICTIONS_KEY) or [])]
-                found.append((ref.path, contras))
-        return found
+    from silica.kernel.check.contradictions import open_records
 
-    # The scan frontmatter-parses every note, so it runs once per
-    # file-state epoch; between vault changes a repeat costs a stat walk.
-    found = layout.on_epoch(_CONTESTED_SCAN_MEMO, "scan", scan)
-    if not found:
-        out.print("  No contested notes — no unresolved contradictions.")
+    rows = open_records()
+    if not rows:
+        out.print("  No open contradictions.")
         return out
-    out.print(f"  {len(found)} contested note(s):")
-    for note_path, contras in sorted(found):
-        out.print(f"  · [bold]{note_path}[/]")
-        for line in contras:
-            out.print(f"      conflicts with: {line}")
+    out.print(f"  {len(rows)} open contradiction{'s' if len(rows) != 1 else ''}:")
+    for r in rows:
+        age = r["age"]
+        when = ("age unknown" if age is None else f"found {r['found']}, "
+                + ("today" if age == 0 else f"{age} day{'s' if age != 1 else ''} ago"))
+        where = f"{r['path']}:{r['line']}" if r["line"] else r["path"]
+        out.print(f"  · [bold]{escape(where)}[/] against {escape(r['other'] or 'a flag')} · {escape(when)}")
+        if r["mine"]:
+            out.print(f"      this note: {escape(' '.join(r['mine'].split())[:140])}")
+        out.print(f"      {'the other' if r['other'] else 'the flag'}: {escape(' '.join(r['their'].split())[:140])}")
+        out.print(f"      conflicts with: {escape(r['ref'])}")
     out.print(
-        "  Ask the agent to resolve one with silica_flag_note(clear=True, "
-        "ref=…), passing a `conflicts with` line above verbatim; the losing "
-        "claim is filed under `## Superseded` instead of being deleted."
+        "  Settle one in the note's drawer in the app (this note holds, the other holds, both hold when, "
+        "keep it open), or ask the agent: silica_flag_note(clear=True, ref=…) with a `conflicts with` "
+        "line above files the other side under `## Superseded`."
     )
     return out
 
