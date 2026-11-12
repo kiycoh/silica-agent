@@ -910,7 +910,7 @@ def web_research(
         # down; the block below regenerates what the cut removed.
         bound = SOURCES_TAIL_RE.split(bound, maxsplit=1)[0].rstrip()
     provenance = "\n".join(line for line in (_lane_line(), audit) if line)
-    note = build_note(concept, bound, sources, lanes=provenance)
+    note = build_note(concept, bound, sources, lanes=provenance, cites_quotes=quote_ids)
     note_rel = unique_inbox_path(name or concept, folder=folder)
     from silica.driver import DRIVER
 
@@ -1336,17 +1336,19 @@ def write_leaf(
 
     web_research bypasses the FSM, so it writes its own leaf: the raw
     web_search and web_fetch tool results the findings were written from, in
-    call order. Named after the inbox note's basename, so a later /nucleate of
-    that note finds the leaf and links the distilled notes to it at CLEANUP.
-    Retrieval-invisible like every sources/ file. Best-effort: a leaf failure
-    never loses the note.
+    call order. Named after the inbox note's path under the inbox
+    (`source_key`), so a later /nucleate of that note finds the leaf and links
+    the distilled notes to it at CLEANUP. Retrieval-invisible like every
+    sources/ file. Best-effort: a leaf failure never loses the note.
 
     The bank rides ahead of the raw trace: after /nucleate distils the note,
     the [n] markers in its prose remain resolvable to the exact quote and URL
-    without re-reading megabytes of page text (spec §3.5).
+    without re-reading megabytes of page text (spec §3.5). CLEANUP parses it
+    back (provenance.evidence_bank), so its row shape is that reader's too.
     """
     try:
         from silica.kernel.base.layout import SOURCES_DIR
+        from silica.kernel.base.manifest import source_key
 
         raw = "\n\n".join(r for r in results if r)
         if not raw:
@@ -1358,11 +1360,15 @@ def write_leaf(
             raw = "\n".join(lines) + "\n" + raw
         from silica.driver import DRIVER
 
-        basename = note_rel.rsplit("/", 1)[-1]
+        # The key CLEANUP looks the leaf up by (ADR-0114). A note at the inbox
+        # root keeps its bare name; a deep research's part sits in a folder of
+        # the inbox, and its leaf named by the basename alone was never found,
+        # so its notes got no Sources block and their quotes no leaf.
+        key = source_key(note_rel)
         today = datetime.date.today().isoformat()
         DRIVER.create(
-            f"{SOURCES_DIR}/{basename}",
-            f"---\ndate: {today}\nsource_id: {basename}\n---\n\n{raw}\n",
+            f"{SOURCES_DIR}/{key}",
+            f"---\ndate: {today}\nsource_id: {key}\n---\n\n{raw}\n",
         )
     except Exception:
         import logging
@@ -1625,6 +1631,7 @@ def build_note(
     force_sources: bool = False,
     lanes: str = "",
     form: str = "",
+    cites_quotes: bool = False,
 ) -> str:
     """Deterministic frontmatter + body + guaranteed ## Sources.
 
@@ -1643,6 +1650,13 @@ def build_note(
     # external content declares itself so nucleation picks the clip lens
     # without sniffing.
     form_line = f"form: {form}\n" if form else ""
+    # A deep research's part keeps its markers as quote ids (ADR-0158 point 9)
+    # and says so, so /nucleate keeps them on the lines it writes and CLEANUP
+    # resolves them against the leaf. Read by forms.cites_quotes, nowhere else.
+    if cites_quotes:
+        from silica.kernel.forms import CITATIONS_KEY, QUOTE_CITATIONS
+
+        form_line += f"{CITATIONS_KEY}: {QUOTE_CITATIONS}\n"
     front = (
         "---\n"
         f"title: {json.dumps(concept)}\n"
@@ -1666,9 +1680,9 @@ def build_note(
 
 def unique_inbox_path(concept: str, fallback: str = "web-research", folder: str = "") -> str:
     """`<inbox>/<slug>.md`, with a numeric suffix on collision in the Inbox OR
-    in sources/. write_leaf names the leaf after this same basename, so a
-    basename that is merely free in the Inbox is not enough: a leaf can
-    outlive its note past /nucleate, and reusing that basename would silently
+    in sources/. write_leaf names the leaf after this same path under the
+    inbox, so a basename that is merely free in the Inbox is not enough: a leaf
+    can outlive its note past /nucleate, and reusing that basename would silently
     attach a stale, unrelated leaf to the new note (DRIVER.create raises
     FileExistsError there, which write_leaf swallows as best-effort). Check
     both up front so the note and its future leaf are always in lockstep.
@@ -1679,7 +1693,7 @@ def unique_inbox_path(concept: str, fallback: str = "web-research", folder: str 
     `folder` is a folder inside the Inbox, for the parts of one deep research
     (ADR-0158 point 8)."""
     from silica.kernel.base.layout import SOURCES_DIR
-    from silica.kernel.base.manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir, source_key
 
     inbox = active_inbox_dir() or "Inbox"
     if folder:
@@ -1688,7 +1702,8 @@ def unique_inbox_path(concept: str, fallback: str = "web-research", folder: str 
     vault = Path(CONFIG.vault_path)
     basename = f"{slug}.md"
     n = 2
-    while (vault / inbox / basename).exists() or (vault / SOURCES_DIR / basename).exists():
+    while ((vault / inbox / basename).exists()
+           or (vault / SOURCES_DIR / source_key(f"{inbox}/{basename}")).exists()):
         basename = f"{slug} {n}.md"
         n += 1
     return f"{inbox}/{basename}"

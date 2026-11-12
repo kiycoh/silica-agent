@@ -153,6 +153,11 @@ TASK_HEAD_RE = re.compile(r"^\[([ xX])\][ \t]+")
 # A whitespace-delimited path-like token: holds "/" or ends in ".md".
 PATH_TOKEN_RE = re.compile(r"[^\s\[\]]*(?:/[^\s\[\]]*|\.md)")
 
+# A deep research's citation of the banked quotes a sentence stands on, `[Q3]`
+# or `[Q3, Q7]` (ADR-0158 point 9), with the whitespace before it, which goes
+# when the marker does. The ids are the one group.
+QUOTE_MARK_RE = re.compile(r"\s*\[(Q\d+(?:\s*,\s*Q\d+)*)\]")
+
 # --- code -------------------------------------------------------------------
 
 INLINE_CODE_RE = re.compile(r"`[^`\n]+`")

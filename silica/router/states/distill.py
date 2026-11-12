@@ -26,6 +26,7 @@ from silica.kernel.text.title import SHORT_FLAG, near_title_of, review_flags
 from silica.kernel.write.validate import validate_ops
 from silica.router.phases import MAX_STEER_ATTEMPTS, REJECTION_RATE_MAX, InjectorState, phase
 from silica.router.run_state import job_origin
+from silica.kernel.forms import cites_quotes
 from silica.kernel.outline import flag_cosine_near_titles, parse_outline, run_outliner, vault_outline
 from silica.kernel.prep_delegation import payload_inbox_text, run_distiller
 
@@ -479,6 +480,9 @@ def _run_outline_chunk(fsm: "InjectorFSM", idx: int, chunk: dict,
         language=language,
         vault_outline=rows, outline=prior, only_titles=only, steer_context=steer_context,
         spine_title=_segment_title(inbox_file),
+        # The ingress stamp, never a sniff: only a deep research's part asks
+        # the model to keep its quote markers (ADR-0158 point 9).
+        quote_ids=cites_quotes(source_text),
     )
     if only is None:
         try:

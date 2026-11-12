@@ -130,6 +130,19 @@ STAGE_BODIES_TRANSLATE = """
 The source is written in another language than {lang}: translate its sentences into {lang}, faithfully and completely. Keep formulas, code, citations and proper names as they are.
 """
 
+# A deep research's part cites the banked quote each sentence stands on
+# (ADR-0158 point 9), and CLEANUP turns the marker into a footnote with that
+# quote and its URL. Only the lines a model writes can lose it: the claim of
+# stage A and the coverage pass, which every note opens on and the spine
+# lists, and a body the bodies stage writes. A looked-up body is the source's
+# own text and keeps its markers by construction. Appended only for a source
+# stamped `citations: quotes`, so every other prompt stays byte-identical.
+QUOTE_IDS_CLAIM = """- The source cites its evidence inline as [Q3] or [Q3, Q7]. End each claim with the marker(s) of the source sentences it states, copied exactly. Never write a marker the source does not show beside those sentences.
+"""
+QUOTE_IDS_BODY = """
+The source cites its evidence inline as [Q3] or [Q3, Q7]. Keep the marker on every line that states a claim from the source, copied exactly as the source shows it beside that claim. Never write a marker the source does not show there.
+"""
+
 # Bodies are LaTeX-heavy prose: as JSON strings they came back with single
 # backslashes, literal newlines, unescaped quotes and objects split in two
 # (four reply shapes, about one retry per lecture, 2026-09-05). A marker line
@@ -1033,15 +1046,18 @@ def _match_bodies(reply: dict, titles: list[str],
     return got
 
 
-def skeleton(src: str, *, language: str, ask: Callable[..., dict], cover: bool = True) -> Outline:
+def skeleton(src: str, *, language: str, ask: Callable[..., dict], cover: bool = True,
+             quote_ids: bool = False) -> Outline:
     """Stage A, then the coverage pass when a heading has no idea: the ideas
     and their typed edges, every source heading claimed or skipped. Shared
     with the study-mode inventory (docs/specs/study-mode.md D31), whose key
     is this same reconstruction of the argument. `cover=False` skips the
     pass: verbatim bodies (partition_bodies) hand an unnamed heading's text
     to the idea before it, so the pass would pay a whole-source call to name
-    text that already lands."""
+    text that already lands. `quote_ids` asks each claim to keep its
+    quote markers (QUOTE_IDS_CLAIM)."""
     rels = ", ".join(RELATIONS)
+    rule = QUOTE_IDS_CLAIM if quote_ids else ""
     cached = _cache_layout()
     user = "" if cached else src
     if not cover and (heads := source_headings(src)):
@@ -1049,13 +1065,13 @@ def skeleton(src: str, *, language: str, ask: Callable[..., dict], cover: bool =
         # its own section names for 15 ideas of 15 on Lezione 18 (2026-10-15).
         user += ("\n\nSOURCE HEADINGS (copy each idea's \"section\" from this list, exactly):\n"
                  + "\n".join(f"- {h}" for h in heads))
-    outline = parse_outline(ask(STAGE_A.format(lang=language, rels=rels), user,
+    outline = parse_outline(ask(STAGE_A.format(lang=language, rels=rels) + rule, user,
                                 max_tokens=8000, **({"prefix": src} if cached else {})))
     gaps = coverage_gaps(outline, source_headings(src)) if cover else []
     if not gaps:
         return _unshout(outline, src)
     ideas_so_far = "IDEAS SO FAR:\n" + "\n".join(f"{i.title} | {i.section}" for i in outline.ideas)
-    extra = ask(STAGE_GAP.format(gaps="\n".join(f"- {g}" for g in gaps), lang=language, rels=rels),
+    extra = ask(STAGE_GAP.format(gaps="\n".join(f"- {g}" for g in gaps), lang=language, rels=rels) + rule,
                 ideas_so_far if cached else ideas_so_far + "\n\nSOURCE:\n" + src, max_tokens=4000,
                 **({"prefix": src} if cached else {}))
     # A coverage idea exists to close a named section; one without a
@@ -1122,12 +1138,16 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
                  language: str, vault_outline: list[dict],
                  ask: Callable[..., dict] | None = None,
                  outline: Outline | None = None, only_titles: set[str] | None = None,
-                 steer_context: str | None = None, spine_title: str | None = None) -> dict:
+                 steer_context: str | None = None, spine_title: str | None = None,
+                 quote_ids: bool = False) -> dict:
     """The lane's DELEGATE: source text -> {"updates", "ephemerals", "concepts", "outline", "gaps"}.
 
     `outline` + `only_titles` is the steer retry: VALIDATE rejected some
     bodies, so only those are regenerated (with the feedback appended) and the
     outline, spine and edges are not paid for again.
+
+    `quote_ids`: the source cites banked quotes, and every stage that writes a
+    line is told to keep the markers (ADR-0158 point 9).
     """
     src = strip_images(source_text)
     # Sized only for the real worker: an injected `ask` is a test or a probe.
@@ -1135,7 +1155,7 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     ask = ask or _default_ask
     verbatim = verbatim_bodies() and not translates(src)
     if outline is None:
-        outline = skeleton(src, language=language, ask=ask, cover=not verbatim)
+        outline = skeleton(src, language=language, ask=ask, cover=not verbatim, quote_ids=quote_ids)
     lead = ""
     looked_up: dict[str, str] = {}
     if verbatim and only_titles is None:
@@ -1149,7 +1169,8 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     # "in {lang}" next to "copied from the source" read as copy: DeepSeek kept
     # the Goodfellow's English under Italian titles (2026-10-23).
     bodies_prompt = STAGE_BODIES.format(lang=language) + (
-        STAGE_BODIES_TRANSLATE.format(lang=language) if translates(src) else "")
+        STAGE_BODIES_TRANSLATE.format(lang=language) if translates(src) else "") + (
+        QUOTE_IDS_BODY if quote_ids else "")
 
     def _bodies(batch: list[str]) -> dict[str, str]:
         section_of = {t: next(i.section for i in outline.ideas if i.title == t) for t in batch}
