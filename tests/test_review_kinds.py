@@ -343,3 +343,78 @@ def test_the_panel_lists_lands_a_yes_and_sends_a_model_yes_to_the_chat(tmp_vault
     assert api.post("/metrics/review/revert", json={"run": "nope"}).status_code == 404
     assert api.post("/metrics/review/dismiss", json={"ids": [orphan.id]}).json()["dismissed"] == [orphan.id]
     assert api.post("/metrics/review/apply", json={"ids": [orphan.id]}).status_code == 404
+
+
+def test_a_bare_undo_takes_back_the_newest_accepted_batch(tmp_vault, monkeypatch):
+    """/undo takes back the last thing Silica wrote. A yes from the queue is one
+    run of many notes, so it goes back whole, as the batch's revert does: before,
+    /undo after a yes said there was nothing to undo (seen 2026-11-12 in the
+    chat, after a yes typed there and after one clicked in Examine)."""
+    from silica.commands import dispatch
+    from silica.config import CONFIG
+
+    vault = CONFIG.vault_path
+    a, b = tmp_vault.note("A.md", "# A\n"), tmp_vault.note("B.md", "# B\n")
+    _toy(monkeypatch, tmp_vault)
+    queue.offer(vault, "toy", [Proposal(id=proposal_id("toy", n), kind="toy", title=n, why="w", notes=(n,),
+                                        data={"path": n}) for n in ("A.md", "B.md")])
+    assert queue.accept(vault, queue.pick(vault, ["toy"]))["run"]
+
+    said = _said(dispatch("/undo", []))
+    assert tmp_vault.read(a) == "# A\n" and tmp_vault.read(b) == "# B\n", said
+    assert queue.batches(vault)[0]["reverted"]
+    assert "Nothing to undo" in _said(dispatch("/undo", []))
+
+
+def test_a_duplicate_judged_a_pure_copy_lands_when_the_worker_marks_the_other_note(tmp_vault, kinds, monkeypatch):
+    """dedup._route_verdict merges no text into a pure duplicate: it points the
+    other note at the winner (superseded_by), records its name as an alias and
+    answers no_merge. Those writes are the yes landing, inside the batch's run;
+    the queue said "nothing merged" and kept the pair (seen 2026-11-12 on
+    Stoicism and a paraphrase of it)."""
+    from silica.config import CONFIG
+    from silica.kernel.write import gate
+    from silica.kernel.write.contested import mark_superseded_by
+
+    vault = CONFIG.vault_path
+    tmp_vault.note("A.md", "# A\n\nThe school.\n")
+    loser = tmp_vault.note("B.md", "# B\n\nThe school again.\n")
+
+    def plan_apply(plan, vault_path=None, **_kw):
+        gate.journaled_write("B.md", lambda t: mark_superseded_by(t, "A.md"), source="dedup",
+                             run=gate.current_run() or "")
+        return {"batch": {"results": [{"target": "A.md", "status": "no_merge", "verdict": "duplicate"}]}}
+
+    monkeypatch.setattr("silica.tools.curate.apply_curation_plan", plan_apply)
+    dup = Proposal(id="d" * 10, kind="duplicate", title="A and B", why="86% similar", notes=("A.md", "B.md"),
+                   data={"target": "A.md", "partner": "B.md", "score": 0.86, "reason": "86% similar"})
+    queue.offer(vault, "duplicate", [dup])
+    res = queue.accept(vault, [dup])
+    assert [p.id for p in res["applied"]] == [dup.id] and not res["failed"]
+    assert queue.listing(vault) == []
+    queue.revert(vault, res["run"])
+    assert "superseded_by" not in tmp_vault.read(loser)
+
+
+def test_an_orphan_that_gained_a_link_or_left_its_path_is_not_offered(tmp_vault, kinds):
+    """The orphan list is the last /curate's. A link written since (a yes on a
+    link of the same queue, an edit) answers it, and a yes would spend the worker
+    on a note that needs nothing: seen 2026-11-12, "Connect The Stoics" listed
+    after its link landed."""
+    import os
+
+    import silica.driver
+    from silica.config import CONFIG
+    from silica.kernel.report.curator import CurationItem, CurationPlan
+    from silica.tools.review.curate import offer_plan
+
+    vault = CONFIG.vault_path
+    tmp_vault.note("Lone.md", "# Lone\n")
+    gone = tmp_vault.note("Gone.md", "# Gone\n")
+    tmp_vault.note("Kept.md", "# Kept\n")
+    offer_plan(vault, CurationPlan(items=[CurationItem("orphan", t) for t in ("Lone.md", "Gone.md", "Kept.md")]))
+    assert len([p for p in queue.listing(vault) if p.kind == "orphan"]) == 3
+    tmp_vault.note("Hub.md", "# Hub\n\nSee [[Lone]].\n")
+    os.remove(gone)
+    silica.driver._driver = None  # the driver's index as a later read finds the vault
+    assert [p.title for p in queue.listing(vault) if p.kind == "orphan"] == ["Connect Kept"]
