@@ -105,14 +105,16 @@ TYPES: dict[str, dict[str, Any]] = {
 
 # shortcut: 16k tokens a read and 1,500 a digest are ADR-0158 Open 5's proposed
 # values (LOCA's DeepSeek-V3.2 holds 80.0 at 16K and drops to 61.3 at 32K), not
-# a probe on the hosted model; replace both when Open 5 is answered. A part is
+# a probe on the hosted model; replace both by Open 5's answer, due with point
+# 7's gate before 2026-11-25. A part is
 # cut at TEXT_CHARS_PER_TOKEN, the count that never comes in under a request,
 # and a digest at ROUGH_CHARS_PER_TOKEN, since nothing clamps on it.
 PART_CHARS = 16000 * TEXT_CHARS_PER_TOKEN
 DIGEST_CHARS = 1500 * ROUGH_CHARS_PER_TOKEN
 # A passage shorter than this is a name or a phrase, verbatim but nothing a
-# sentence can stand on.
-MIN_QUOTE_WORDS = 3
+# sentence can stand on. Characters and not words: a Chinese or Japanese
+# sentence has no spaces to count.
+MIN_QUOTE_CHARS = 12
 WHY_CHARS = 200
 # The person's caps, checked where the spend happens.
 MAX_SECTIONS = 30
@@ -121,7 +123,7 @@ MIN_LENGTH = 100
 # shortcut: at most 200 files a document and a plan index of at most 20k
 # tokens (40,000 characters), past which each note keeps its first passages in
 # turn; both keep the plan call inside the 64k cap of the hosted chat
-# (2026-10-22). Raise them with Open 5's probe.
+# (2026-10-22). Raise them with Open 5's probe, due before 2026-11-25.
 MAX_FILES = 200
 PLAN_INDEX_CHARS = 20000 * TEXT_CHARS_PER_TOKEN
 # shortcut: the register stops growing at 8,000 characters (4k tokens) and
@@ -131,6 +133,7 @@ PLAN_INDEX_CHARS = 20000 * TEXT_CHARS_PER_TOKEN
 REGISTER_CHARS = 8000
 PARAM_CHARS = {"audience": 300, "register": 300, "language": 100, "focus": 2000}
 STOPPED = "stopped: what was read is kept, and the outline if there was one"
+INTERRUPTED = "the server restarted while this document was running: plan or write again to go on"
 
 _STOPS: dict[str, threading.Event] = {}
 
@@ -325,7 +328,7 @@ def _read_part(rec: dict, path: str, i: int, n: int, part: str) -> list[tuple[st
         quote = str(item.get("quote") or "").strip()
         why = " ".join(str(item.get("why") or "").split())[:WHY_CHARS]
         flat = squash(quote)
-        if len(flat.split()) < MIN_QUOTE_WORDS or flat not in hay:
+        if len(flat) < MIN_QUOTE_CHARS or flat not in hay:
             continue
         size += len(quote) + len(why)
         if size > DIGEST_CHARS:
@@ -341,9 +344,13 @@ _PAGE_RE = re.compile(r"^<!-- p\. (\d+) -->$")
 def _anchor(text: str, quote: str) -> str:
     """Where `quote` sits in `text`, from where code found it and never from
     the reader's word: `p. N` in a PDF, `§ Heading` under a note's heading,
-    "" above the first. The text is squashed line by line, which joins to the
-    same string as squashing it whole, so a line's offset there is exact."""
-    flat, marks = "", [(0, "")]
+    "" above the first. In a PDF the page is the anchor even below a line that
+    reads like a heading: a text layer's `#` is not the note's structure. The
+    text is squashed line by line, which joins to the same string as squashing
+    it whole, so a line's offset there is exact."""
+    flat = ""
+    pages: list[tuple[int, str]] = []
+    heads: list[tuple[int, str]] = []
     for line in text.splitlines():
         s = squash(line)
         if not s:
@@ -351,12 +358,12 @@ def _anchor(text: str, quote: str) -> str:
         flat += " " if flat else ""
         stripped = line.strip()
         if m := _PAGE_RE.match(stripped):
-            marks.append((len(flat), f"p. {m.group(1)}"))
+            pages.append((len(flat), f"p. {m.group(1)}"))
         elif m := _HEADING_RE.match(stripped):
-            marks.append((len(flat), f"§ {m.group(1)}"))
+            heads.append((len(flat), f"§ {m.group(1)}"))
         flat += s
     at = flat.find(squash(quote))
-    return next((label for off, label in reversed(marks) if off <= at), "")
+    return next((label for off, label in reversed(pages or heads) if off <= at), "")
 
 
 def _side_path(job_id: str) -> Path:
@@ -456,6 +463,9 @@ def _read(rec: dict, stop: threading.Event, update: Callable[..., None]) -> None
             side["passages"][pid] = {"note": path, "anchor": _anchor(text, quote), "quote": quote, "why": why}
             ids.append(pid)
         side["read"][path] = {"hash": digest, "ids": ids}
+    # shortcut: the digests are saved once the pass ends, so a restart in the
+    # middle of a read pays it again on the replan; save them file by file
+    # once a read is measured past 10 minutes (200 files at width 3).
     # A file that left the selection, or has no text now, takes its passages
     # out of the plan.
     for path in [p for p in side["read"] if p not in readable]:
@@ -593,7 +603,10 @@ it is, keep every event in the order told and add none, and keep each \
 citation on the line that tells what it supports. Reply with the sequence \
 only."""
 
-_REGISTER_RE = re.compile(r"(?im)^\s*\**\s*REGISTER\s*:?\s*\**\s*$")
+# The trailer's line as asked (`REGISTER:`) and as models also write it
+# (`## Register`, `**REGISTER:** none`); a prose line that only starts with
+# the word does not match.
+_REGISTER_RE = re.compile(r"(?im)^[ \t#*]*register[ \t*]*(?::.*)?$")
 # One [P3] or [P3, P7] marker with the whitespace that leads it, so a dropped
 # one takes its space along (web_research's _QREF_RE); a `^` the writer added
 # itself is read the same way, or a phantom [^P99] would slip through as is.
@@ -751,8 +764,14 @@ def _records() -> list[dict]:
 
 
 def public(rec: dict) -> dict:
-    """The record as the browser gets it: without the vault's path on disk."""
-    return {k: v for k, v in rec.items() if k != "vault"}
+    """The record as the browser gets it: without the vault's path on disk,
+    and in this kind's words when a restart interrupted it, since
+    `jobs.recover` writes the conversions' sentence on every kind
+    (job_records: a kind reads the state and says its own)."""
+    out = {k: v for k, v in rec.items() if k != "vault"}
+    if out.get("state") == "interrupted":
+        out.update(error=INTERRUPTED, stage="")
+    return out
 
 
 def _write(rec: dict) -> None:
@@ -959,7 +978,10 @@ def _guarded(rec: dict, stop_ev: threading.Event, body: Callable[[Callable[..., 
         logger.exception("document %s failed", rec["id"])
         end("the document stopped on an error")
     finally:
-        _STOPS.pop(rec["id"], None)
+        # Only this run's event: a write sent the instant this one ended has
+        # already put its own in.
+        if _STOPS.get(rec["id"]) is stop_ev:
+            _STOPS.pop(rec["id"], None)
 
 
 def _run_plan(rec: dict, stop_ev: threading.Event) -> None:

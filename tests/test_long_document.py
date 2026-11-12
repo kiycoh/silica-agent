@@ -95,9 +95,8 @@ def test_read_keeps_only_verbatim_passages_with_an_anchor_code_computed(tmp_vaul
 
 def test_a_pdf_page_is_the_anchor_of_a_passage_found_on_it():
     text = "<!-- p. 1 -->\nCover.\n\n<!-- p. 2 -->\n## Methods\nWe sampled forty rivers.\n"
-    assert ld._anchor(text, "We sampled forty rivers.") == "§ Methods"
-    assert ld._anchor("<!-- p. 1 -->\nA.\n\n<!-- p. 2 -->\nWe sampled forty rivers.\n",
-                      "sampled  forty rivers") == "p. 2"
+    assert ld._anchor(text, "We sampled forty rivers.") == "p. 2"     # a text layer's # is no heading
+    assert ld._anchor("Top.\n\n## Methods\n\nWe sampled forty rivers.\n", "sampled  forty rivers") == "§ Methods"
     long = "a b c\n\n" * (ld.PART_CHARS // 6)
     assert all(len(p) <= ld.PART_CHARS for p in ld._parts(long)) and "".join(ld._parts(long)) == long
 
@@ -289,3 +288,71 @@ def test_the_local_model_is_refused_and_the_form_gets_its_types(client, tmp_vaul
     assert client.post("/document/count", json={"selection": {"folders": ["Notes"]}}).json()["notes"] == 1
     r = client.post("/document/count", json={"selection": {"folders": ["../x"]}})
     assert r.status_code == 409 and r.json()["error"] == "a folder in the selection is not one of this vault's"
+
+
+def test_a_pdf_is_read_page_by_page_unless_a_chosen_note_holds_its_text(tmp_vault, monkeypatch):
+    from silica.config import CONFIG
+    from silica.sources import pdf_extract
+    from tests.doc_factory import pdf_bytes
+
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
+    monkeypatch.delenv("SILICA_HOSTED", raising=False)
+    pdf_extract._CACHE.clear()
+    root = Path(tmp_vault.note("Notes/Bridge.md", BRIDGE)).parent
+    (root / "Survey.pdf").write_bytes(pdf_bytes(["The cover of the survey.", "We sampled forty rivers in 2019."]))
+    (root / "Held.pdf").write_bytes(pdf_bytes(["Text a note already holds."]))
+    tmp_vault.note("Notes/Held notes.md", "---\nsource_file: Notes/Held.pdf\n---\nText a note already holds.\n")
+
+    assert ld.resolve(ld._clean_selection({"folders": ["Notes"]})) == [
+        "Notes/Bridge.md", "Notes/Held notes.md", "Notes/Survey.pdf"]
+    counted = ld.count({"folders": ["Notes"]})
+    assert counted["pdfs"] == 1 and counted["pages"] == 2 and counted["notes"] == 2
+    rec = _planned(monkeypatch, [], plan=_plan_reply(("Rivers", 300, ["P1"])), read=lambda user: json.dumps(
+        {"passages": [{"quote": "We sampled forty rivers in 2019.", "why": "the sample"}]}
+        if "Survey.pdf" in user else {"passages": []}))
+    (passage,) = ld._side(rec["id"])["passages"].values()
+    assert passage == {"note": "Notes/Survey.pdf", "anchor": "p. 2", "quote": "We sampled forty rivers in 2019.",
+                       "why": "the sample"}
+
+
+def test_a_screenplay_is_told_as_story_then_laid_out(tmp_vault, monkeypatch):
+    tmp_vault.note("Notes/Bridge.md", BRIDGE)
+    calls: list = []
+    rec = _planned(monkeypatch, calls, type_id="screenplay", plan=_plan_reply(("The fall", 900, ["P1", "P2"])))
+    monkeypatch.setattr(ld, "_ask", _model(calls, write=lambda u: "The bridge falls [P1].\n\nREGISTER:\n- 11:36"))
+    script = "EXT. VIADUCT - DAY\n\nThe deck gives way. [P1]"
+    original = ld._ask
+    monkeypatch.setattr(ld, "_ask", lambda m: script if m[0]["content"] is ld._FORMAT_SYSTEM else original(m))
+    done = _write(rec, rec["outline"]["sections"])
+    text = (Path(ld.CONFIG.vault_path) / done["note"]).read_text()
+    assert "EXT. VIADUCT - DAY" in text and "gives way. [^P1]" in text and "REGISTER" not in text
+
+
+def test_a_usage_limit_mid_read_keeps_the_passages_already_paid_for(tmp_vault, monkeypatch):
+    from silica.model.usage_limits import UsageLimited
+
+    tmp_vault.note("Notes/A.md", "Alpha holds the first fact of all.\n")
+    tmp_vault.note("Notes/B.md", "Beta holds the second fact of all.\n")
+    monkeypatch.setattr(ld.CONFIG, "subagent_max_concurrent", 1)
+
+    def read(user):
+        if "Beta" in user:
+            raise UsageLimited("window", None)
+        return json.dumps({"passages": [{"quote": "Alpha holds the first fact of all.", "why": "a fact"}]})
+
+    rec = _planned(monkeypatch, [], read=read, plan=_plan_reply(("All", 500, ["P1"])))
+    assert rec["state"] == "failed" and rec["error"] == "the 5-hour usage limit was reached"
+    assert [p["note"] for p in ld._side(rec["id"])["passages"].values()] == ["Notes/A.md"]
+
+
+def test_the_register_trailer_is_read_however_it_is_headed():
+    for line in ("REGISTER:", "## Register", "**REGISTER:** none"):
+        prose, items = ld._split_register(f"It fell. [P1]\nRegister offices shut.\n\n{line}\n- 11:36\n")
+        assert prose == "It fell. [P1]\nRegister offices shut." and items == ["11:36"]
+
+
+def test_a_cut_index_keeps_every_notes_first_passages(monkeypatch):
+    passages = {f"P{i}": {"note": "A.md" if i <= 5 else "B.md", "why": "w"} for i in range(1, 8)}
+    monkeypatch.setattr(ld, "PLAN_INDEX_CHARS", 60)
+    index, left_out = ld._index(passages)
+    assert [line.split(" | ")[0] for line in index.splitlines()] == ["P1", "P6", "P2", "P7"] and left_out == 3
