@@ -51,6 +51,8 @@ ROWS = [
     "| `a|b` | c | d |",
     "| Coffee | $5 | x |",  # a price: a `$` that never closes is text
     "| [[x | y | z |",  # a link that never closes is text
+    "| $5 | $7 | x |",  # two prices: `$5 | $` closes on a space, so dollarmath reads no math
+    "| $5 | $|x|$ | y |",  # a price beside a formula
 ]
 
 
@@ -67,10 +69,11 @@ def _server_cells(row: str) -> int:
 
 def test_the_split_agrees_with_the_servers_render(tmp_path):
     got = _run(tmp_path, [["cells", r] for r in ROWS])
-    assert [len(c) for c in got] == [_server_cells(r) for r in ROWS] == [3, 3, 3, 4, 4, 3, 3]
+    assert [len(c) for c in got] == [_server_cells(r) for r in ROWS] == [3, 3, 3, 4, 4, 3, 3, 3, 3]
     assert got[2] == [" [[Note|alias]] ", " $|x|$ ", " a \\| b "]
     # the text, not only the count: a cell taken one pipe too far writes over its neighbour
     assert got[5] == [" Coffee ", " $5 ", " x "] and got[6] == [" [[x ", " y ", " z "]
+    assert got[7] == [" $5 ", " $7 ", " x "] and got[8] == [" $5 ", " $|x|$ ", " y "]
     # a row the server splits wider than its head makes the table no grid: drawn, and edited as text
     head = "| h1 | h2 | h3 |\n|---|---|---|\n"
     assert _run(tmp_path, [["model", head + ROWS[4]], ["model", head + ROWS[2]]])[0] is None
@@ -82,6 +85,17 @@ def test_a_cell_writes_its_pipes_escaped_and_shows_them_bare(tmp_path):
     assert shown == "a | b $|x|$"
     assert raw == "a \\| b $|x|$ \\|"  # a pipe in a formula is the formula's
     assert kept == "[[A\\|b]]"  # Obsidian's spelling of an alias in a table
+    # `$5 | $7` typed in one cell is two prices and a pipe, not a formula: a bare pipe
+    # would split the cell on disk and leave the table ragged
+    assert _run(tmp_path, [["cellRaw", "$5 | $7"]]) == ["$5 \\| $7"]
+
+
+def test_a_row_of_prices_reads_as_cells_of_text():
+    """`| $5 | $7 |` drew one cell holding `$5 \\vert{} $7` and an empty one, in the
+    reader too (2026-11-12): the bars in a formula were escaped where dollarmath reads
+    no formula, `$5 | $` closing on a space."""
+    html = render("| Item | S | L |\n|---|---|---|\n| Coffee | $5 | $7 |\n", link=lambda p, d: d, asset=lambda t: t)
+    assert "<td>$5</td>\n<td>$7</td>" in html and "vert" not in html
 
 
 def test_a_column_change_writes_the_table_compactly_with_its_alignments(tmp_path):

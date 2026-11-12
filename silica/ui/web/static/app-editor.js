@@ -225,18 +225,23 @@
   // wikilink or inline math is the cell's own, as the server reads it
   // (render.py _escape_table_aliases), and `\|` always is. Where this and the
   // server's render count different cells, the grid stands down (paintGrid).
+  // Inline math where dollarmath reads it, as render.py _TABLE_MATH: no space inside
+  // either `$`, no digit before the first or after the last, never `$$`. So the `$5` of
+  // a price is text, and so is `$5 | $7`, two prices, whose `$` closes on a space.
+  const INLINE_MATH = /(?<![$\d\\])\$(?![$\s])[^$\n]*?(?<!\s)\$(?!\d)/;
+  const MATH_AT = new RegExp(INLINE_MATH.source, "y");
   function tableCells(line) {
     const cells = [], lead = /^\s*\|/.exec(line);
-    let start = lead ? lead[0].length : 0, math = false, wiki = 0;
+    let start = lead ? lead[0].length : 0, wiki = 0;
     for (let i = start; i < line.length; i++) {
       const ch = line[i];
       if (ch === "\\") i++;
-      // Math and a link open only where they close, as the server's patterns match:
-      // the `$5` of a price is text, and its cell ends at the next pipe.
-      else if (ch === "$") math = math ? false : line[i + 1] !== "$" && line[i - 1] !== "$" && line.indexOf("$", i + 2) > 0;
-      else if (!math && line.startsWith("[[", i) && line.indexOf("]]", i + 2) > 0) { wiki++; i++; }
-      else if (!math && wiki && line.startsWith("]]", i)) { wiki--; i++; }
-      else if (ch === "|" && !math && !wiki) { cells.push([start, i]); start = i + 1; }
+      // Math and a link open only where they close, as the server's patterns match;
+      // a formula's pipes are its own, so the scan steps over the whole of it.
+      else if (ch === "$") { MATH_AT.lastIndex = i; if (MATH_AT.test(line)) i = MATH_AT.lastIndex - 1; }
+      else if (line.startsWith("[[", i) && line.indexOf("]]", i + 2) > 0) { wiki++; i++; }
+      else if (wiki && line.startsWith("]]", i)) { wiki--; i++; }
+      else if (ch === "|" && !wiki) { cells.push([start, i]); start = i + 1; }
     }
     if (line.slice(start).trim()) cells.push([start, line.length]);
     return cells;
@@ -254,7 +259,7 @@
   const tableText = (m) => [m.head, m.aligns.map((a) => DELIM[a]), ...m.body].map(rowText).join("\n");
   // A cell shows its pipes bare and writes them escaped, inline math aside: there
   // `\|` is a norm, and the server already keeps a formula's bars in its cell.
-  const outsideMath = (t, f) => t.split(/(\$[^$\n]*\$)/).map((s, i) => (i % 2 ? s : f(s))).join("");
+  const outsideMath = (t, f) => t.split(new RegExp(`(${INLINE_MATH.source})`)).map((s, i) => (i % 2 ? s : f(s))).join("");
   const cellShown = (raw) => outsideMath(raw, (s) => s.replace(/\\\|/g, "|"));
   const cellRaw = (shown) => outsideMath(shown.trim(), (s) => s.replace(/\\\||\|/g, (m) => (m === "|" ? "\\|" : m)));
 

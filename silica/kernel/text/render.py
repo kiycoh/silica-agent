@@ -580,7 +580,11 @@ def _unembed_foreign_imgs(fragment: str, own: tuple[str, ...], made: set[str]) -
 # as `|` so the alias still resolves; in a formula `\|` would read as a norm,
 # so its bars become `\vert` and `\Vert`, which draw the same.
 _TABLE_ALIAS = re.compile(r"\[\[([^\]\[|\\]+)\|([^\]\[]+)\]\]")
-_TABLE_MATH = re.compile(r"(?<!\$)\$(?!\$)([^$\n]+?)\$")
+# Inline math where dollarmath (allow_space=False, allow_digits=False) reads it: no space
+# inside either `$`, no digit before the first or after the last, never `$$`. Wider, it
+# took `$5 | $` in `| $5 | $7 |` for a formula and wrote its bar as `\vert{}`.
+# app-editor.js INLINE_MATH is this pattern, for the grid's split.
+_TABLE_MATH = re.compile(r"(?<![$\d\\])\$(?![$\s])([^$\n]*?)(?<!\s)\$(?!\d)")
 
 
 def _escape_table_aliases(text: str) -> str:
