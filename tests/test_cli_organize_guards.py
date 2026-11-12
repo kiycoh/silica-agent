@@ -210,6 +210,17 @@ def test_web_search_closes_a_renderer_it_owns(tmp_vault, monkeypatch):
     assert renderer_mod._batch_run_hook is None
 
 
+def test_web_search_reads_an_apostrophe_as_a_letter(tmp_vault, monkeypatch):
+    """A concept is prose: "Caravaggio's light" was refused as unbalanced
+    quotes, with advice about paths, as /council and /page were."""
+    import silica.sources.web_research as wr
+
+    seen = []
+    monkeypatch.setattr(wr, "web_research", lambda concept, **k: seen.append(concept) or "Inbox/x.md")
+    for line in ("/web-search Caravaggio's light", '/web-search "Caravaggio\'s light" --max-searches=2'):
+        assert run_command.expansion(line) == ""
+    assert seen == ["Caravaggio's light"] * 2
+
 # --- the injector failure line names the phase that failed ------------------
 
 def test_injector_failure_names_the_failed_phase(monkeypatch):

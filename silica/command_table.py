@@ -265,7 +265,7 @@ COMMANDS: tuple[Command, ...] = (
             '/web-search "retrieval-augmented generation"',
             '/web-search "graph neural networks" --max-searches=6',
         ),
-        handler="silica.commands.ingress:web_search", shlex=True, demo_off=True,
+        handler="silica.commands.ingress:web_search", demo_off=True,
     ),
     Command(
         name="/web",
