@@ -434,12 +434,15 @@ def _finish(rec: dict, update, topics: list[str], error: str = "") -> None:
 
 
 def _part_name(q: str) -> str:
-    """A file name for a part: the sub-question cut at a word near 80 characters."""
+    """A file name for a part: the sub-question cut at a word near 80
+    characters, never on a comma or inside a parenthesis it opened (measured
+    on the first live run: "...formulations (mRNA construct,.md")."""
     q = re.sub(r"^\[\d{1,2}:\d{2}(?::\d{2})?\]\s*", "", q).rstrip("?").strip()
-    if len(q) <= 80:
-        return q
-    cut = q[:80].rsplit(" ", 1)[0]
-    return cut or q[:80]
+    if len(q) > 80:
+        q = q[:80].rsplit(" ", 1)[0] or q[:80]
+        if q.count("(") > q.count(")"):
+            q = q[:q.rindex("(")]
+    return q.rstrip(" ,;:-(").strip() or "part"
 
 
 _TOPICS_SYSTEM = """You get a research question, the sub-questions it was \

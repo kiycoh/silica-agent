@@ -23,19 +23,26 @@ router = APIRouter(prefix="/research")
 
 def _hosted_model_only() -> None:
     """ADR-0158 point 6: the local model gets no deep research until a probe
-    on it passes (Open 2). The chat's base URL says which one this is."""
+    on it passes (Open 2). Local the way `silica doctor` says it: a provider
+    row that is a local server, or a custom endpoint on this machine. A
+    hosted provider's calls go to its own address whatever base URL is pinned
+    beside it (llm.py's api_base), so that pin says nothing here."""
+    from silica.config import CONFIG
     from silica.onboarding.serve import is_local
-    from silica.onboarding.settings_ops import base_urls
+    from silica.provider_table import PROVIDERS
 
-    url = base_urls().get("chat", "")
-    if url and is_local(url):
+    row = PROVIDERS.get(CONFIG.provider)
+    local = bool(row and row.fixed_key) or (
+        CONFIG.provider == "custom" and is_local(CONFIG.provider_base_url or ""))
+    if local:
         raise Refused(409, "a deep research runs on the hosted model; the local one has not been measured on it")
 
 
 @router.get("")
 def list_research():
-    """This vault's research jobs, for the tray on load and on reconnect."""
-    return {"research": deep_research.listing()}
+    """This vault's research jobs, for the tray on load and on reconnect, and
+    the depths the form offers, so the page and the caps cannot disagree."""
+    return {"research": deep_research.listing(), "depths": deep_research.DEPTHS}
 
 
 @router.post("/plan")

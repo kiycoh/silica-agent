@@ -1,0 +1,417 @@
+/* --- a deep research (ADR-0158 point 8) -------------------------------------- */
+/* The form and the plan are a card in the conversation, at the transcript's
+   measure; the running job is a row in its own tray above the field, shaped
+   like the conversions' (app-jobs.css). Teal only on what is clickable; amber
+   only for a part that is thin or a job that stopped. */
+
+#research {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  position: relative;
+  z-index: 1;
+}
+
+#research[hidden] {
+  display: none;
+}
+
+#composer #research {
+  order: -2;
+  flex: 1 0 100%;
+  padding: 0.2rem 0.2rem 0;
+}
+
+.rs-row {
+  align-items: baseline;
+}
+
+.rs-row .job-name {
+  max-width: 30rem;
+}
+
+.rs-row[data-state="done"] .job-dot {
+  background: var(--add);
+}
+
+/* The parts: a numbered list under the row's line, the whole width. */
+.rs-plist {
+  flex: 1 0 100%;
+  list-style: none;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.rs-pitem {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.3rem 0;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+
+.rs-n,
+.rs-pwhat {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ash-dim);
+}
+
+.rs-pwhat {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.rs-pitem[data-state="running"] .rs-pwhat {
+  color: var(--accent);
+}
+
+.rs-pitem[data-state="done"] .rs-q {
+  color: var(--frost);
+}
+
+.rs-q {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ash);
+}
+
+.rs-q input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0 0.15rem 0 0;
+  vertical-align: -2px;
+}
+
+.rs-row .rs-qlink {
+  color: var(--frost);
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+.rs-choose,
+.rs-topics {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.8rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line);
+}
+
+.rs-choose .rs-acts {
+  margin-left: auto;
+}
+
+.rs-topic {
+  color: var(--frost);
+}
+
+.rs-aside {
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+}
+
+.rs-acts {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.job-go:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* --- the form and the plan, in the conversation ------------------------------ */
+
+/* In the column a message's text takes: the .msg padding, and the left edge
+   of a measure-wide column centred in the transcript. */
+.rs-msg {
+  padding: 0.8rem 2rem;
+}
+
+.rs-msg:last-child {
+  padding-bottom: 2.6rem;
+}
+
+.rs-msg > .rs-card {
+  max-width: 44rem;
+  margin-left: max(0px, calc((100% - var(--measure)) / 2));
+}
+
+.rs-card {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 1.1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.rs-card.rs-sent {
+  background: none;
+  border-color: var(--line);
+  padding: 0.6rem 0.9rem;
+}
+
+.rs-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.rs-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.rs-question {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--frost);
+}
+
+.rs-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.rs-lab {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.rs-help {
+  margin: -0.4rem 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ash);
+}
+
+.rs-card.rs-sent .rs-help {
+  margin: 0;
+}
+
+.rs-input {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--bubble);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--frost);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 0.45rem 0.65rem;
+  resize: vertical;
+}
+
+.rs-input:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.rs-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  align-self: flex-start;
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.rs-seg button {
+  background: none;
+  border: 0;
+  border-radius: var(--r-xs);
+  color: var(--ash);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  padding: 0.32rem 0.7rem;
+  cursor: pointer;
+}
+
+.rs-seg button:hover {
+  color: var(--frost);
+}
+
+.rs-seg button.on {
+  background: var(--sel);
+  color: var(--frost);
+  font-weight: 500;
+}
+
+.rs-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+  align-items: center;
+}
+
+.rs-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 13px;
+  color: var(--frost);
+}
+
+.rs-check input {
+  accent-color: var(--accent);
+}
+
+.rs-note {
+  font-size: 14px;
+  color: var(--ash);
+}
+
+.rs-card .linklike {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.rs-card .linklike:hover {
+  text-decoration: underline;
+}
+
+.rs-parts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.rs-part {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr) auto;
+  gap: 0.3rem 0.5rem;
+  align-items: start;
+}
+
+.rs-part .rs-n {
+  padding-top: 0.55rem;
+}
+
+.rs-part .rs-input {
+  resize: none;
+  overflow: hidden;
+}
+
+.rs-held {
+  grid-column: 2;
+  font-size: 12.5px;
+  color: var(--ash);
+}
+
+.rs-x {
+  grid-column: 3;
+  grid-row: 1;
+  background: none;
+  border: 0;
+  color: var(--ash-dim);
+  cursor: pointer;
+  padding: 0.4rem 0.3rem;
+}
+
+.rs-x:hover {
+  color: var(--frost);
+}
+
+.rs-add {
+  align-self: flex-start;
+  font-size: 13px;
+}
+
+.rs-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  padding-top: 0.8rem;
+}
+
+.rs-go {
+  background: var(--accent);
+  color: var(--on-vivid);
+  border: 0;
+  border-radius: var(--r-sm);
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-size: var(--fs-ctl);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rs-go:hover {
+  background: var(--frost);
+}
+
+.rs-go:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.rs-alt {
+  background: none;
+  color: var(--ash);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.45rem 0.8rem;
+  font: inherit;
+  font-size: var(--fs-ctl);
+  cursor: pointer;
+}
+
+.rs-alt:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.rs-card button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 600px) {
+  .rs-card {
+    padding: 0.9rem;
+  }
+
+  .rs-pitem {
+    grid-template-columns: 1.2rem minmax(0, 1fr);
+  }
+
+  .rs-pwhat {
+    grid-column: 2;
+    text-align: left;
+  }
+}

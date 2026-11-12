@@ -40,6 +40,7 @@
   <link rel="stylesheet" href="/static/pages/body.css" />
   <link rel="stylesheet" href="/static/app-chat.css" />
   <link rel="stylesheet" href="/static/app-jobs.css" />
+  <link rel="stylesheet" href="/static/app-research.css" />
   <link rel="stylesheet" href="/static/app-panels.css" />
   <link rel="stylesheet" href="/static/app-chrome.css" />
   <link rel="stylesheet" href="/static/app-metrics.css" />
@@ -317,6 +318,10 @@
                (ADR-0117 point 5): conversions after an answer (ADR-0099), the
                files staged for it, and a message typed during a turn (P2), which
                interrupting sends now and nothing else does. -->
+          <!-- A deep research's row (ADR-0158 point 8): its parts while it runs,
+               then the choice of what to nucleate. Its own tray, since the
+               conversions' is rebuilt whole on each of their events. -->
+          <div id="research" hidden></div>
           <div id="jobs" hidden></div>
           <div id="attachments" hidden></div>
           <div id="queue" hidden>
@@ -335,6 +340,7 @@
           <div id="attach-menu" role="menu" aria-label="what the next message does" hidden>
             <button type="button" role="menuitem" id="am-files" data-how="or drop" title="bring files in: images ride the message, the rest stage for /nucleate">add files…</button>
             <button type="button" role="menuitem" data-action="/fetch" title="read one URL (a YouTube link gives its transcript) into the inbox">fetch a link</button>
+            <button type="button" role="menuitem" id="am-research" data-how="plan first" title="research a question on the web: a plan you approve, then one note in the inbox with a part per sub-question">deep research…</button>
             <div role="separator"></div>
             <button type="button" role="menuitem" data-action="/summarize" title="a digest of the notes you name, in the chat; writes nothing">summarize</button>
             <button type="button" role="menuitem" data-action="/explain" title="a concept explained from what the vault says">explain</button>
@@ -927,6 +933,7 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
   <script src="/static/app-discover.js"></script>
   <script src="/static/app-workspaces.js"></script>
   <script src="/static/app-jobs.js"></script>
+  <script src="/static/app-research.js"></script>
   <script src="/static/app-boot.js"></script>
   <script src="/static/app-wake.js"></script>
   <!-- Before app-settings.js, which starts the first /vault_info and /sessions:

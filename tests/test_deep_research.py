@@ -226,3 +226,10 @@ def test_a_scholarly_hit_can_be_banked_from_its_abstract(monkeypatch):
         hits = json.loads(wr.scholarly_search("lnp"))
         assert hits[0]["content"] == "Lipids carry mRNA." and hits[0]["retracted"] is True
         assert wr.remember("https://doi.org/10.1/x", "Lipids carry mRNA.", "what LNPs do").startswith("banked [Q1]")
+
+
+def test_a_long_sub_question_names_its_file_without_a_dangling_comma_or_parenthesis():
+    q = ("What are the core components of mRNA vaccine formulations (mRNA construct, lipid nanoparticle "
+         "delivery system, and excipients)?")
+    assert dr._part_name(q) == "What are the core components of mRNA vaccine formulations"
+    assert dr._part_name("[04:12] Is it true?") == "Is it true"
