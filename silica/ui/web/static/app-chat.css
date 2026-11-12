@@ -3092,3 +3092,16 @@ body.demo-card :is(#dock-composer, #vh-ideas) {
   font-size: 12px;
   color: var(--ash);
 }
+
+/* Explore on an empty vault (ADR-0172 point 3): the loading overlay's frame,
+   holding a sentence and the one first step instead of a wait */
+#graph-empty p {
+  max-width: 28rem;
+  margin: 0;
+  padding: 0 1.5rem;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1.55;
+  letter-spacing: normal;
+  color: var(--text);
+}

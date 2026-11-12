@@ -1022,13 +1022,13 @@ function neighbourRows(d) {
   const TAG_TEXT = { both: "⇄", in: "in", out: "out", "-1": "−1", "+1": "+1", declared: "declared",
                      similar: "~", unwritten: "unwritten", behind: "behind" };
   const TAG_SAY = { both: "linked both ways", in: "links to this note", out: "linked from this note",
-                    "-1": "read before it", "+1": "read after it", declared: "declared in the frontmatter, not linked",
+                    "-1": "read before it", "+1": "read after it", declared: "named in its properties, not linked",
                     similar: "similar, not linked", unwritten: VOCAB.notes.unwritten,
                     behind: "cut off without this note" };
   // One legend entry per family of tags, listed only when a row carries one.
   const LEGEND = [
     [["both"], "⇄ both ways"], [["in", "out"], "in / out one way"], [["-1", "+1"], "±1 reading order"],
-    [["declared"], "declared: in its frontmatter only"], [["similar"], "~ similar, not linked"],
+    [["declared"], "declared: in its properties only"], [["similar"], "~ similar, not linked"],
     [["unwritten"], "unwritten: linked, never written"], [["behind"], "behind: cut off without this note"],
   ];
 

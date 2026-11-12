@@ -19,7 +19,9 @@ def _rows(sections):
 def test_every_row_of_the_panel_is_read():
     html = INDEX.read_text(encoding="utf-8")
     block = html[html.index('<div id="help-panel"'):]
-    assert len(_rows(panel(hosted=False))) == block.count('class="hp-row"', 0, block.index("</div>\n  <!--"))
+    end = block.index("</div>\n  <!--")
+    # a laptop reads the plain rows and its own (hp-local), never the server's (hp-hosted)
+    assert len(_rows(panel(hosted=False))) == block.count('class="hp-row"', 0, end) + block.count('class="hp-row hp-local"', 0, end)
 
 
 def test_the_views_are_read_and_hosted_drops_what_it_hides(monkeypatch):
@@ -42,7 +44,8 @@ def test_a_row_ends_where_its_sentence_ends():
 
 def test_the_message_stays_under_its_ceiling(monkeypatch):
     # Past 1,000 tokens everything after the views moves behind a loadable tool
-    # (ADR-0115 point 5). Measured 2026-10-15: 737 local, 607 hosted.
+    # (ADR-0115 point 5). Measured 2026-10-15: 737 local, 607 hosted; 2026-11-12,
+    # with ADR-0172's rows: 995 local, 637 hosted, so the next row needs that tool.
     enc = tiktoken.get_encoding("cl100k_base")
     for flag in ("", "1"):
         monkeypatch.setenv("SILICA_HOSTED", flag)

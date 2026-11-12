@@ -605,7 +605,8 @@ function lrSessionList(d) {
   const sec = mkEl("section", "lr-hsec lr-next");
   const all = d.session_rows || [];
   if (!all.length) {
-    sec.appendChild(mkEl("p", "lr-help", d.total ? "Nothing waiting from earlier sessions: a note needs a footnoted claim or a Relations bullet to be asked about."
+    sec.appendChild(mkEl("p", "lr-help", d.total ? "Nothing waiting from earlier sessions. Name a note above to test yourself on it."
+      : vaultEmpty ? "Memorize asks you questions on your notes, and what you miss comes back later. Add your first files, then name one above."
       : "Nothing tested yet. Name a note above and test yourself on it; this list grows from there."));
     return sec;
   }
@@ -3686,7 +3687,7 @@ function lrRenderReceipt(body) {
     if (r.points?.length) box.appendChild(mkEl("p", null, "A point counts for an objective when its criteria were met without help; an assisted answer stays recorded but does not count. It does not complete the note, and an answer right after feedback does not prove recall at a distance."));
     if (moved.length) box.appendChild(mkEl("p", null, "What moved comes from the recorded answers only; no model call, no claim about you beyond them."));
     box.appendChild(mkEl("p", null, "Result: whether the rubric was met, before help or confidence enter. Rating: what the schedule received; a hint or \"just tell me\" caps it at Hard, an answer at 25 caps it at Good. A skipped question writes nothing."));
-    if (r.revisit?.length) box.appendChild(mkEl("p", null, r.plan ? "Queueing writes a revisit line on the plan through the gate; the plan's next session takes those first. Nothing is queued on its own." : "A free session belongs to no plan, so nothing can be queued; a plan's session can."));
+    if (r.revisit?.length) box.appendChild(mkEl("p", null, r.plan ? "Queueing adds a line to the plan to go over these again; its next session takes them first. Nothing is queued on its own." : "A free session belongs to no plan, so nothing can be queued; a plan's session can."));
   });
   wrap.appendChild(discs);
   wrap.appendChild(mkEl("p", "lr-help", r.recorded

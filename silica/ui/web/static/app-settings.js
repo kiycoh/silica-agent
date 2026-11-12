@@ -1097,6 +1097,34 @@ document.addEventListener("keydown", (e) => {
   toggleHelpPanel();
 });
 
+// The doctor's rows in plain words (ADR-0172 point 2), by check name: its own
+// text is `silica doctor`'s too and names env vars and tool names, so it is kept
+// under "details" and rewritten here, not in checks.py. A row not named here
+// shows as the doctor wrote it.
+const NOTICE_SAID = {
+  "chat model": () => ["No model is set up, so the chat cannot answer yet.",
+    "The chat shows how to choose one: an online model with a key, or one on this computer."],
+  "chat endpoint": () => ["The model does not answer: what runs it is not running.",
+    "Start LM Studio or Ollama, or choose another model in Settings, Brains."],
+  vault: (r) => /inbox folder/.test(r.detail)
+    ? ["This vault has no Inbox folder, where links and documents to turn into notes land.",
+       "Create a folder named Inbox at the top of the vault."] : null,
+  embeddings: () => ["Search by meaning is off, so search matches words only.",
+    "It needs the model that reads for meaning; Settings, Brains, names it as the embedding model."],
+  rerank: () => ["Search results are not reordered by a second model. This is optional.", ""],
+  "recall indexes": () => ["Search by meaning has no index yet.",
+    "Type /embed in the chat to build it, then /cooccur."],
+  dictation: () => ["Dictation is off. This is optional.",
+    "Settings, Language, browser speech turns on the browser's own."],
+  converters: (r) => /office missing/.test(r.detail)
+    ? ["Old .doc and .ppt files cannot be read yet.", "Save them as .docx or .pptx, or install LibreOffice."] : null,
+  // Information and not a warning: a format other tools may read, which a
+  // person's own vault rarely follows and whose remedy is a script of the
+  // source tree, not of an installed Silica. It lit the dot on every new vault.
+  "OKF §11": (r) => r.status === "warn"
+    ? ["Some notes have no type in their properties. This is optional: Silica works without it.", "", true] : null,
+};
+
 async function loadHealth() {
   const box = $("#boot-notices");
   try {
@@ -1108,23 +1136,28 @@ async function loadHealth() {
     const warnings = () => box.querySelectorAll(".notice:not(.info)").length;
     for (const r of rows) {
       const info = r.status === "unknown";
+      // A "could not tell" with nothing to do about it (a language not sampled
+      // yet, a census of no notes) says nothing a person can use.
+      if (info && !r.hint) continue;
+      const plain = NOTICE_SAID[r.name]?.(r);
       const n = document.createElement("div");
-      n.className = info ? "notice info" : "notice";
+      n.className = info || plain?.[2] ? "notice info" : "notice";
       const t = document.createElement("div");
       t.className = "notice-text";
-      t.textContent = r.name + ": " + r.detail;
+      t.textContent = plain ? plain[0] : r.name + ": " + r.detail;
       n.appendChild(t);
-      if (r.hint) {
+      if (r.hint || plain) {
         // Hints collapsed behind a disclosure: three stacked notices with a
         // five-line JSON hooks blob were eating half the sidebar on first
         // load. One line each until the user asks for the remedy.
         const d = document.createElement("details");
         const s = document.createElement("summary");
-        s.textContent = "how to fix";
+        s.textContent = plain ? "how to fix, and details" : "how to fix";
         d.appendChild(s);
+        if (plain?.[1]) d.appendChild(mkEl("div", "notice-fix", plain[1]));
         const h = document.createElement("div");
         h.className = "notice-hint";
-        h.textContent = r.hint;
+        h.textContent = plain ? `${r.name}: ${r.detail}${r.hint ? ". " + r.hint : ""}` : r.hint;
         d.appendChild(h);
         n.appendChild(d);
       }
@@ -1136,7 +1169,7 @@ async function loadHealth() {
       x.addEventListener("click", () => { n.remove(); setNoticeCount(warnings()); });
       n.appendChild(x);
       box.appendChild(n);
-      if (!info) announce(r.name + ": " + r.detail);
+      if (!n.classList.contains("info")) announce(t.textContent);
     }
     setNoticeCount(warnings());
   } catch { /* the page works without the report; don't toast about the toast */ }

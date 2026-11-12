@@ -75,7 +75,7 @@ async function jobPost(j, action, body) {
 // The offered turn, in the chat that is open: "ask" sends the words typed with
 // the drop, "summarize" and "quiz" their request, "nucleate" copies the files
 // into the Inbox and nucleates them. A click, or the drop's file being read.
-const JOB_SAID = { summarize: "Summarize ", quiz: "Quiz me on ", nucleate: "Nucleate " };
+const JOB_SAID = { summarize: "Summarize ", quiz: "Quiz me on ", nucleate: "Turn into notes: " };
 function jobOffer(j, kind) {
   if (streaming) { notify("a turn is running: offer it again when it ends", "warn"); return; }
   const said = kind === "ask" && (j.text || "").trim() ? j.text.trim() : (JOB_SAID[kind] || "Summarize ") + j.source.name;
@@ -170,7 +170,7 @@ function jobRow(j, ahead) {
       acts.append(jobButton("add to vault", "job-alt linklike", "copy it and its notes into the Inbox; the chat keeps its own",
         () => jobAddToVault(j)));
     }
-    acts.append(jobButton("Nucleate it", "job-alt linklike", "copy it into the Inbox and nucleate it, in this chat",
+    acts.append(jobButton("Turn into notes", "job-alt linklike", "copy it into the Inbox and turn it into notes, in this chat",
       () => jobOffer(j, "nucleate")));
   } else if ((j.state === "failed" || j.state === "interrupted") && j.retry) {
     acts.append(jobButton("Retry", "job-go", "convert the same file again", async () => {
@@ -274,7 +274,7 @@ function drawJobAnswer(flow, d) {
   if (d.waits && names) {
     lines.push(`Your question waits for ${names}: it is answered here once ${(d.jobs || []).length === 1 ? "the file is" : "the files are"} read.`);
   } else if (d.command === "/nucleate" && (d.jobs || []).length) {
-    lines.push(`${names}: the command runs once its files are converted: use Nucleate it on the row above, or type it again then.`);
+    lines.push(`${names}: the command runs once its files are converted: use Turn into notes on the row above, or type it again then.`);
   } else if (names) {
     lines.push(`${names} ${(d.jobs || []).length === 1 ? "is" : "are"} being read. Once ready, summarize it, `
       + "quiz yourself on it, or just ask about it here.");

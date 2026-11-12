@@ -117,7 +117,19 @@ function rollUpToasts() {
 // it reports (a tree delete's undo, ADR-0123). Such a toast is never deduped,
 // since its button belongs to one event, and it stays longer: the reader has
 // to find the button, not only read the line.
+// An error says what to do next (ADR-0172 point 2). Some 40 toasts read
+// "couldn't <do something>" and stop, and the server's absence named no remedy:
+// the next step is added here, once, and never to a toast that already says
+// more than what failed (a colon, a second clause, a sentence of its own).
+function withNextStep(msg) {
+  if (/^the server could not be reached$/i.test(msg))
+    return "The server could not be reached. Check your connection, or that Silica is still running, then try again.";
+  if (/^couldn't [^:.;]+$/i.test(msg)) return `${msg[0].toUpperCase()}${msg.slice(1)}. Try again, or reload the page.`;
+  return msg;
+}
+
 function notify(msg, level = "error", action = null) {
+  if (level === "error") msg = withNextStep(msg);
   announce(msg);
   const toasts = $("#toasts");
   if (!action && [...toasts.querySelectorAll(".toast")].some((t) => t.textContent === msg)) return; // dedupe visible

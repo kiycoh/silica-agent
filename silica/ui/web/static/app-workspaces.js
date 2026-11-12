@@ -12,8 +12,8 @@ const WS_REASON = { listed: "listed", folder: "folder", where: "where", derived:
 const WS_REASON_TIP = {
   listed: "listed in the workspace's notes",
   folder: "inside a listed folder",
-  where: "carries a listed frontmatter value",
-  derived: "nucleated from a member",
+  where: "carries a listed property",
+  derived: "made from a member's document",
 };
 
 // `adopt` takes the server's scope for this chat. Only at boot and on a

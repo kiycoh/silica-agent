@@ -1311,8 +1311,8 @@ function drawReview(box, d) {
   const q = document.querySelector('.wl[data-sig="review"] .wl-q');
   if (q) q.textContent = nfmt(total);
   if (!total) {
-    evEmpty(box, "Nothing waits for review. The dry runs of /curate, /aliases and /organize fill it; "
-      + "refused writes and stale notes arrive by themselves.");
+    evEmpty(box, "Nothing to review. What Silica proposes to change in your notes waits here for your yes or no, "
+      + "and so does a write it could not make. To get proposals, type /curate in the chat.");
   } else {
     box.appendChild(evProse("A yes lands as one run you can revert below; a no is remembered, "
       + "and the same proposal is not offered again."));
@@ -1507,12 +1507,12 @@ function renderMetrics(d) {
     ["lean", T.lean_notes, "lean notes", "too thin to carry their topic"],
     ["orphans", T.orphans, "orphans", "nothing links to them"],
     ["gaps", T.structural_gaps, "structural gaps", "areas that should connect and do not"],
-    ["attention", attnCount, "waiting on attention", "idle and missed in recall"],
+    ["attention", attnCount, "waiting on attention", "not read in a while, or missed in a quiz"],
     // "—" not "0" when the leg that measures it never ran: a printed zero reads
     // as "measured, came out flat".
     ["deficits", full ? T.integration_deficits : null, "integration deficits",
-     "concept-rich text, few wikilinks"],
-    ["contested", T.contested, "contested", "frontmatter flags a conflict"],
+     "many ideas, few links to other notes"],
+    ["contested", T.contested, "contested", "marked as disagreeing with another note"],
     ["drift", T.source_drift, "source drift", "the source moved on without the note"],
     // ADR-0165: what Silica proposes, waiting for a yes or a no.
     ["review", d.review || 0, "waiting for review", "proposals to accept or dismiss"],
@@ -1520,7 +1520,9 @@ function renderMetrics(d) {
 
   let firstRow = null;
   for (const [key, n, label, means] of signals) {
-    const live = n > 0;
+    // The review queue opens at zero too: its pane says what it is for and how
+    // to fill it (ADR-0172 point 3), and lists the accepted runs to revert.
+    const live = n > 0 || key === "review";
     // A row that goes nowhere stays a div: a button that does nothing is worse
     // than a line of text, and a zero has no evidence to show.
     const row = mkEl(live ? "button" : "div", "wl" + (live ? "" : " zero"));
