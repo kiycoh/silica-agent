@@ -290,7 +290,8 @@ def start(approved: dict, *, run=None) -> dict:
     with job_records.LOCK:
         if any(r.get("state") in ("queued", "running") for r in _records()):
             raise Refused("a research is already running: it ends before another starts")
-        parent = unique_inbox_path(p["question"][:80], fallback="deep-research")
+        # The parts' cut, so the folder never ends on ", an" (second live run).
+        parent = unique_inbox_path(_part_name(p["question"]), fallback="deep-research")
         now = time.time()
         rec = {"id": job_records.new_id(), "kind": JOB_KIND, "origin": "research",
                "source": {"path": parent, "name": p["question"]},

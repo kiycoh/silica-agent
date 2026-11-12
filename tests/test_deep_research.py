@@ -303,3 +303,9 @@ def test_learn_grounds_a_reworded_research_claim_on_the_quote_its_footnote_names
     [claim] = items.claims_of("Notes/Energy.md", note)
     assert claim["leaf"] == "sources/Mito/Part one.md"
     assert claim["line"] > 0 and "Mitochondria produce most" in claim["span"]
+
+
+def test_the_parent_folder_is_cut_like_a_part(tmp_vault):
+    q = "What lipids make up the nanoparticle of the Pfizer-BioNTech COVID-19 vaccine, and what does each do?"
+    rec, _stop = _started({**_approved(1), "question": q})
+    assert rec["parent"].endswith("/What lipids make up the nanoparticle of the Pfizer-BioNTech COVID-19 vaccine.md")
