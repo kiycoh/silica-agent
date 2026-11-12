@@ -366,6 +366,26 @@ def test_web_fetch_500_still_raises(monkeypatch):
         wf.web_fetch("https://example.com/broken")
 
 
+def test_a_refused_page_names_the_address_asked_and_not_the_pinned_ip(monkeypatch):
+    """`_stream` connects to the address `_validated` approved, so httpx's own
+    words named an IP the person never typed: /fetch of a missing GitHub
+    repository said "Client error '404 Not Found' for url 'https://140.82.121.3/...'"
+    (2026-11-12)."""
+    from contextlib import contextmanager
+
+    monkeypatch.setattr(wf, "_validated", lambda url: "203.0.113.9")
+
+    @contextmanager
+    def pinned(url, ip, headers):
+        yield httpx.Response(404, request=httpx.Request("GET", f"https://{ip}/gone"))
+
+    monkeypatch.setattr(wf, "_stream", pinned)
+    with pytest.raises(httpx.HTTPStatusError) as got:
+        wf.web_fetch("https://example.com/gone")
+    assert "https://example.com/gone" in str(got.value) and "203.0.113.9" not in str(got.value)
+    assert got.value.response.status_code == 404
+
+
 def test_web_fetch_refuses_binary_content(monkeypatch):
     _serve(monkeypatch, _Resp(ctype="application/pdf", text="%PDF-1.7"))
     with pytest.raises(ValueError, match="application/pdf"):

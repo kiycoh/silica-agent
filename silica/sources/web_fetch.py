@@ -551,7 +551,14 @@ def _raise_for_status(resp: httpx.Response, url: str) -> None:
         raise Refused(
             429, f"429 at {url}: rate limited. Back off, or use a different source.", resp.headers
         )
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError:
+        # The request went to the pinned address (`_stream`), so httpx's words
+        # name an IP the person never typed; theirs is `url`.
+        raise httpx.HTTPStatusError(
+            f"{resp.status_code} {httpx.codes.get_reason_phrase(resp.status_code)} at {url}",
+            request=resp.request, response=resp) from None
 
 
 def content_type(resp: httpx.Response) -> str:
