@@ -6,9 +6,19 @@ driven in headless Chrome with real keys and a real pointer. Opt-in like ADR-015
 SILICA_E2E=1. A code read has missed every layout defect of this directory so far."""
 from __future__ import annotations
 
+import os
 import time
 
+import pytest
+
+from tests.test_calendar_e2e import CHROME
 from tests.test_write_note_e2e import _press_enter, app  # noqa: F401  (the fixture)
+
+# The fixture comes with its import, its module's marks do not.
+pytestmark = [
+    pytest.mark.skipif(not os.environ.get("SILICA_E2E"), reason="opt-in: SILICA_E2E=1 starts a browser"),
+    pytest.mark.skipif(CHROME is None, reason="needs Chrome or Chromium"),
+]
 
 TABLE = "Before.\n\n|   Name    | Note |\n|-----------|:----:|\n| **water** | [[Topic/Source\\|src]] |\n| salt      | b \\| c |\n\nAfter.\n"
 
