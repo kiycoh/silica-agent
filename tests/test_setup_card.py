@@ -116,12 +116,14 @@ def test_the_card_shows_without_a_model_or_its_key_and_never_on_the_server(card,
     ("failed: litellm.AuthenticationError: 401 No auth credentials found", "The provider did not accept the API key"),
     ("failed: OpenrouterException 402: This request requires more credits, or fewer max_tokens",
      "The provider says this account has no credit left"),
-    ("skipped — no model configured", "No model is set up yet"),
+    (None, "No model is set up yet"),  # the probe's own skip, CONFIG having no model
 ])
 def test_test_says_what_failed_in_one_sentence_and_keeps_the_probe_as_detail(card, monkeypatch, detail, said):
     from silica.onboarding import checks
 
     c, _env_path = card
+    if detail is None:
+        detail = checks.live_probe(CONFIG).detail
     sent = []
     monkeypatch.setattr(checks, "live_probe", lambda cfg: sent.append(1) or CheckResult("live probe", "fail", detail))
     r = c.post("/settings/setup/test").json()
