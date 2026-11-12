@@ -213,6 +213,74 @@ const imageDrop = (s) => window.CM.EditorView.domEventHandlers({
   },
 });
 
+// --- a pasted address becomes a titled link (ADR-0161) --------------------------
+// `[url](url)` goes in at once, so the link works before any answer, and the page's
+// title takes the words' place only while they are still the address as pasted. A
+// waiting link is a range mapped through every change: a late title lands where its
+// link is now, and never in another note, whose fresh state holds no such range.
+const BARE_URL = /^https?:\/\/\S+$/i;
+const mdWords = (t) => t.replace(/[\\`*_[\]]/g, "\\$&");
+const mdDest = (u) => (/[()<>]/.test(u) ? `<${u}>` : u);
+// Where an address is already code, a link's or the properties', it goes in as typed.
+function pasteAsText(st, at) {
+  const fm = window.LiveEditor.frontmatterEnd(st.sliceDoc(0, 65536));
+  if (fm > 0 && at <= fm) return true;
+  if (/(\]\(|<)$/.test(st.sliceDoc(Math.max(0, at - 2), at))) return true;
+  for (let n = window.CM.syntaxTree(st).resolveInner(at, -1); n; n = n.parent) {
+    if (/Code|URL|Link|Autolink|MathBlock|InlineMath|HTMLBlock/.test(n.name)) return true;
+  }
+  return false;
+}
+// Built on first use, as the other extensions here are: CodeMirror loads with the first note.
+let pasteExt = null, pasteSeq = 0;
+function linkPaste() {
+  if (pasteExt) return pasteExt;
+  const { StateEffect, StateField, Decoration, EditorView } = window.CM;
+  const pasteWait = StateEffect.define(); // {add: a range whose spec has id and words} | {drop: id}
+  const pasteField = StateField.define({
+    create: () => Decoration.none,
+    update(v, tr) {
+      let out = v.map(tr.changes);
+      for (const e of tr.effects) {
+        if (!e.is(pasteWait)) continue;
+        out = e.value.add ? out.update({ add: [e.value.add] }) : out.update({ filter: (_a, _b, d) => d.spec.id !== e.value.drop });
+      }
+      return out;
+    },
+  });
+  const pastedAt = (state, id) => {
+    let at = null;
+    state.field(pasteField, false)?.between(0, state.doc.length, (from, to, d) => { if (d.spec.id === id) at = { from, to, words: d.spec.words }; });
+    return at;
+  };
+  return (pasteExt = [pasteField, EditorView.domEventHandlers({
+    paste(e, view) {
+      const url = (e.clipboardData?.getData("text/plain") || "").trim();
+      if (!BARE_URL.test(url) || e.clipboardData.files?.length) return false;
+      const st = view.state, r = st.selection.main;
+      if (pasteAsText(st, r.from)) return false;
+      e.preventDefault();
+      if (!r.empty) { // the words are the person's: they stay as written, and no title is asked
+        const text = `[${st.sliceDoc(r.from, r.to)}](${mdDest(url)})`;
+        view.dispatch({ changes: { from: r.from, to: r.to, insert: text }, selection: { anchor: r.from + text.length }, userEvent: "input.paste" });
+        return true;
+      }
+      const words = mdWords(url), text = `[${words}](${mdDest(url)})`, id = ++pasteSeq;
+      view.dispatch({
+        changes: { from: r.from, insert: text }, selection: { anchor: r.from + text.length }, userEvent: "input.paste",
+        effects: pasteWait.of({ add: Decoration.mark({ id, words }).range(r.from + 1, r.from + 1 + words.length) }),
+      });
+      // No title (a demo's 404, a page with none, the network down) leaves the address as its words.
+      fetch("/note/link-title?url=" + encodeURIComponent(url)).then((res) => (res.ok ? res.json() : {})).catch(() => ({})).then((d) => {
+        const at = pastedAt(view.state, id), title = String(d.title || "").trim();
+        const keep = !!(at && title && view.state.sliceDoc(at.from, at.to) === at.words);
+        view.dispatch({ effects: pasteWait.of({ drop: id }), ...(keep ? { changes: { from: at.from, to: at.to, insert: mdWords(title) } } : {}) });
+      });
+      return true;
+    },
+  })]);
+}
+
 // What both surfaces add to the editor. Built once per session: a fresh state per
 // note asks for them again, and a new StateField each time would be a new field.
 function noteExtensions(s) {
@@ -225,6 +293,7 @@ function noteExtensions(s) {
     search({ top: true, createPanel: findPanel }),
     ghostField(s),
     imageDrop(s),
+    ...linkPaste(),
     ...(s === centreNote ? [placeholder("Write here. [[ links a note")] : []),
     Prec.high(keymap.of([
       ...searchKeymap.filter((k) => k.key === "Mod-f"),

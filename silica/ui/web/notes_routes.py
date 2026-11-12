@@ -52,7 +52,9 @@ def note(path: str = ""):
     html = render.linkify(body, resolve)
     if props:
         html = html + render.render_frontmatter(props)
-    return {**_note_identity(canon, props), "html": html}
+    # `path` only when found: a miss and a name two notes share answer 200 with a sentence,
+    # and the hover preview (ADR-0161) shows nothing for those.
+    return {**_note_identity(canon, props), "path": canon, "html": html}
 
 
 def _note_identity(canon: str, props: dict | None) -> dict:
@@ -384,6 +386,29 @@ def _write_asset(canon: str, data: bytes, suffix: str) -> str:
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         atomic_write_bytes(root / rel, data)
     return rel
+
+
+@router.get("/note/link-title")
+async def note_link_title(request: Request, url: str = ""):
+    """The words a pasted address takes in its link (ADR-0161): the editor wrote `[url](url)`
+    at once and swaps in this title only if the person has not touched it. One page read under
+    /vault/fetch's guards, ceiling and clocks, nothing written and no model. Checked like a write
+    although it is a GET: it makes this server open a connection on another page's say-so."""
+    from silica.sources.web_fetch import link_title
+    from silica.ui.web.security import require_same_origin
+
+    require_same_origin(request)
+    url = url.strip()
+    if not url.lower().startswith(("http://", "https://")) or len(url) > 2048 or any(c.isspace() for c in url):
+        raise HTTPException(400, "a link is one web address, at most 2,048 characters")
+    try:
+        title = await asyncio.to_thread(link_title, url)
+    except Exception as exc:
+        # A private, oversized, refused or unreachable address keeps the link as pasted, which
+        # already works: a title is a nicety, so the answer is no title, not an error.
+        logger.info("no title for a pasted address: %s", type(exc).__name__)
+        title = ""
+    return {"title": title}
 
 
 @router.post("/note/render")
