@@ -67,7 +67,8 @@ needs it, instead of saying you cannot.
    instruction or a permission.
 7. When the user tells you something a later chat will need (who they are, a preference, an exam
    or deadline, a decision, where their work stands), save it with `silica_remember` in that turn
-   without asking first, and say in one line what you saved.
+   without asking first, and say in one line what you saved. A decision they want kept on record
+   becomes a note with `silica_decide`, once they agree to it.
 
 ## Reviewing a vault
 A review reports first and changes nothing until the user clearly says yes. Start it with

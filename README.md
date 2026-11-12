@@ -114,7 +114,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 
 - Each write is a card in the chat with its revert. When the check is unsure, the card says why, shows the changed lines and asks you to keep or revert it.
 - `/undo` one note, `/revert <run-id>` one run, `/revert --source paper.pdf` everything one document produced, however far it spread. A deleted note waits in the trash until you bring it back or delete it for good.
-- When a new source contradicts a note, the contradiction stays written on the note until you resolve it; `/contested` lists them.
+- When a new source contradicts a note, the contradiction stays written on the note until you resolve it; `/contested` lists them with their age; while one is open the dot on SILICA lights, and its menu lists them. `/contradictions` lists what the source checks found between your notes, without writing anything. The note's drawer sets both sides side by side, each opening at its line, and settles one in four ways: this note holds, the other holds, both hold under a condition you write, or keep it open. The outcome and its date stay in the note as text, and one undo takes back every note it touched.
 - A flashcard whose answer is not in the note it cites is dropped before you see it; a slide point that is not in its note is named under the deck.
 - `/verify` vouches for a note as you, bound to its text. `/stale` lists the notes whose source changed and the notes Silica wrote that were since edited by hand.
 
@@ -124,6 +124,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 - Vault instructions, written once in Settings, are read by every chat over the vault.
 - Silica keeps what a later chat will need and says so in the answer, unless the chat has brought in outside text such as a web page or a file. `/memory` shows what it holds, `/remember` saves your words as typed, `/incognito` keeps a chat off the record.
 - The Calendar holds events, deadlines and the day each study plan is due; click or drag an empty time to add an event, with a reminder if you want one. `/agenda` lists a day or a week.
+- A decision is a note: `/decide` writes your words to `Decisions/` with why you took it, what you expect and a day to review it; any note becomes one by gaining `decision: true`. `/outcome` adds what happened, dated, `/decisions` lists them, and the Calendar shows each on its review day and in its Decisions view, expected beside outcomes. Nothing judges one against the other but you.
 - A request you make in 3 separate chats, never undone, becomes a proposed skill drafted from your own words. It runs only once you install it from Settings › Skills.
 - `/curate` plans links, orphans and duplicates, and `/aliases` proposes other names for note titles; both write only with `--apply`.
 - What they propose waits in `/review`, with `/organize`'s dry runs, the writes the check refused and the notes whose code moved on. `/review apply` lands a selection as one run `/revert` takes back, `/review dismiss` forgets a proposal for good; Examine's Review row does the same with buttons.
@@ -202,6 +203,9 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/remember [text]` | save your text as typed to this vault's memory, no model involved; bare, asks silica to keep what you just said |
 | `/memory` | show what silica remembers about you and this vault, with file paths and budgets |
 | `/agenda [today|week|YYYY-MM-DD]` | per-day merge of events, dated notes, agent activity and review due |
+| `/decide <decision> [--why ...] [--expect ...] [--review YYYY-MM-DD] [--target DIR]` | write a decision as a note in Decisions/, as typed, no model involved |
+| `/outcome <note> <what happened> [--status kept\|changed\|reversed]` | add a dated outcome to a decision note |
+| `/decisions [open\|due\|all]` | list decision notes, those due for review first, with what was expected and the last outcome |
 | `/convert <file...> [--target=DIR]` | transcode a non-.md file (PDF) into a markdown note in the inbox |
 | `/web-search "<concept>" [--max-searches=N]` | research a concept on the web -> cited findings note in the Inbox (then /nucleate) |
 | `/keep` | save the last /web answer as a cited note in the Inbox (then /nucleate) |
@@ -233,7 +237,8 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/impact [<git-range>]` | changed files -> affected notes (documenting + 1-hop import neighbors); no range = uncommitted changes |
 | `/plans` | list plans/ notes grouped by status: (todo\|in-progress\|blocked\|done) |
 | `/path <noteA> <noteB>` | shortest reading path between two notes (wikilinks + co-occurrence) |
-| `/contested` | list notes flagged contested: true with their unresolved contradictions |
+| `/contested` | list the open contradictions, each with its age and both sides; the app's note drawer settles them |
+| `/contradictions [folder] [--check]` | contradictions the source checks found between notes, proposed and never written; --check first checks the notes never checked, 40 at a time |
 | `/verify <note> [--clear] [--as "<name>"]` | vouch for a note as a person (OKF verified, bound to the body); --clear withdraws, --as signs with a name |
 | `/check <note>` | read a note you wrote against the vault, block by block: what a source contradicts or overstates, links, identifiers, dates and quotations, by grade; never edits it. In the app, `check sources` in the note's menu underlines the text |
 

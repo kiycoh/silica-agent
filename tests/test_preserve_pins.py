@@ -41,6 +41,7 @@ LOSS_PINS = {
     ("silica/kernel/link/sweep.py", "sweep_note", "Loss.UNLINK"): 1,
     ("silica/kernel/vault.py", "_retarget", "preserve.Loss.RENAME"): 1,
     ("silica/kernel/link/rename.py", "explicit_links", "Loss.RENAME"): 1,   # ADR-0126 point 3
+    ("silica/kernel/check/contradictions.py", "_land", "Loss.PERSON"): 1,   # ADR-0166 point 3: the person settles it
 }
 
 FREE_PINS = {
@@ -50,6 +51,7 @@ FREE_PINS = {
     ("silica/kernel/learn/plans.py", "close_plan", "('status', 'completed')"): 2,
     ("silica/kernel/vault.py", "set_prop", "(name,)"): 1,   # one site now: both transports write under the Vault
     ("silica/kernel/vault.py", "unset_prop", "(name,)"): 1,   # ADR-0143: a globe clears publish:
+    ("silica/kernel/calendar/decisions.py", "outcome", "('status',)"): 1,   # ADR-0167: an outcome may set status
 }
 
 _FORWARDS = {"loss", "free", "None", "()"}
@@ -97,15 +99,16 @@ def test_every_free_key_set_is_pinned():
 def test_the_counts_the_record_states():
     from silica.kernel.write.preserve import _RELAX_ALL, Loss
 
-    # 26: ADR-0155 point 8 added a note written by hand, ADR-0156 point 7 Study
-    # this. Two RESTOREs went: the ws backend's own restore, which no product code
+    # 27: ADR-0155 point 8 added a note written by hand, ADR-0156 point 7 Study
+    # this, ADR-0166 point 3 a contradiction the person settles. Two RESTOREs
+    # went: the ws backend's own restore, which no product code
     # called, and commit_derived's rollback, which now goes through
     # gate.apply_inverses like every other.
-    assert sum(LOSS_PINS.values()) == 26
+    assert sum(LOSS_PINS.values()) == 27
     off = sum(n for (_f, _fn, v), n in LOSS_PINS.items()
               if Loss[v.rsplit(".", 1)[-1].split()[0]] in _RELAX_ALL)
-    assert off == 20  # STAGED relaxes all, PERSON too: ADR-0129 point 5, ADR-0155 point 8 and ADR-0156 point 7 add one each
-    assert sum(FREE_PINS.values()) == 7  # ADR-0143: unset_prop beside set_prop
+    assert off == 21  # STAGED relaxes all, PERSON too: ADR-0129 point 5, ADR-0155 point 8, ADR-0156 point 7 and ADR-0166 add one each
+    assert sum(FREE_PINS.values()) == 8  # ADR-0143: unset_prop beside set_prop; ADR-0167: an outcome sets status
 
 
 def test_a_reason_never_rides_on_an_op():

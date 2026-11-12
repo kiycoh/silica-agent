@@ -33,8 +33,9 @@ from silica.kernel.base import frontmatter
 from silica.kernel.base.noteshape import note_clock
 
 
-# (epoch, vault) -> (dated rows, paths of the notes the walk found no date for)
-_rows_memo: dict[tuple[str, str], tuple[list[tuple[str, str, str, str]], list[str]]] = {}
+# (epoch, vault) -> (dated rows, paths of the notes the walk found no date for,
+# paths of the decision notes)
+_rows_memo: dict[tuple[str, str], tuple[list[tuple[str, str, str, str]], list[str], list[str]]] = {}
 
 # What a date bound may be: a year, a month or a day (ADR-0148 point 1).
 DATE_PREFIX = re.compile(r"\d{4}(-\d{2}(-\d{2})?)?")
@@ -57,21 +58,29 @@ def _all_rows(vault: Path) -> list[tuple[str, str, str, str]]:
     return _scan(vault)[0]
 
 
-def _scan(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
+def _scan(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str], list[str]]:
     """(the dated rows of `_all_rows`, the vault-relative paths of the notes
-    the same walk found no date for), memoized together."""
+    the same walk found no date for, those of the decision notes), memoized
+    together."""
     from silica.kernel.base import layout
 
     return layout.on_epoch(_rows_memo, str(vault), lambda: _walk(vault), str(vault))
 
 
-def _walk(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
+def decision_paths(vault: Path) -> list[str]:
+    """The notes whose frontmatter says `decision: true` (ADR-0167), off the
+    walk the dated notes already make, so the calendar reads the vault once."""
+    return _scan(vault)[2]
+
+
+def _walk(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str], list[str]]:
     from silica.kernel.base.layout import iter_notes
     from silica.kernel.calendar.daily import daily_date, daily_rule
 
     days = daily_rule(vault)
     rows: list[tuple[str, str, str, str]] = []
     undated: list[str] = []
+    decisions: list[str] = []
     for rel, f in iter_notes(vault):
         try:
             text = f.read_text(encoding="utf-8")
@@ -80,6 +89,8 @@ def _walk(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
             # must skip that file, never take the whole timeline down.
             continue
         data, _raw, _body = frontmatter.split(text)
+        if (data or {}).get("decision") is True:
+            decisions.append(rel)
         # Frontmatter first: an explicit `date:` is the note's own statement
         # about itself and outranks what its claims happen to carry. A daily
         # note's name is the next statement (ADR-0062): Obsidian named it after
@@ -90,7 +101,7 @@ def _walk(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
             continue
         label = str((data or {}).get("session_id") or f.stem)
         rows.append((str(date)[:10], label, f.stem, rel))
-    return rows, undated
+    return rows, undated, decisions
 
 
 def dated_window(vault: Path, since: str = "", until: str = "",
@@ -99,7 +110,7 @@ def dated_window(vault: Path, since: str = "", until: str = "",
     have no date and so fall outside every window), both counted over the
     notes `keep` accepts. The keys are what recall's legs take as `allow`
     (ADR-0148 point 2): a path without its `.md`."""
-    rows, undated = _scan(vault)
+    rows, undated, _decisions = _scan(vault)
     keys = frozenset(r[3].removesuffix(".md") for r in rows
                      if in_window(r[0], since, until) and (keep is None or keep(r[3])))
     return keys, sum(1 for p in undated if keep is None or keep(p))

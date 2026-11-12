@@ -127,6 +127,7 @@ def test_the_chat_hears_of_no_view_the_account_does_not_get(monkeypatch):
 # every account; a new one goes here or into its view's row in view_table.VIEWS.
 SHARED_ROUTES = {
     "/link",
+    "/contradictions", "/contradictions/note", "/contradictions/resolve",   # ADR-0166: every account
     "/", "/asset", "/attachment/{name}", "/bug_report", "/changes", "/changes/diff", "/changes/keep",
     "/chat", "/chat/files/add", "/commands", "/concept", "/concepts", "/config", "/connectors",
     "/connectors/{name}/{action}", "/context", "/docs", "/docs/oauth2-redirect", "/endpoints",
@@ -157,7 +158,7 @@ SHARED_TOOLS = {
     "silica_concepts", "silica_cooccurrence_refresh", "silica_curate", "silica_dedup",
     "silica_dedup_pairs", "silica_deferred_flush", "silica_deferred_list", "silica_deferred_retry",
     "silica_delete", "silica_doctor", "silica_document", "silica_embed_refresh",
-    "silica_enrich_batch", "silica_exists", "silica_file_links", "silica_files", "silica_flag_note", "silica_require",
+    "silica_enrich_batch", "silica_exists", "silica_file_links", "silica_files", "silica_flag_note", "silica_require", "silica_decide",
     "silica_generate_taxonomy", "silica_graph_explain", "silica_graph_export", "silica_graph_path",
     "silica_health", "silica_impact", "silica_inbox_ls", "silica_ledger_digest", "silica_ledger_next",
     "silica_ledger_update", "silica_lexical_refresh", "silica_links", "silica_load_tools",
@@ -171,7 +172,7 @@ SHARED_TOOLS = {
     "web_fetch", "web_search",
 }
 SHARED_COMMANDS = {
-    "/aliases", "/anneal", "/changes", "/check", "/clear", "/connect", "/contested", "/convert",
+    "/aliases", "/anneal", "/changes", "/check", "/clear", "/connect", "/contested", "/contradictions", "/convert", "/decide", "/decisions", "/outcome",
     "/cooccur", "/curate", "/dedup", "/delete", "/embed", "/enrich", "/episodes", "/exit", "/fetch",
     "/find", "/flashcards", "/graph", "/help", "/impact", "/incognito", "/keep", "/lexical", "/mail",
     "/map", "/memory", "/migrate", "/model", "/new", "/nucleate", "/organize", "/path", "/persona",

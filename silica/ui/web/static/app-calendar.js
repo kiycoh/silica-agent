@@ -28,11 +28,11 @@ const CAL_CHIP_CAP = 2;       // month mode: visible timed chips per day
 const CAL_DERIVED_CAP = 3;    // month mode: chips + derived lines together
 const CAL_AGENDA_CAP = 6;     // agenda: rows per axis before "show all"
 
-// The seven kinds are layers, as Google's calendars are (ADR-0118 point 5). On
+// The kinds are layers, as Google's calendars are (ADR-0118 point 5). On
 // by default: what is planned. Off: the two axes that log what already happened.
 const CAL_LAYERS = [
   ["events", "Events"], ["plans", "Study plans"], ["tasks", "Tasks"], ["review", "To review"],
-  ["daily", "Daily notes"], ["runs", "Silica's runs"], ["notes", "Dated notes"],
+  ["decisions", "Decisions"], ["daily", "Daily notes"], ["runs", "Silica's runs"], ["notes", "Dated notes"],
 ];
 const CAL_LAYERS_OFF = ["runs", "notes"];
 const CAL_LAYERS_KEY = "silica.calendar.layers";
@@ -184,6 +184,11 @@ function calDerived(row) {
     out.push({ cls: "due", text: row.review.length + " to review",
                title: row.review.length + " notes the review queue has due" });
   }
+  const dec = calOn("decisions") ? row.decisions || [] : [];
+  if (dec.length) {
+    out.push({ cls: dec.some((x) => x.overdue) ? "due" : "", text: `${dec.length} decision${dec.length === 1 ? "" : "s"}`,
+               title: "review decision: " + dec.map((x) => x.name).join(", ") });
+  }
   const verbs = new Map();
   for (const a of calOn("runs") ? row.activity || [] : []) {
     const v = calActivity(a).verb || "wrote";
@@ -284,6 +289,7 @@ function renderCalendar() {
   main.dataset.mode = calMode;
   if (calMode === "month") calRenderMonth(main);
   else if (calMode === "agenda") renderCalAgenda();
+  else if (calMode === "decisions") renderDecisions(main);   // app-decisions.js (ADR-0167)
   else if (calMode === "day") calRenderDay(main);
   else main.appendChild(calTimeGrid(calWeekDates(), true));
 }
@@ -296,8 +302,9 @@ function calRenderTitle() {
     sub.textContent = String(calAnchor.getFullYear());
     return;
   }
-  if (calMode === "month") {
-    t.textContent = calAnchor.toLocaleString("en-US", { month: "long", year: "numeric" });
+  if (calMode === "month" || calMode === "decisions") {
+    t.textContent = calMode === "decisions" ? "Decisions"
+      : calAnchor.toLocaleString("en-US", { month: "long", year: "numeric" });
     sub.textContent = "";
     return;
   }
@@ -367,6 +374,7 @@ function calRenderLayers() {
     plans: calPlans.filter((p) => p.by >= today).length,
     tasks: Object.values(calDays).reduce((n, r) => n + (r.tasks || []).filter((t) => t.status === "open").length, 0),
     review: (calDays[today]?.review || []).length,
+    decisions: (calDays[today]?.decisions || []).length,
   };
   for (const [k, label] of CAL_LAYERS) {
     const on = calOn(k);
@@ -964,6 +972,15 @@ function calAgendaDay(row) {
     it.classList.add("clickable");
     if (t.status === "done") it.classList.add("done");
     it.addEventListener("click", () => openNote(t.path, t.line));
+    it.appendChild(txt);
+  });
+  // A decision to review (ADR-0167) opens its note, where Expected and Outcomes are.
+  axis("decision", calOn("decisions") ? row.decisions : [], (it, d) => {
+    const txt = mkEl("span", "cal-ag-txt", "review decision: " + d.name);
+    if (d.overdue) txt.appendChild(mkEl("i", "late", " since " + d.review_on));
+    it.title = d.path;
+    it.classList.add("clickable");
+    it.addEventListener("click", () => openNote(d.path));
     it.appendChild(txt);
   });
   axis("note", calOn("notes") ? row.notes : [], (it, n) => it.appendChild(document.createTextNode(n.label)));
