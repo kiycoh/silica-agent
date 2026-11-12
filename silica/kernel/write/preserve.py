@@ -33,7 +33,7 @@ from types import FrameType
 
 from silica.kernel.base import frontmatter, markdown
 from silica.kernel.base.noteshape import PROVENANCE_HEADER_PREFIXES
-from silica.kernel.base.syntax import WIKILINK_CELL_RE
+from silica.kernel.base.syntax import QUOTE_MARK_RE, WIKILINK_CELL_RE
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ class Loss(enum.Enum):
     MIGRATE = "migrate"    # /migrate --write, confirmed per run and journaled
     PLAN = "plan"          # Learn's re-scope rebuilds what the plan generated
     RESOLVE = "resolve"    # resolve_contested files callouts under ## Superseded
-    CITE = "cite"          # CLEANUP rewrites footnote references and definitions
+    CITE = "cite"          # CLEANUP rewrites footnote references, definitions and quote markers
     UNLINK = "unlink"      # the sweep drops related: entries that resolve nowhere
     RENAME = "rename"      # a move rewrites link targets in its referrers
 
@@ -123,7 +123,10 @@ def _reduce(line: str, loss: Loss | None) -> str:
     if loss is Loss.RENAME:
         line = _MDLINK.sub(lambda m: m.group(1) + m.group(2), line)
     if loss is Loss.CITE:
-        line = _FN_REF.sub("", line)
+        # A bare quote marker becomes a keyed footnote, or goes when it names
+        # no banked quote (provenance.attribute_quotes); neither is a lost
+        # word, and a space it took or left is not one either.
+        line = " ".join(QUOTE_MARK_RE.sub("", _FN_REF.sub("", line)).split())
     return line
 
 

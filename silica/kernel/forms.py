@@ -142,6 +142,24 @@ def stamped_form(text: str) -> str:
     return val if val in FORMS else ""
 
 
+# A deep research's part cites the quote each sentence stands on, [Q3], where a
+# /web-search note cites the page, [1] (ADR-0158 point 9). The ingress says so
+# under a key of its own and not as a `form:` value: the citations change what
+# /nucleate keeps on a line and how CLEANUP resolves it, never the lens or the
+# lane, and a form value would also be counted by the wizard's census and steer
+# the lane through `form_origin == "stamp"`.
+CITATIONS_KEY = "citations"
+QUOTE_CITATIONS = "quotes"
+
+
+def cites_quotes(text: str) -> bool:
+    """The source's ingress stamp says its markers name banked quotes."""
+    from silica.kernel.base import frontmatter
+
+    data, _, _ = frontmatter.split(text)
+    return isinstance(data, dict) and str(data.get(CITATIONS_KEY) or "").strip().lower() == QUOTE_CITATIONS
+
+
 # Dispatch (draft filing) and PAYLOAD (profile pin) both resolve the same
 # file in one /nucleate run; the memo makes the second resolution free.
 _sniff_memo: dict[str, str] = {}

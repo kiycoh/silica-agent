@@ -26,6 +26,7 @@ from silica.kernel.text.title import SHORT_FLAG, near_title_of, review_flags
 from silica.kernel.write.validate import validate_ops
 from silica.router.phases import MAX_STEER_ATTEMPTS, REJECTION_RATE_MAX, InjectorState, phase
 from silica.router.run_state import job_origin
+from silica.kernel.forms import cites_quotes, read_source_text
 from silica.kernel.outline import flag_cosine_near_titles, parse_outline, run_outliner, vault_outline
 from silica.kernel.prep_delegation import payload_inbox_text, run_distiller
 
@@ -139,6 +140,18 @@ def enqueue_short_snippet_expands(fsm: "InjectorFSM", rejected_raw: list) -> Non
     wq = fsm.work_queue
     if wq is None:
         return
+    # A deep research's part (ADR-0158 point 9): its thin note is a section of
+    # the part, each line keeping the quote it cites. The worker re-authors a
+    # body from the excerpt with no word about markers, on a consumer thread
+    # CLEANUP does not wait for, so it lands after the markers were keyed and
+    # writes over them. The note stays as the part wrote it, flagged for review.
+    try:
+        if cites_quotes(read_source_text(fsm.current_source_file)):
+            return
+    except Exception:
+        # A source neither reader can open has no stamp to read: the worker
+        # is queued as it is for every other source, which loses nothing.
+        logger.debug("EXPAND: source stamp unreadable, worker queued", exc_info=True)
     from silica.kernel.workqueue import ExpandJob, WorkItem
 
     excerpts: dict[str, str] = {}
@@ -479,6 +492,9 @@ def _run_outline_chunk(fsm: "InjectorFSM", idx: int, chunk: dict,
         language=language,
         vault_outline=rows, outline=prior, only_titles=only, steer_context=steer_context,
         spine_title=_segment_title(inbox_file),
+        # The ingress stamp, never a sniff: only a deep research's part asks
+        # the model to keep its quote markers (ADR-0158 point 9).
+        quote_ids=cites_quotes(source_text),
     )
     if only is None:
         try:
