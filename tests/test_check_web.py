@@ -254,7 +254,7 @@ def test_a_check_leaves_a_chat_turns_web_state_alone(monkeypatch):
     monkeypatch.setattr(wr, "ddg_search", lambda q: [{"url": "https://a.example/1"}])
     wr._reset_turn()
     wr._LANES.append("mojeek")
-    wr._DEAD = 2
+    wr._turn().dead = 2
     hits, lane = wr.search_lanes("anything")
     assert (hits, lane) == ([{"url": "https://a.example/1"}], "duckduckgo")
     assert wr._LANES == ["mojeek"] and wr._DEAD == 2

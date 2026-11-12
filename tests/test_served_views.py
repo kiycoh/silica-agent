@@ -132,6 +132,9 @@ SHARED_ROUTES = {
     "/connectors/{name}/{action}", "/context", "/docs", "/docs/oauth2-redirect", "/endpoints",
     "/endpoints/start", "/file", "/file/chapters", "/vectors", "/vectors/refresh", "/file/ocr", "/file/study", "/find", "/flag", "/health", "/instructions", "/jobs", "/jobs/running",
     "/jobs/{job_id}/dismiss", "/jobs/{job_id}/retry", "/jobs/{job_id}/turn", "/limits", "/mail/upload",
+    # ADR-0158 point 8: a deep research starts from the chat's + and offers its /nucleate there
+    "/research", "/research/plan", "/research/start", "/research/{job_id}/dismiss",
+    "/research/{job_id}/nucleate", "/research/{job_id}/stop",
     "/memory", "/memory/reset", "/memory/undo", "/memory/{scope}", "/messages", "/narration",
     "/narration/sse", "/note", "/note/asset", "/note/check", "/note/check/keep", "/note/history",
     "/note/history/diff", "/note/history/restore", "/note/let-go", "/note/new", "/note/raw",
@@ -168,7 +171,7 @@ SHARED_TOOLS = {
     "silica_search", "silica_search_context", "silica_semantic_search", "silica_session_search",
     "silica_tables", "silica_timeline", "silica_unresolved",
     "silica_vault_report", "silica_vaults", "silica_web_answer", "silica_write_note",
-    "web_fetch", "web_search",
+    "web_fetch", "web_search", "scholarly_search",
 }
 SHARED_COMMANDS = {
     "/aliases", "/anneal", "/changes", "/check", "/clear", "/connect", "/contested", "/convert",

@@ -38,13 +38,15 @@ never reached the open web says so instead of reading as a thin answer.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
 
 import datetime
 import json
 import logging
 import re
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import replace
 from html import unescape
 from html.parser import HTMLParser
@@ -76,6 +78,7 @@ _TAVILY_URL = "https://api.tavily.com/search"
 _DDG_URL = "https://html.duckduckgo.com/html/"
 _MOJEEK_URL = "https://www.mojeek.com/search"
 _WP_SITE = "https://en.wikipedia.org"
+_OPENALEX_URL = "https://api.openalex.org/works"
 _WP_TAG_RE = re.compile(r"<[^>]+>")
 _MAX_RESULTS = 5            # per-query cap; config promotion declined 2026-08-19
 _HTTP_TIMEOUT = 30
@@ -191,19 +194,23 @@ it next. Update the plan whenever remember returns new IDs; the reply names \
 the sections still without evidence. You are saturated when no section that \
 matters is still empty."""
 
+# Appended when a deep research allows scholarly sources (ADR-0158 point 10,
+# the literature shape), with the tool it names.
+_SCHOLARLY_STEP = """
+
+You also have `scholarly_search(query)`, which searches papers, reviews and \
+preprints and returns each one's abstract. Prefer it for what studies found. \
+An abstract can be banked with `remember` under the hit's url as it stands; \
+fetch the url only for what the abstract does not say. Say when a work is a \
+preprint, and never cite a work marked retracted as support for a claim."""
+
 # Gate seam. evals/probe_web_gate.py flips this to run gate arm A (the exact
 # pre-steering loop) live; product code never touches it.
 _STEERING = True
 
 
-# Which lane answered each web_search call of the current turn, in call order.
-# Per-process and per-turn: web_research() and WebTurn() clear it before the loop
-# starts, and _lane_line() reads it after. Kept beside the tool rather than
-# threaded through its return value: the payload shape is the model's contract,
-# and a lane is the *user's* business, not the model's.
-_LANES: list[str] = []
-
-# Consecutive web_search calls that exhausted every lane. Cleared beside _LANES.
+# Consecutive web_search calls that exhausted every lane, past which the tool
+# stops dialling (`_Turn.dead` counts them).
 #
 # A search that reaches the `else` below has paid up to four HTTP timeouts, so a
 # stack that is wholly down costs ~2 minutes per call and the loop keeps buying
@@ -212,7 +219,6 @@ _LANES: list[str] = []
 # is not at 48, so past _DEAD_LANES_LIMIT the tool stops dialling and fails on
 # the spot. The model still sees an error and can still write the note from what
 # it has — the loop lands, it just lands in seconds instead of in half an hour.
-_DEAD = 0
 _DEAD_LANES_LIMIT = 3
 
 
@@ -224,31 +230,81 @@ class Quote(NamedTuple):
     why: str
 
 
-# The turn's evidence bank: "Q1", "Q2", ... -> Quote, in remember order.
-# Same per-process, per-turn life as _LANES. The note builders snapshot it
-# (dict(_BANK)) before the next turn's _reset_turn can clear it.
-_BANK: dict[str, Quote] = {}
+class _Turn:
+    """One loop's search state. web_research() and WebTurn() clear it before
+    the loop starts; the tools read and grow it while the loop runs.
 
-# url -> fetched page text, fed by _harvest_page from the turn's tool events.
-# remember's guardian checks quotes against these bodies: a page the loop never
-# fetched cannot back a quote.
-_PAGES: dict[str, str] = {}
+    - `lanes`: which lane answered each web_search call, in call order, read
+      by _lane_line() after the loop. Kept beside the tool rather than threaded
+      through its return value: the payload shape is the model's contract, and
+      a lane is the *user's* business, not the model's.
+    - `dead`: consecutive web_search calls that exhausted every lane.
+    - `bank`: the evidence bank, "Q1", "Q2", ... -> Quote, in remember order.
+      The note builders snapshot it (dict(bank)) before the next turn's
+      _reset_turn can clear it.
+    - `pages`: url -> fetched page text, fed by _harvest_page from the turn's
+      tool events. remember's guardian checks quotes against these bodies: a
+      page the loop never fetched cannot back a quote.
+    - `plan`: the live research plan (spec-web-research-plan-steering §3.1):
+      markdown `## ` headings, optionally ending with banked IDs like [Q1, Q3].
+      Steering state only: composition never reads it (§2 invariant).
+    """
 
-# The live research plan (spec-web-research-plan-steering §3.1): markdown
-# `## ` headings, optionally ending with banked IDs like [Q1, Q3]. Steering
-# state only: composition never reads it (§2 invariant).
-_PLAN: str = ""
+    def __init__(self) -> None:
+        self.lanes: list[str] = []
+        self.dead = 0
+        self.bank: dict[str, Quote] = {}
+        self.pages: dict[str, str] = {}
+        self.plan = ""
+
+    def clear(self) -> None:
+        self.lanes.clear()
+        self.bank.clear()
+        self.pages.clear()
+        self.dead = 0
+        self.plan = ""
+
+
+# The chat's turns share one state per process, as they always have: the turn
+# slot runs them one at a time. A deep research job runs its loops off that
+# slot, on its own thread, and a chat /web question asked meanwhile would clear
+# the job's bank mid-part (ADR-0158 point 8), so the job opens a state of its
+# own (`own_turn`). A context variable and not a thread-local: the agent loop
+# runs a block of reads on pool threads that copy the caller's context
+# (RunContext.spawn), so `remember` and `find_in_page` find the same state
+# from there.
+_SHARED = _Turn()
+_OWN: ContextVar[_Turn | None] = ContextVar("silica_web_turn", default=None)
+
+
+def _turn() -> _Turn:
+    return _OWN.get() or _SHARED
+
+
+@contextmanager
+def own_turn() -> Iterator[_Turn]:
+    """A search state of the caller's own for the loops run inside the block."""
+    token = _OWN.set(_Turn())
+    try:
+        yield _turn()
+    finally:
+        _OWN.reset(token)
+
+
+# The names the state had as module globals, read by the suite and the probes
+# (evals/probe_web_gate.py): `wr._BANK` is the current loop's bank.
+_STATE_NAMES = {"_LANES": "lanes", "_DEAD": "dead", "_BANK": "bank", "_PAGES": "pages", "_PLAN": "plan"}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _STATE_NAMES:
+        return getattr(_turn(), _STATE_NAMES[name])
+    raise AttributeError(name)
 
 
 def _reset_turn() -> None:
     """Clear the per-turn search state. Both callers of the loop run this first."""
-    global _DEAD, _PLAN
-
-    _LANES.clear()
-    _BANK.clear()
-    _PAGES.clear()
-    _DEAD = 0
-    _PLAN = ""
+    _turn().clear()
 
 
 def _harvest_page(event) -> None:
@@ -268,7 +324,7 @@ def _harvest_page(event) -> None:
         head, _, _ = event.result.partition("\n")
         url = head[len("Source: "):].strip() if head.startswith("Source: ") else ""
         if url:
-            _PAGES[url] = event.result
+            _turn().pages[url] = event.result
 
 
 # The typography folding lives in kernel/text so the source check (ADR-0110
@@ -280,7 +336,7 @@ def search_lanes(query: str) -> tuple[list[dict[str, str]], str]:
     """(hits, the lane that answered): DuckDuckGo, then the backstops. Raises
     DuckDuckGo's ValueError when no lane answers.
 
-    Holds no state: `web_search` keeps the turn's `_LANES` and `_DEAD` around
+    Holds no state: `web_search` keeps the turn's lanes and dead count around
     it, so a selection's check (ADR-0110 amendment, point 7), which runs beside
     a chat turn, leaves both alone."""
     try:
@@ -318,11 +374,10 @@ def search_lanes(query: str) -> tuple[list[dict[str, str]], str]:
 def web_search(query: str) -> str:
     """Search the web for a single query. Returns a JSON list of
     {title, url, content} results. Use iteratively to research a concept."""
-    global _DEAD
-
-    if _DEAD >= _DEAD_LANES_LIMIT:
+    turn = _turn()
+    if turn.dead >= _DEAD_LANES_LIMIT:
         raise ValueError(
-            f"web search is unavailable: {_DEAD} consecutive queries exhausted "
+            f"web search is unavailable: {turn.dead} consecutive queries exhausted "
             "every lane (DuckDuckGo, Mojeek, Wikipedia and Tavily where "
             "configured). Not retrying. Write up what you already have, or "
             "retry later / set SILICA_TAVILY_API_KEY."
@@ -330,10 +385,10 @@ def web_search(query: str) -> str:
     try:
         compact, lane = search_lanes(query)
     except ValueError:
-        _DEAD += 1
+        turn.dead += 1
         raise
-    _LANES.append(lane)
-    _DEAD = 0
+    turn.lanes.append(lane)
+    turn.dead = 0
     return json.dumps(compact, ensure_ascii=False)
 
 
@@ -345,10 +400,11 @@ def _lane_line() -> str:
     and the per-lane counts say how much of the note came from where. Silent
     otherwise: a banner on every healthy note is noise nobody reads.
     """
-    if not _LANES or set(_LANES) == {"duckduckgo"}:
+    lanes = _turn().lanes
+    if not lanes or set(lanes) == {"duckduckgo"}:
         return ""
     counts: dict[str, int] = {}
-    for lane in _LANES:
+    for lane in lanes:
         counts[lane] = counts.get(lane, 0) + 1
     named = ", ".join(f"{lane} {n}" for lane, n in counts.items())
     return f"Search lanes: {named}. DuckDuckGo was challenged; these answered instead."
@@ -366,9 +422,10 @@ def remember(url: str, quote: str, why: str) -> str:
     # String containment, no model in the loop — which is what makes the
     # rejection trustworthy: it cannot be sweet-talked.
     url = url.strip()
-    page = _PAGES.get(url)
+    turn = _turn()
+    page = turn.pages.get(url)
     if page is None:
-        fetched = "\n".join(f"  {u}" for u in _PAGES) or "  (none yet)"
+        fetched = "\n".join(f"  {u}" for u in turn.pages) or "  (none yet)"
         raise ValueError(
             f"no page fetched from {url!r} this turn — quote only pages you "
             "have read with web_fetch, using the URL on the page's own "
@@ -383,11 +440,11 @@ def remember(url: str, quote: str, why: str) -> str:
             "fetched text shows it (whitespace differences are fine, "
             "paraphrase is not)."
         )
-    for qid, banked in _BANK.items():
+    for qid, banked in turn.bank.items():
         if banked.url == url and _squash(banked.quote) == squashed:
             return f"already banked as [{qid}]"
-    qid = f"Q{len(_BANK) + 1}"
-    _BANK[qid] = Quote(url=url, quote=quote.strip(), why=why.strip())
+    qid = f"Q{len(turn.bank) + 1}"
+    turn.bank[qid] = Quote(url=url, quote=quote.strip(), why=why.strip())
     return f"banked [{qid}] — cite it inline as [{qid}]"
 
 
@@ -401,9 +458,10 @@ def find_in_page(url: str, pattern: str) -> str:
     # Same cache the remember guardian reads, same style of failure: the error
     # names what IS fetchable so a wrong URL costs one step, not a spiral.
     url = url.strip()
-    page = _PAGES.get(url)
+    pages = _turn().pages
+    page = pages.get(url)
     if page is None:
-        fetched = "\n".join(f"  {u}" for u in _PAGES) or "  (none yet)"
+        fetched = "\n".join(f"  {u}" for u in pages) or "  (none yet)"
         raise ValueError(
             f"no page fetched from {url!r} this turn — find only searches "
             "pages you have read with web_fetch, using the URL on the page's "
@@ -433,6 +491,59 @@ def find_in_page(url: str, pattern: str) -> str:
     return "\n…\n".join(windows)[:4000] + tail
 
 
+def _openalex_abstract(index: dict | None) -> str:
+    """OpenAlex ships an abstract as {word: [positions]}; the words back in order."""
+    if not isinstance(index, dict):
+        return ""
+    at: dict[int, str] = {}
+    for word, places in index.items():
+        for i in places if isinstance(places, list) else []:
+            if isinstance(i, int):
+                at[i] = word
+    return " ".join(at[i] for i in sorted(at))
+
+
+# ingress: a deep research's literature lane, titles and abstracts of works.
+@tool(cls="atomic", sensitive=True, ingress=True, label=("scholarly search", "query"))
+def scholarly_search(query: str) -> str:
+    """Search scholarly works (papers, reviews, preprints) on a topic. Returns
+    a JSON list of {title, url, year, type, retracted, content}, where content
+    is the work's abstract. Bank a sentence of an abstract with remember under
+    the hit's url, as from a fetched page."""
+    # OpenAlex: keyless, and its record carries `is_retracted`, which is the
+    # retraction join by identifier that ADR-0158 point 10 asks code to do.
+    # No `mailto`: its polite pool would want an address, and the person's is
+    # not ours to send (the same posture as the keyless DuckDuckGo lane).
+    resp = httpx.get(
+        _OPENALEX_URL,
+        params={
+            "search": query,
+            "per-page": _MAX_RESULTS,
+            "select": "id,doi,display_name,publication_year,type,is_retracted,"
+                      "abstract_inverted_index,primary_location",
+        },
+        timeout=_HTTP_TIMEOUT,
+    )
+    resp.raise_for_status()
+    out = []
+    pages = _turn().pages
+    for work in resp.json().get("results") or []:
+        loc = work.get("primary_location") or {}
+        url = work.get("doi") or loc.get("landing_page_url") or work.get("id") or ""
+        title = work.get("display_name") or url
+        if not url:
+            continue
+        abstract = _openalex_abstract(work.get("abstract_inverted_index"))
+        retracted = bool(work.get("is_retracted"))
+        # On file like a fetched page, so remember's guardian accepts a quote
+        # from the abstract and from nothing else the record does not hold.
+        pages.setdefault(url, f"Source: {url}\n{title}\n\n{abstract}")
+        out.append({"title": title, "url": url, "year": work.get("publication_year"),
+                    "type": work.get("type") or "", "retracted": retracted,
+                    "content": abstract[:1200]})
+    return json.dumps(out, ensure_ascii=False)
+
+
 @tool(cls="atomic", sensitive=True, ingress=False)
 def plan(outline: str) -> str:
     """Save or replace your working plan for the findings note: markdown
@@ -444,8 +555,7 @@ def plan(outline: str) -> str:
     # validity are checked mechanically; coverage is what the return value
     # reports, not what it enforces. The bank only grows within a turn, so a
     # plan accepted here cannot lose ID validity later.
-    global _PLAN
-
+    bank = _turn().bank
     text = outline.strip()
     covered = 0
     gaps: list[str] = []
@@ -469,15 +579,15 @@ def plan(outline: str) -> str:
         for m in _QREF_RE.finditer(text)
         for qid in re.split(r"\s*,\s*", m.group(2))
     }
-    unknown = sorted(cited - _BANK.keys(), key=lambda q: int(q[1:]))
+    unknown = sorted(cited - bank.keys(), key=lambda q: int(q[1:]))
     if unknown:
-        known = ", ".join(_BANK) or "(none yet)"
+        known = ", ".join(bank) or "(none yet)"
         raise ValueError(
             f"unknown quote ID(s): {', '.join(unknown)}. The bank holds: "
             f"{known}. Cite only IDs that remember returned; a heading "
             "without IDs is fine for a section still to research."
         )
-    _PLAN = text
+    _turn().plan = text
     n = covered + len(gaps)
     head = f"saved: {n} section{'s' if n != 1 else ''}, "
     if gaps:
@@ -718,9 +828,21 @@ def web_research(
     concept: str,
     max_searches: int = DEFAULT_MAX_SEARCHES,
     tool_progress_callback=None,
+    *,
+    folder: str = "",
+    name: str = "",
+    quote_ids: bool = False,
+    scholarly: bool = False,
+    cancel_token=None,
 ) -> str:
     """Run the constrained web-research loop and write one findings note to the
     Inbox. Returns the note's vault-relative path.
+
+    A deep research (ADR-0158 point 8) runs one loop per sub-question: `folder`
+    puts the note in a folder of the Inbox beside its siblings, and
+    `quote_ids` keeps each citation as the quote it names (point 9) instead of
+    the page's number. `name` names the file when the concept is a long
+    sub-question, and `scholarly` adds the literature lane (point 10).
 
     Raises ValueError if the loop produced no findings (sentinel return — no
     note is written).
@@ -728,10 +850,14 @@ def web_research(
     messages = [
         {
             "role": "system",
-            "content": _RESEARCH_SYSTEM_PROMPT + (_STEER_STEP if _STEERING else ""),
+            "content": _RESEARCH_SYSTEM_PROMPT + (_STEER_STEP if _STEERING else "")
+            + (_SCHOLARLY_STEP if scholarly else ""),
         },
         {"role": "user", "content": concept},
     ]
+    tools = (*_WEB_TOOLS, "plan") if _STEERING else _WEB_TOOLS
+    if scholarly:
+        tools = (*tools, "scholarly_search")
 
     # The trace is recorded as it happens, never read back off `messages`.
     # run_agent compacts its own history mid-loop (silica/agent/compaction.py):
@@ -743,6 +869,7 @@ def web_research(
     # before the eager projection and before any later sweep can touch it.
     trace: dict[str, str] = {}
     _reset_turn()  # lanes and the dead-lane counter are per turn
+    bank = _turn().bank
 
     def _record(event) -> None:
         if isinstance(event, ToolCompleteEvent) and isinstance(event.result, str):
@@ -755,10 +882,8 @@ def web_research(
         messages,
         model=CONFIG.model,
         tool_progress_callback=_record,
-        constraints=AgentConstraints(
-            tools=(*_WEB_TOOLS, "plan") if _STEERING else _WEB_TOOLS,
-            max_iterations=max_searches,
-        ),
+        constraints=AgentConstraints(tools=tools, max_iterations=max_searches),
+        cancel_token=cancel_token,
     )
 
     if not body or is_sentinel(body):
@@ -767,17 +892,18 @@ def web_research(
             "(loop hit its limit, was cancelled, or all searches failed)."
         )
 
-    if _BANK:
+    if bank:
         # Deep runs write past their own context: compaction has stubbed most
         # fetched pages by the time the loop's final message is written. The
         # sectioned rewrite (spec §3.3-3.4) recomposes the note from the banked
         # quotes instead; the one-shot body stays as the §3.6 fallback. Only
         # here — /web answers in direct prose (§5).
-        body = compose_findings(concept, dict(_BANK)) or body
+        body = compose_findings(concept, dict(bank)) or body
 
     results = list(trace.values())
-    bound, sources, audit = bind_citations(body, _collect_sources(results), _BANK)
-    if _BANK and "## Sources" in bound:
+    bound, sources, audit = bind_citations(body, _collect_sources(results), bank,
+                                           quote_ids=quote_ids)
+    if bank and "## Sources" in bound:
         # The prompt forbids a model-written Sources section when quotes were
         # banked: bind_citations owns the numbering, and build_note would keep
         # a hand-written section over the mechanical one. Cut from the heading
@@ -785,11 +911,11 @@ def web_research(
         bound = SOURCES_TAIL_RE.split(bound, maxsplit=1)[0].rstrip()
     provenance = "\n".join(line for line in (_lane_line(), audit) if line)
     note = build_note(concept, bound, sources, lanes=provenance)
-    note_rel = unique_inbox_path(concept)
+    note_rel = unique_inbox_path(name or concept, folder=folder)
     from silica.driver import DRIVER
 
     DRIVER.create(note_rel, note)
-    write_leaf(note_rel, results, bank=dict(_BANK))
+    write_leaf(note_rel, results, bank=dict(bank))
     return note_rel
 
 
@@ -797,7 +923,7 @@ def web_research(
 # raw trace, provenance line, bank snapshot). Per-process, one deep — a second
 # /web overwrites it, /keep clears it. Deliberately no history: a queue of
 # unkept answers is a second inbox. Lanes and bank are stashed with the rest
-# because _LANES and _BANK have moved on by the time /keep runs.
+# because the turn's lanes and bank have moved on by the time /keep runs.
 _LAST_WEB_TURN: (
     tuple[str, str, list[tuple[str, str]], list[str], str, dict[str, Quote]] | None
 ) = None
@@ -856,9 +982,10 @@ class WebTurn:
         if not answer or is_sentinel(answer):
             return answer  # cancelled or capped: nothing to cite, nothing to keep
         raw = list(self._trace.values())
-        answer, sources, audit = bind_citations(answer, _collect_sources(raw), _BANK)
+        bank = _turn().bank
+        answer, sources, audit = bind_citations(answer, _collect_sources(raw), bank)
         lanes = "\n".join(line for line in (_lane_line(), audit) if line)
-        _LAST_WEB_TURN = (self.question, answer, sources, raw, lanes, dict(_BANK))
+        _LAST_WEB_TURN = (self.question, answer, sources, raw, lanes, dict(bank))
         out = f"{answer.rstrip()}\n\n{_sources_block(sources, lanes)}"
         if messages and messages[-1].get("role") == "assistant":
             messages[-1]["content"] = out
@@ -1390,6 +1517,8 @@ def bind_citations(
     body: str,
     collected: list[tuple[str, str]],
     bank: dict[str, Quote],
+    *,
+    quote_ids: bool = False,
 ) -> tuple[str, list[tuple[str, str]], str]:
     """Resolve the body's [Qk] markers against the bank (spec §3.5).
 
@@ -1404,7 +1533,13 @@ def bind_citations(
     ("" when clean). This is the other half of remember's guarantee: the
     guardian stops fabricated quotes from entering the bank, this stops
     citations of quotes that never did. Pure function — the callers pass a
-    snapshot, so /keep can re-render long after _BANK has moved on.
+    snapshot, so /keep can re-render long after the bank has moved on.
+
+    `quote_ids` keeps a surviving marker as the quotes it names, `[Q3, Q7]`,
+    which reverses step 2 of the spec's §3.5 for a deep research's parts
+    (ADR-0158 point 9): a page number cannot say which quote a reworded
+    sentence stands on, and the sentence reaches the vault through /nucleate.
+    The sources keep the same order either way.
     """
     order: list[str] = []  # cited urls, first-citation order
     phantoms = 0
@@ -1413,6 +1548,7 @@ def bind_citations(
         nonlocal phantoms
         lead, ids = match.groups()
         numbers: list[int] = []
+        kept: list[str] = []
         for qid in re.split(r"\s*,\s*", ids):
             banked = bank.get(qid)
             if banked is None:
@@ -1423,14 +1559,18 @@ def bind_citations(
             n = order.index(banked.url) + 1
             if n not in numbers:
                 numbers.append(n)
+            if qid not in kept:
+                kept.append(qid)
         if not numbers:
             return ""
+        if quote_ids:
+            return f"{lead}[{', '.join(kept)}]"
         return f"{lead}[{', '.join(str(n) for n in numbers)}]"
 
     bound = _QREF_RE.sub(_sub, body)
     # A writer citing the same quote twice in a row ([Q3][Q3], measured live)
     # binds to the same number twice; adjacent duplicates are one citation.
-    bound = re.sub(r"(\[\d+(?:, \d+)*\])(?:\s*\1)+", r"\1", bound)
+    bound = re.sub(r"(\[(?:\d+|Q\d+)(?:, (?:\d+|Q\d+))*\])(?:\s*\1)+", r"\1", bound)
     titles = dict(collected)
     sources = [(u, titles.get(u, u)) for u in order]
     sources += [(u, t) for u, t in collected if u not in order]
@@ -1524,7 +1664,7 @@ def build_note(
     return f"{front}\n{out}\n"
 
 
-def unique_inbox_path(concept: str, fallback: str = "web-research") -> str:
+def unique_inbox_path(concept: str, fallback: str = "web-research", folder: str = "") -> str:
     """`<inbox>/<slug>.md`, with a numeric suffix on collision in the Inbox OR
     in sources/. write_leaf names the leaf after this same basename, so a
     basename that is merely free in the Inbox is not enough: a leaf can
@@ -1534,11 +1674,16 @@ def unique_inbox_path(concept: str, fallback: str = "web-research") -> str:
     both up front so the note and its future leaf are always in lockstep.
 
     `fallback` names the note when the title slugifies to nothing (CJK, emoji,
-    pure punctuation), so each command squats only its own namespace."""
+    pure punctuation), so each command squats only its own namespace.
+
+    `folder` is a folder inside the Inbox, for the parts of one deep research
+    (ADR-0158 point 8)."""
     from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import active_inbox_dir
 
     inbox = active_inbox_dir() or "Inbox"
+    if folder:
+        inbox = f"{inbox}/{folder.strip('/')}"
     slug = slugify(concept) or fallback
     vault = Path(CONFIG.vault_path)
     basename = f"{slug}.md"

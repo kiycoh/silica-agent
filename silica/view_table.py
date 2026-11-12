@@ -68,6 +68,9 @@ DEMO_OFF: dict[str, tuple[str, ...]] = {
         # never counts, whatever queued the job; with no upload there is none
         # to list, and the tray leaves itself as it was on a 404 (jobsFetch)
         "/jobs",
+        # a deep research (ADR-0158 point 8) fetches the open web and runs a
+        # loop a sub-question, none of it through the door's count
+        "/research",
         # ADR-0142's two downloads: the owner has not decided (2026-10-31)
         "/vault/export",
     ),

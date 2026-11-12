@@ -25,6 +25,7 @@ from starlette.exceptions import HTTPException
 
 from silica.config import CONFIG, demo, GUI_PORT, live_env
 from silica.kernel import vault_files
+from silica.sources import deep_research
 from silica.sources.zotero import ZoteroError
 from silica.ui.web import (
     calendar_routes,
@@ -39,6 +40,7 @@ from silica.ui.web import (
     metrics_routes,
     notes_routes,
     public_routes,
+    research_routes,
     security,
     session,
     settings_routes,
@@ -152,13 +154,14 @@ async def _http_refused(request: Request, exc: Exception) -> Response:
 # Sentences written for the person by code below this layer, which names no status.
 app.add_exception_handler(vault_files.NotAChatFile, _refused(400))
 app.add_exception_handler(vault_files.InboxClash, _refused(409))
+app.add_exception_handler(deep_research.Refused, _refused(409))
 app.add_exception_handler(ZoteroError, zotero_web.refused)
 app.add_exception_handler(failures.Refused, _route_refused)
 app.add_exception_handler(HTTPException, _http_refused)
 
 for _routes in (chat_routes, files_routes, workspaces_routes, metrics_routes, calendar_routes, explore_routes,
                 notes_routes, tree_routes, stt_routes, settings_routes, zotero_web, learn_routes, skills_routes,
-                jobs_routes, discover_routes, public_routes, library_routes):
+                jobs_routes, discover_routes, public_routes, library_routes, research_routes):
     app.include_router(_routes.router)
 
 
