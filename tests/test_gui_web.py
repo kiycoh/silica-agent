@@ -3205,6 +3205,8 @@ def test_an_absolute_value_in_a_table_cell_keeps_the_row_whole():
     assert [row.count("<td") for row in body.split("</tr>")[:2]] == [2, 2]
     assert "&#x0007C;" in body and "&#x02016;" in body
     assert ofm._escape_table_aliases("prose $|x|$\n") == "prose $|x|$\n"
+    # a formula ending on its bar still closes (2026-11-12: `\vert ` left a space before the `$`)
+    assert "<math" in render.linkify("| a |\n|---|\n| $|x|$ |\n")
 
 
 def test_a_plan_request_ends_on_the_calendar_learn_computed(client, monkeypatch):

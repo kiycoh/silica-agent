@@ -718,6 +718,30 @@
   max-width: 100%;
 }
 
+/* A molecule (ADR-0159) sits on the reading surface as a drawn diagram does. The
+   two label classes are smiles-drawer's, at the sizes drawSmiles measured them in
+   (SMILES_FONT); its own sheet named them bare and is dropped. */
+:is(.msg, #peek-body, #note-edit, #nv-edit, .hv-pop) pre.smiles:has(> svg) {
+  background: none;
+  border: 0;
+  padding: 0.5rem 0;
+  text-align: center;
+  contain: inline-size;
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .hv-pop) pre.smiles svg {
+  max-width: 100%;
+  height: auto;
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .hv-pop) pre.smiles svg .element {
+  font: 8pt Archivo, ui-sans-serif, system-ui, sans-serif;
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .hv-pop) pre.smiles svg .sub {
+  font: 5pt Archivo, ui-sans-serif, system-ui, sans-serif;
+}
+
 /* A fence mermaid could not parse (ADR-0082): one quiet line in the answer or
    the note, the source behind it for whoever wants to see what was written. */
 :is(.msg, #peek-body, #note-edit, #nv-edit) details.diagram-failed > summary {

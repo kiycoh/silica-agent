@@ -218,6 +218,11 @@ details > summary::-webkit-details-marker { display: none; }
 .body pre { overflow-x: auto; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--slate); font-size: 14px; }
 .body pre.mermaid { text-align: center; }
 .body pre.mermaid svg { max-width: 100%; height: auto; }
+/* a molecule (ADR-0159): its labels at the sizes pages.js measured them in */
+.body pre.smiles:has(> svg) { text-align: center; background: none; border: 0; }
+.body pre.smiles svg { max-width: 100%; height: auto; }
+.body pre.smiles svg .element { font: 8pt var(--sans); }
+.body pre.smiles svg .sub { font: 5pt var(--sans); }
 .body code { font-family: var(--mono); font-size: .82em; }
 .body table { border-collapse: collapse; display: block; overflow-x: auto; }
 .body th, .body td { border: 1px solid var(--line); padding: 4px 8px; }

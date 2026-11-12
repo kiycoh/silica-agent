@@ -783,6 +783,19 @@ def fetch_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
     return Page(_render(final_url, truncate(text)), page_title(body) if is_html else "")
 
 
+def link_title(url: str) -> str:
+    """The title a pasted address takes as its link's words (ADR-0161), through `fetch`'s
+    guards, ceiling and clocks; "" when it names none or is not a page. A YouTube video asks
+    the site's oEmbed, a few hundred bytes: `_youtube_transcript` runs yt-dlp for a minute,
+    and a server's watch page can be the consent wall, whose title is the wall's."""
+    if host_matches(url, *YT_DOMAINS):
+        resp, _ = fetch(f"https://www.youtube.com/oembed?{urlencode({'url': url, 'format': 'json'})}")
+        return " ".join(str(resp.json().get("title") or "").split())[:_MAX_TITLE]
+    resp, _ = fetch(url)
+    ctype = content_type(resp)
+    return page_title(resp.text) if "html" in ctype or not ctype else ""
+
+
 # ingress: /web, a page's text.
 @tool(cls="atomic", sensitive=True, ingress=True, label=("web fetch", "url"))
 def web_fetch(url: str) -> str:

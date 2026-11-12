@@ -1462,6 +1462,78 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   box-shadow: 0 0 0 1px var(--line);
 }
 
+/* A table is a grid (ADR-0160): the cell being edited holds its source in a field
+   ringed in teal, as any focus is; the bar over the table's corner shows on
+   hover, its row and column acts only while a cell is being edited. */
+:is(#note-edit,#nv-edit) .cm-grid {
+  position: relative;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid :is(td, th) {
+  cursor: text;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid .cm-grid-editing {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid .cm-grid-editing > .cm-grid-show {
+  display: none;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid-input {
+  width: 100%;
+  min-width: 6ch;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: var(--frost);
+  font: inherit;
+  outline: none;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid-bar {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% - 0.35em);
+  z-index: 2;
+  display: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 1px;
+  max-width: 100%;
+  padding: 2px;
+  background: var(--bubble);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+
+:is(#note-edit,#nv-edit) .cm-grid:is(:hover, :focus-within) .cm-grid-bar {
+  display: flex;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid:not(:focus-within) .cm-grid-op {
+  display: none;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid-bar button {
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ash);
+  font: 500 12px/1 var(--sans);
+  padding: 0.3rem 0.45rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid-bar button:hover {
+  color: var(--frost);
+  background: var(--sel-hover);
+}
+
 :is(#note-edit,#nv-edit) .cm-rendering {
   font-family: var(--mono);
   font-size: 0.86em;
