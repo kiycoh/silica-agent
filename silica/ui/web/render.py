@@ -6,6 +6,7 @@ the file /asset serves. `silica.kernel.text.render` holds the grammar and knows 
 from __future__ import annotations
 
 import html as _html
+import re
 from pathlib import Path
 from urllib.parse import quote as _quote
 
@@ -34,14 +35,30 @@ ASSET_HEADERS = {
 # reaches the app's cookies, storage or routes, also when the address bar opens
 # it alone; default-src 'none' stops every request it could make, and only its
 # inline style and script, and the vault's images, load.
-PAGE_HEADERS = {
-    "Content-Security-Policy": "sandbox allow-scripts; default-src 'none'; img-src 'self' data:; "
-                               "style-src 'unsafe-inline'; script-src 'unsafe-inline'",
-    "X-Content-Type-Options": "nosniff",
-    # A revision keeps the page's address; without this the browser's heuristic
-    # freshness showed a page /undo had removed (checked 2026-11-12, Chrome 156).
-    "Cache-Control": "no-cache",
-}
+_PAGE_CSP = ("sandbox allow-scripts; default-src 'none'; img-src {images}; "
+             "style-src 'unsafe-inline'; script-src 'unsafe-inline'")
+# What may stand in the policy as the host: anything else (a Host header no
+# browser sends) would write its own directives into it.
+_PAGE_HOST = re.compile(r"[a-z0-9.-]+(?::\d{1,5})?")
+
+
+def page_headers(host: str) -> dict[str, str]:
+    """The page's headers on `host`, the Host its request named. Its images come
+    from the route's own /page/ paths, where a relative vault image resolves:
+    under 'self' a page's <img> reached every GET route of the app, and
+    /vault_brief?refresh=1 is a model call on the person's key per request
+    (checked 2026-11-13, Chrome 156). A host-source with a path is the narrowest
+    a policy can name, and it needs the host; with no scheme it matches the one
+    the page came on, http or https behind the hosted proxy."""
+    h = (host or "").strip().lower()
+    images = f"data: {h}/page/" if _PAGE_HOST.fullmatch(h) else "data:"
+    return {
+        "Content-Security-Policy": _PAGE_CSP.format(images=images),
+        "X-Content-Type-Options": "nosniff",
+        # A revision keeps the page's address; without this the browser's heuristic
+        # freshness showed a page /undo had removed (checked 2026-11-12, Chrome 156).
+        "Cache-Control": "no-cache",
+    }
 
 # The raws the drawer shows in the browser's own viewer (ADR-0129 point 1);
 # every other one is a download.

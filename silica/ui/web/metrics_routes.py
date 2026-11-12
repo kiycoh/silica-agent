@@ -8,13 +8,13 @@ import json
 import logging
 import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from silica.config import CONFIG
 from silica.kernel.recall.relatedness import similarity_percent
 from silica.kernel.report import brief, vault_shape
 from silica.kernel.text import note_parts
-from silica.ui.web import session
+from silica.ui.web import security, session
 from silica.ui.web.failures import Refused
 from silica.ui.web.failures import explain as _failure
 
@@ -534,7 +534,9 @@ def limits():
     return {"limits": status(CONFIG.model or "")}
 
 
-@router.get("/vault_brief")
+# Checked like a write although it is a GET: it can be a worker-model call, and a
+# page the chat wrote reached it by navigating its own frame (ADR-0171).
+@router.get("/vault_brief", dependencies=[Depends(security.require_same_origin)])
 def vault_brief(refresh: int = 0):
     """One sentence about what the vault holds, written by the worker model.
 

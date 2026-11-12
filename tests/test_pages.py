@@ -128,6 +128,8 @@ def test_the_page_command_asks_the_model_to_read_then_write(vault):
     asked = expansion('/page "a timeline of Rome"')
     assert "a timeline of Rome" in asked and "silica_write_page" in asked
     assert refusal("/page").startswith("Usage: /page")
+    # An apostrophe is a letter in what the page is about, not an open quote.
+    assert "Make a page: a site on Caravaggio's light\n" in expansion("/page a site on Caravaggio's light")
 
 
 # --- the route --------------------------------------------------------------------
@@ -150,9 +152,47 @@ def test_the_page_is_served_in_an_origin_of_its_own(client, vault):
     r = client.get("/page/Pages/rome.html")
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
     csp = r.headers["content-security-policy"]
-    assert csp == render.PAGE_HEADERS["Content-Security-Policy"]
+    assert csp == render.page_headers("testserver")["Content-Security-Policy"]
     assert "sandbox allow-scripts" in csp and "allow-same-origin" not in csp
     assert "default-src 'none'" in csp
+    # Its images from the route's own paths only: under 'self' a hand-written
+    # page's <img> reached any route of the app, /vault_brief?refresh=1 among
+    # them, which is a model call on the person's key per request.
+    assert "img-src data: testserver/page/;" in csp and "'self'" not in csp
+
+
+@pytest.mark.parametrize("script", ["app-notes.js", "app-zotero.js"])
+def test_the_app_takes_messages_only_from_its_own_origin(script):
+    """A page in the drawer holds `parent` and can post to it: a hand-written one
+    opened a note in place of itself with `silica-open-line` (2026-11-13). Its
+    origin is opaque, so its messages arrive from "null"; the graph frame's from
+    the app's own."""
+    import re
+
+    from silica.ui.web.server import STATIC_DIR
+
+    js = (STATIC_DIR / script).read_text(encoding="utf-8")
+    listeners = re.findall(r'window\.addEventListener\("message", \(e\) => \{\n(.*)\n', js)
+    assert listeners and all("e.origin !== location.origin" in first for first in listeners)
+
+
+def test_a_page_navigating_its_frame_cannot_make_the_app_call_the_model(client, monkeypatch):
+    """frame-src 'self' lets a page navigate its own frame to any route of the app:
+    `location = "/vault_brief?refresh=1"` from a hand-written page was a worker-model
+    call (2026-11-13). Its navigation comes from an opaque origin, so cross-site."""
+    from silica.config import CONFIG
+
+    monkeypatch.setattr(CONFIG, "vault_brief", False)
+    assert client.get("/vault_brief?refresh=1", headers={"sec-fetch-site": "cross-site"}).status_code == 403
+    assert client.get("/vault_brief", headers={"sec-fetch-site": "same-origin"}).json() == {"enabled": False, "text": ""}
+
+
+def test_a_host_header_that_is_no_host_puts_nothing_in_the_page_policy():
+    from silica.ui.web import render
+
+    csp = render.page_headers("127.0.0.1:8785; script-src *")["Content-Security-Policy"]
+    assert "img-src data:;" in csp and "script-src *" not in csp
+    assert "img-src data: localhost:8785/page/;" in render.page_headers("LocalHost:8785")["Content-Security-Policy"]
 
 
 def test_its_relative_image_is_the_vaults_and_nothing_else_is_served(client, vault):

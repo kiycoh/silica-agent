@@ -101,6 +101,15 @@ def test_no_members_or_a_wrong_count_says_how_to_set_them(council, monkeypatch, 
     assert council.calls == [] and council.recalls == []
 
 
+def test_a_question_with_an_apostrophe_is_asked_quoted_or_not(council):
+    """The composer's + prefills `/council ` and the person types a question:
+    "What's" was refused as unbalanced quotes, with advice about paths."""
+    for line in ("/council What's the role of light?", "/council \"What's the role of light?\""):
+        out = _run(line)
+        assert out.error is None, line
+    assert council.recalls == ["What's the role of light?"] * 2
+
+
 def test_the_server_and_the_demo_refuse_it(council, monkeypatch):
     monkeypatch.setenv("SILICA_HOSTED", "1")
     assert "not on the server" in _run('/council "q"').error

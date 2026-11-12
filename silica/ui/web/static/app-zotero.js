@@ -743,6 +743,7 @@ function fillZoteroScopes(groups) {
   if (window.syncScopePicker) syncScopePicker();
 }
 window.addEventListener("message", (e) => {
+  if (e.origin !== location.origin) return; // a page in the drawer posts from "null" (ADR-0171)
   if (e.data && e.data.type === "silica-scope-groups") fillZoteroScopes(e.data);
 });
 window.fillZoteroScopes = fillZoteroScopes;

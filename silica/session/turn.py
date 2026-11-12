@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from silica.agent import turn_notes
-from silica.agent.general_knowledge import general_notes, without_general
+from silica.agent.general_knowledge import general_notes, held_back, without_general
 from silica.agent.constraints import AgentConstraints, chat_constraints
 from silica.agent.loop import run_agent
 from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
@@ -236,6 +236,22 @@ def ask_model(t: Turn, cancel, cut: AgentConstraints) -> None:
 # --- after the model ----------------------------------------------------------
 
 
+def hold_unsearched_general(t: Turn) -> None:
+    """ADR-0169 as the owner set it: an answer from general knowledge only after
+    the vault was searched. A block in a turn that searched and read none of the
+    notes is held back (general_knowledge.held_back), first of the steps so that
+    nothing below, the stored answer and the history included, ever holds it."""
+    if t.stopped or t.web or t.read is None or t.read.looked:
+        return
+    held = held_back(t.answer)
+    if held == t.answer:
+        return
+    t.answer = held
+    messages = t.conv.messages
+    if messages and messages[-1].get("role") == "assistant":
+        messages[-1]["content"] = held
+
+
 def check_numbers(t: Turn) -> None:
     """ADR-0095: the answer as the model wrote it, before attribution and figures
     add text it did not; not a stopped turn's, not a /web turn's, whose answer is
@@ -291,7 +307,7 @@ def note(t: Turn) -> None:
     they are drawn live only."""
     notes = t.watch.notes() if isinstance(t.watch, RecallWatch) else []
     if not (t.stopped or t.web) and t.read is not None:
-        notes += general_notes(t.answer, looked=t.read.looked, command=t.text.startswith("/"))
+        notes += general_notes(t.answer, command=t.text.startswith("/"))
     notes += numbers_notes(t.unread)
     if not (t.stopped or t.web):
         # A card or a slide point its cited note does not hold (learn.artifacts).

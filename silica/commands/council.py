@@ -176,7 +176,7 @@ def council(c: Call) -> Result:
     resp = call_llm(CONFIG.model, _synthesis_messages(question, answering))
     synthesis = (resp.text or "").strip() or "(the synthesis came back empty: the members' answers are below)"
     out.answer = _drawn(synthesis, answering)
-    notes = general_knowledge.general_notes(out.answer, looked=True, command=False)
+    notes = general_knowledge.general_notes(out.answer, command=False)
     notes += [_meter(f"member {h.name}", h) for h in heard]
     tokens = _tokens(resp.usage)
     notes.append({"kind": "council", "text": f"synthesis: 1 call{f', {tokens:,} tokens' if tokens else ''}"})

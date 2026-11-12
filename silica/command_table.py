@@ -285,7 +285,7 @@ COMMANDS: tuple[Command, ...] = (
         summary="one question to 2 to 5 models over one search of your notes, then where they "
                 "agree and disagree, cited; name the models in Settings, Brains",
         examples=('/council "what do my notes say causes inflation?"',),
-        handler="silica.commands.council:council", shlex=True, demo_off=True,
+        handler="silica.commands.council:council", demo_off=True,
     ),
     Command(
         name="/keep",
@@ -355,7 +355,7 @@ COMMANDS: tuple[Command, ...] = (
         summary="a web page, or a small site, built from your notes into Pages/; it opens in "
                 "a safe frame in the app",
         examples=('/page "a timeline of the Roman republic"', '/page "a three-page site on my thesis chapters"'),
-        handler="silica.commands.notes:page", shlex=True, demo_off=True,
+        handler="silica.commands.notes:page", demo_off=True,
     ),
     Command(
         name="/memorize",

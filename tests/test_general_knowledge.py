@@ -50,12 +50,18 @@ class TestBlock:
 
     def test_the_notes_say_the_label_and_warn_only_when_due(self):
         label = {"kind": "general", "text": gk.LABEL}
-        assert gk.general_notes("no block here", looked=False, command=False) == []
-        assert gk.general_notes(ANSWER, looked=True, command=False) == [label]
-        assert gk.general_notes(ANSWER, looked=False, command=False) == [
-            label, {"kind": "general", "text": gk.UNSEARCHED}]
-        assert gk.general_notes(ANSWER, looked=True, command=True) == [
+        assert gk.general_notes("no block here", command=False) == []
+        assert gk.general_notes(ANSWER, command=False) == [label]
+        assert gk.general_notes(ANSWER, command=True) == [
             label, {"kind": "general", "text": gk.IN_COMMAND}]
+
+    def test_a_block_is_held_back_in_place_and_the_rest_stays(self):
+        held = gk.held_back(ANSWER)
+        assert not gk.has_general(held) and "1648" not in held
+        assert held.startswith("Your notes say nothing") and held.rstrip().endswith("for sources.")
+        assert gk.HELD_BACK in held
+        assert gk.held_back("no block here") == "no block here"
+        assert gk.held_back(f"{GENERAL_HEAD}\n> only the block") == gk.HELD_BACK
 
     def test_a_search_or_a_read_counts_as_looking_and_a_write_does_not(self):
         import silica.cli  # noqa: F401  registers every tool
@@ -121,10 +127,41 @@ def test_a_searched_turn_is_labelled_and_its_block_years_are_not_flagged(client,
     assert {"kind": "general", "text": gk.LABEL} in SESSION.chat.messages[-1][turn_notes.KEY]
 
 
-def test_a_block_with_no_search_before_it_is_warned_under_the_answer(client, monkeypatch):
+def test_a_block_with_no_search_before_it_is_held_back_and_never_stored(client, monkeypatch):
+    """The owner's rule is general knowledge only after the vault was searched:
+    a block the model wrote before any search is not the answer, on screen, in
+    the stored chat or in the history the next turn reads."""
+    from silica.ui.web.session import SESSION
+
     monkeypatch.setattr("silica.session.turn.run_agent", _turn(ANSWER))
     done = _sse(client.post("/chat", json={"text": "what was the peace of westphalia?"}))[-1]
-    assert {"kind": "general", "text": gk.UNSEARCHED} in done["notes"]
+    stored = SESSION.chat.messages[-1]["content"]
+    for shown in (done["answer"], done["html"], stored):
+        assert "1648" not in shown and "general knowledge was held back" in shown
+    assert gk.HELD_BACK in stored
+    assert "Ask again with /web" in done["answer"]
+    assert not any(n["kind"] == "general" for n in done.get("notes", []))
+
+
+def test_the_copy_button_copies_what_the_server_drew_not_what_streamed():
+    """A held-back block streams before the server takes it out: the drawn answer
+    was the held-back line while copy still gave the block (2026-11-13, a stream
+    replayed through runTurn and a real click). Both branches that swap in the
+    server's render must take its text too."""
+    import re
+
+    from silica.ui.web.server import STATIC_DIR
+
+    js = (STATIC_DIR / "app-chat.js").read_text(encoding="utf-8")
+    swaps = re.findall(r"\} else if \((?:segments === 1 && curText|tail && ev\.html)[^{]*\{\n(.*?)(?=\n      \})", js, re.S)
+    assert len(swaps) == 2 and all("curText.raw = ev.answer" in s for s in swaps)
+
+
+def test_the_terminal_holds_the_block_back_too():
+    from silica import cli
+    from silica.session import turn as session_turn
+
+    assert cli._AFTER[0] is session_turn.hold_unsearched_general
 
 
 def test_the_block_draws_as_its_own_callout(tmp_vault):

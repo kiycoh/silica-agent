@@ -3374,7 +3374,7 @@ $("#note-close").addEventListener("click", () => closeNote()); // not as the han
 // (Escape is handled once, at the bottom of this file, in priority order.)
 // Graph node clicks (in the iframe) post a message up when embedded.
 window.addEventListener("message", (e) => {
-  if (!e.data) return;
+  if (e.origin !== location.origin || !e.data) return; // a page in the drawer posts from "null" (ADR-0171)
   // A graph node or a map card opens its note, with the facts the frame drew
   // it from (ADR-0075). A ghost node arrives with no path at all, and the
   // pane is the only surface that can say anything about an unresolved link.

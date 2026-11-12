@@ -185,7 +185,7 @@ def _offer_next(t: _ChatTurn) -> None:
     session_turn.offer_next(t, [c.name.lstrip("/") for c in COMMANDS])
 
 
-_AFTER = (session_turn.check_numbers, session_turn.attribute, _figures, session_turn.plan_under_answer,
+_AFTER = (session_turn.hold_unsearched_general, session_turn.check_numbers, session_turn.attribute, _figures, session_turn.plan_under_answer,
           _offer_next, session_turn.note, session_turn.stamp_reads, session_turn.beat,
           session_turn.recount)
 
