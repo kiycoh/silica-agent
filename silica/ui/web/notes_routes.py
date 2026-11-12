@@ -219,6 +219,24 @@ def raw_file(path: str = "", download: bool = False):
     headers, whose `sandbox` keeps a navigated file off the GUI's origin;
     checked 2026-11-03, Chrome 156 and Firefox 158 still draw a PDF under
     them, in an iframe and at #page=N."""
+    found = _raw_path(path)
+    attach = download or found.suffix.lower() not in render.RAW_OPENS
+    return FileResponse(found, headers=render.ASSET_HEADERS, filename=found.name,
+                        content_disposition_type="attachment" if attach else "inline")
+
+
+@router.get("/raw/cover")
+def raw_cover(path: str = ""):
+    """The cover of the raw a note names (ADR-0163), for its byline and the
+    PDF's header: reached through the note as /raw is, so on the server too."""
+    from silica.ui.web.library_routes import cover_response
+
+    return cover_response(_raw_path(path))
+
+
+def _raw_path(path: str) -> Path:
+    """The file the note `path` names as its raw, or 404: /raw's one rule,
+    which its cover keeps."""
     from silica.driver import get_driver
     from silica.driver.base import NoteRef
 
@@ -232,9 +250,7 @@ def raw_file(path: str = "", download: bool = False):
     _value, found = _raw_found(canon, split_shown(text)[0])
     if found is None:
         raise HTTPException(404)
-    attach = download or found.suffix.lower() not in render.RAW_OPENS
-    return FileResponse(found, headers=render.ASSET_HEADERS, filename=found.name,
-                        content_disposition_type="attachment" if attach else "inline")
+    return found
 
 
 @router.post("/note/save")

@@ -242,6 +242,10 @@ function markEdge(n, r, ux, uy) {
 // only the reference as the first citing paper wrote it.
 function paperTip(n) {
   if (n.type === "paper") return n.paper && n.paper.title ? "<i>" + escHtml(n.paper.title) + "</i>" : "";
+  // A book or a PDF shows its cover (ADR-0163), the page's own /file/cover, which
+  // draws it on the first hover; one it has none of is taken out (the listener below).
+  if (n.type === "file" && n.cover)
+    return '<img class="g3d-cover" alt="" src="/file/cover?path=' + encodeURIComponent(n.path) + '">';
   // A rim paper names its collections here: an arc too short for its name
   // leaves this as the only place they are said (ADR-0066 decision 3).
   if (n.type === "outside") {
@@ -851,6 +855,12 @@ function layoutRoom(free, left, right) {
 }
 
 // frame-pure:end
+
+// A file node's cover (paperTip) that fails is taken out, so the tip keeps its
+// name and no broken box; `error` does not bubble, so it is caught on the way down.
+document.addEventListener("error", (e) => {
+  if (e.target instanceof HTMLImageElement && e.target.classList.contains("g3d-cover")) e.target.remove();
+}, true);
 
 function applyFocus(ids) { computeFocus(ids); refreshPaint(); arrangeFocus(); }
 
@@ -4309,8 +4319,9 @@ function buildGraph() {
       .nodeRelSize(NODE_REL_SIZE)
       // 2D names every note on the canvas and hovers nothing, except a paper
       // or a missing paper: its canvas name is the short form ("Xu 2025"),
-      // and the title or the reference has nowhere else to go.
-      .nodeLabel(n => SQUARE[n.type] || NATIVE[n.type]
+      // and the title or the reference has nowhere else to go. A book's cover
+      // has nowhere else either.
+      .nodeLabel(n => SQUARE[n.type] || NATIVE[n.type] || n.cover
         ? '<div class="g3d-tip"><b>' + escHtml(n.label) + '</b>' + paperTip(n) + '</div>' : "")
       .nodeCanvasObject(drawNode)
       .nodePointerAreaPaint(paintNodeArea)

@@ -1640,6 +1640,27 @@ body.sidebar-collapsed #sidebar {
   color: var(--ash-dim);
 }
 
+/* A book's or a PDF's cover over the glyph (ADR-0163), in the glyph's column
+   so every name starts on one line; one that fails is taken out and leaves
+   the glyph (app-notes.js). The top of the page, where a title sits. */
+.tree-cover {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 17px;
+}
+
+.tree-cover img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+
 .tree-file > span {
   min-width: 0;
   overflow: hidden;

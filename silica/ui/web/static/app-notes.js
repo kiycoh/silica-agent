@@ -1341,16 +1341,45 @@ function fileSays(f, name) {
   return says.unread;
 }
 
+// A source's cover (ADR-0163): a PDF's first page or a book's own picture, in
+// a box of fixed size, so a strip over the editor keeps its height whether the
+// picture comes, fails or was never asked for; without one the box is the
+// title set as type. `src` is "" for a file no picture is drawn of.
+const COVER_FILE = extRe(VOCAB.formats.covers);
+function coverEl(src, name, big) {
+  const box = mkEl("span", big ? "src-cover big" : "src-cover");
+  box.setAttribute("aria-hidden", "true"); // the strip names the file beside it
+  const tile = () => box.replaceChildren(mkEl("span", "src-cover-t", name.replace(/\.[^.]+$/, "")));
+  if (!src) { tile(); return box; }
+  const img = mkEl("img", "");
+  Object.assign(img, { alt: "", loading: "lazy", decoding: "async", src });
+  img.addEventListener("error", tile);
+  box.append(img);
+  return box;
+}
+
+// A rail row's cover comes in the server's HTML (rail.py), and a failed <img>
+// draws a broken box even with alt="": caught on the way down, since `error`
+// does not bubble, and removed, so the row keeps its glyph.
+document.addEventListener("error", (e) => {
+  if (e.target instanceof HTMLImageElement && e.target.parentElement?.classList.contains("tree-cover")) e.target.remove();
+}, true);
+
 // A PDF in the browser's viewer and a picture as itself, both from /file
-// under /asset's sandbox; anything else is the strip and its Download.
+// under /asset's sandbox; anything else is the strip and its Download, under
+// the file's cover drawn large, since nothing else stands for it there.
 function syncFileView() {
   const f = drawerFile, name = f.path.split("/").pop();
+  const pdf = /\.pdf$/i.test(name), pic = FILE_PICTURE.test(name);
   const head = $("#raw-head");
   head.className = "note-paper raw-strip";
   head.replaceChildren();
+  const text = mkEl("span", "raw-strip-text");
+  if (!pic) head.append(coverEl(COVER_FILE.test(name) ? "/file/cover?path=" + encodeURIComponent(f.path) : "", name, !pdf));
+  head.append(text);
   const line = mkEl("span", "");
   line.append(mkEl("b", "", name), " " + fileSays(f, name));
-  head.append(line);
+  text.append(line);
   const act = f.state === "unread" ? { ocr: "OCR this", convert: "Convert this" }[f.act] : "";
   if (act) {
     const b = mkEl("button", "wk-paper-a", act);
@@ -1360,7 +1389,7 @@ function syncFileView() {
     // page is one call to the vision model, 1,795 for one Bible here.
     armThenRun(b, act, f.act === "ocr" ? "click again: every page goes to a model" : "click again to convert",
                () => fileOcr(f, b));
-    head.append(b);
+    text.append(b);
   }
   // A PDF with a text layer can be studied (ADR-0156 point 7): its chapters
   // become notes beside it, and Memorize opens a plan over them. Not indexed
@@ -1371,11 +1400,10 @@ function syncFileView() {
     study.type = "button";
     study.title = "write its chapters beside it as notes, from its own text, and plan over them in Memorize";
     study.addEventListener("click", () => fileStudy(f, study));
-    head.append(study);
+    text.append(study);
   }
-  head.append(Object.assign(document.createElement("a"),
+  text.append(Object.assign(document.createElement("a"),
     { className: "wk-paper-a", textContent: "Download", href: fileUrl(f.path, "&download=1") }));
-  const pdf = /\.pdf$/i.test(name), pic = FILE_PICTURE.test(name);
   const frame = $("#raw-frame"), img = $("#raw-img"), url = fileUrl(f.path);
   const listing = pdf && detailsOn;
   $("#raw-chapters").hidden = !listing;
@@ -1494,14 +1522,18 @@ function fillRawStrip(el, raw, path, inRaw) {
     }
     return el;
   }
-  el.append(line);
+  // A note made from a book or a PDF wears its cover, asked through the note
+  // as /raw is, so the server draws it too (ADR-0163).
+  const text = COVER_FILE.test(raw.name) ? mkEl("span", "raw-strip-text") : el;
+  if (text !== el) el.append(coverEl("/raw/cover?path=" + encodeURIComponent(path), raw.name), text);
+  text.append(line);
   if (raw.open) {
     const b = mkEl("button", "wk-paper-a", inRaw ? "Text" : "PDF");
     b.type = "button";
     b.addEventListener("click", () => setRaw(!inRaw));
-    el.append(b);
+    text.append(b);
   }
-  el.append(Object.assign(document.createElement("a"),
+  text.append(Object.assign(document.createElement("a"),
     { className: "wk-paper-a", textContent: "Download", href: rawUrl(path, "&download=1") }));
   return el;
 }

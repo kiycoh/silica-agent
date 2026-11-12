@@ -370,5 +370,9 @@ body.embedded #layout-note{top:58px;left:12px;transform:none}
                 color:var(--frost)!important;box-shadow:var(--lift)!important}
 .g3d-tip{display:flex;flex-direction:column;gap:3px;text-align:left}
 .g3d-tip b{font-weight:600;color:var(--frost)}
+/* A book's or a PDF's cover (ADR-0163), its height held so the tip does not
+   jump when it lands; the page's own white keeps a hairline on paper. */
+.g3d-tip .g3d-cover{height:120px;width:auto;max-width:180px;align-self:flex-start;
+            border:1px solid var(--line)}
 .g3d-tip i{font-style:normal;font-size:12px;color:var(--ash-dim);
             }

@@ -73,10 +73,10 @@ def _png_header(png: bytes) -> tuple[int, int, int, int]:
 # --- the PNG the child writes -------------------------------------------------
 
 def test_the_png_encoder_writes_a_png_a_decoder_reads():
-    from silica.sources.pdf_extract import png_gray
+    from silica.sources.pdf_extract import png as encode
 
     rows = b"\x00\x00\x80\xff" + b"\x00\x10\x20\x30"  # two rows of three pixels
-    png = png_gray(rows, 3, 2)
+    png = encode(rows, 3, 2)
 
     assert _png_header(png) == (3, 2, 8, 0)  # 8-bit grayscale
     chunks, at = {}, 8

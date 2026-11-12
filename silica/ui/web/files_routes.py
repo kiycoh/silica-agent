@@ -276,8 +276,8 @@ def vault_export_added():
 
 @router.post("/vault/fetch")
 async def vault_fetch(payload: dict):
-    """The vault's + "a link…" (ADR-0120): one web page, or locally a
-    YouTube video's captions, into the Inbox as a note, with no agent turn:
+    """The vault's + "a link…" (ADR-0120): one web page, a Reddit thread or a
+    GitHub page (ADR-0162), or locally a YouTube video's captions, into the Inbox as a note, with no agent turn:
     `/fetch` from the GUI. One row in `/vault/import`'s shape, so the page
     shows it as it shows a file.
 
@@ -286,7 +286,7 @@ async def vault_fetch(payload: dict):
     server the unit's IPAddressDeny holds the private ranges and link-local
     under it."""
     from silica.config import hosted
-    from silica.sources.web_fetch import YT_DOMAINS, YoutubeBlocked, host_matches, youtube_cookies
+    from silica.sources.web_fetch import YT_DOMAINS, SiteRefused, YoutubeBlocked, host_matches, youtube_cookies
     from silica.sources.web_research import fetch_to_inbox
 
     url = str(payload.get("url") or "").strip()
@@ -306,6 +306,10 @@ async def vault_fetch(payload: dict):
             row.update(status="refused", reason=drop.YOUTUBE_ON_SERVER if hosted() else
                        "YouTube asked to sign in: set SILICA_YOUTUBE_COOKIES to an account's cookies "
                        "file, or download the audio and add that")
+        except SiteRefused as exc:
+            # Reddit's wall or GitHub's limit, in words written for the person
+            # (ADR-0162), where the sentence below would say only "could not".
+            row.update(status="refused", reason=exc.said)
         except Exception as exc:
             # Not only ValueError: httpx raises its own on a refused connection or
             # a timeout, and either is this link refused, not a 500. The reason

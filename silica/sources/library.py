@@ -23,6 +23,7 @@ from silica.kernel.base.formats import DOC_EXTS, IMG_EXTS, file_act
 from silica.kernel.recall import engine as recall_engine
 from silica.kernel.recall.listing import vault_files_under
 from silica.sources import pdf_extract
+from silica.sources.covers import COVER_EXTS
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +377,9 @@ def file_layer(first_group: int) -> dict:
         g = group[area[rel]]
         nodes.append({"id": f"file:{rel}", "type": "file", "path": rel, "label": Path(rel).stem,
                       "group": g, "color": colour(g, states[rel] == "read"), "state": states[rel],
-                      "act": file_act(rel) if states[rel] == "unread" else "", "pages": pages, "size": round(12 + 6 * math.log2(1 + pages / 40), 1)})
+                      "act": file_act(rel) if states[rel] == "unread" else "", "pages": pages, "size": round(12 + 6 * math.log2(1 + pages / 40), 1),
+                      # the frame's hover asks /file/cover only for what may have one (ADR-0163)
+                      "cover": Path(rel).suffix.lower() in COVER_EXTS})
     for label, members in by_edition.items():
         photos = sorted(p for s in members for p in sets[s])
         counts: dict[str, int] = {}
