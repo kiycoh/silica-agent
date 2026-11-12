@@ -35,6 +35,76 @@ function linkSource(cx) {
   };
 }
 
+// --- a formula or a molecule by its name, offline (ADR-0159) -------------------
+// A word typed in math, in `\ce{`, or in a ```smiles fence offers the entries of
+// one static vocabulary (science-vocab.json, about 200 entries in English and
+// Italian), read at the first ask; picking one writes LaTeX, the `\ce` formula
+// or the SMILES in the word's place. No model, and nothing leaves the page.
+let sciVocab = null;
+const loadVocab = () => (sciVocab ||= fetch("/static/science-vocab.json").then((r) => r.json())
+  .catch(() => { sciVocab = null; return { molecules: [], formulas: [] }; })); // asked again at the next word
+const fold = (t) => t.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+// What the caret is in: "smiles", "ce", "math" or null. Read from the line as well as
+// the tree, since `$wat` is no InlineMath node until it closes.
+function sciContext(state, pos) {
+  const line = state.doc.lineAt(pos), before = line.text.slice(0, pos - line.from);
+  for (let n = window.CM.syntaxTree(state).resolveInner(pos, -1); n; n = n.parent) {
+    if (n.name === "FencedCode") {
+      const head = state.doc.lineAt(n.from);
+      return head.number < line.number && /^\s*(`{3,}|~{3,})\s*smiles\s*$/i.test(head.text) ? "smiles" : null;
+    }
+    if (n.name === "InlineCode" || n.name === "CodeBlock") return null;
+    if (n.name === "MathBlock" || n.name === "InlineMath") return /\\ce\s*\{[^{}]*$/.test(before) ? "ce" : "math";
+  }
+  // An opening `$` as dollarmath reads one: not escaped, not after a word, and not
+  // before a space or a digit, so the `$5` of a price is never a formula.
+  if (!/(?:^|[^\\$\w])\$(?![\s\d$])[^$]*$/.test(before)) return null;
+  return /\\ce\s*\{[^{}]*$/.test(before) ? "ce" : "math";
+}
+// The entries whose names hold `q`: the name starting with it first, then a word of it.
+function vocabHits(pool, q) {
+  const hits = [];
+  for (const e of pool) {
+    let best = 0, label = e.en[0];
+    for (const name of [...e.en, ...e.it]) {
+      const f = fold(name);
+      const s = !q ? 1 : f.startsWith(q) ? 3 : f.split(/[\s'-]+/).some((w) => w.startsWith(q)) ? 2 : f.includes(q) ? 1 : 0;
+      if (s > best) { best = s; label = name; }
+    }
+    if (best) hits.push([best, label, e]);
+  }
+  // no word yet (a button's list): the file's order, formulas before molecules in math
+  return q ? hits.sort((x, y) => y[0] - x[0] || x[1].localeCompare(y[1])) : hits;
+}
+async function scienceSource(cx) {
+  const kind = sciContext(cx.state, cx.pos);
+  if (!kind) return null;
+  const word = cx.matchBefore(/[\p{L}][\p{L}\p{N}' -]*$/u);
+  if (!cx.explicit && (!word || word.text.trim().length < 3)) return null; // `$x$` is a variable, not a name
+  const v = await loadVocab();
+  const pool = kind === "math" ? [...v.formulas, ...v.molecules] : v.molecules;
+  // `$a + acqua`: the longest run of words before the caret that names something,
+  // so "acido solforico" is one name and the `a` of `a acqua` is left alone.
+  let from = cx.pos, hits = word ? [] : vocabHits(pool, "");
+  if (word) {
+    for (const m of word.text.matchAll(/\S+/g)) {
+      const q = fold(word.text.slice(m.index).trim());
+      if (q.length < (cx.explicit ? 1 : 3)) break;
+      hits = vocabHits(pool, q);
+      if (hits.length) { from = word.from + m.index; break; }
+    }
+  }
+  if (!hits.length) return null;
+  const insertOf = (e) => (kind === "smiles" ? e.smiles : kind === "ce" ? e.ce : e.tex ?? `\\ce{${e.ce}}`);
+  return {
+    from, filter: false,
+    options: hits.slice(0, 40).map(([, label, e]) => {
+      const detail = e.ce || e.tex;
+      return { label, detail: detail.length > 36 ? detail.slice(0, 35) + "…" : detail, apply: insertOf(e) };
+    }),
+  };
+}
+
 // --- an unresolved link under the caret is a door (ADR-0155 point 9) ----------
 const linkTarget = (t) => t.split("|")[0].split("#")[0].trim();
 function ghostAt(state, s) {
@@ -289,7 +359,7 @@ function noteExtensions(s) {
   s.extensions = [
     // on the body: the view and the drawer clip what hangs out of them
     tooltips({ parent: document.body }),
-    autocompletion({ override: [linkSource], icons: false }),
+    autocompletion({ override: [linkSource, scienceSource], icons: false }),
     search({ top: true, createPanel: findPanel }),
     ghostField(s),
     imageDrop(s),
@@ -681,6 +751,20 @@ const FORMAT = {
   table: (v) => insertBlock(v, "| Column | Column |\n| --- | --- |\n|  |  |", 2),
   callout: (v) => insertBlock(v, "> [!note] Title\n> ", 18),
   math: (v) => insertBlock(v, "$$\n\n$$", 3),
+  // By name (ADR-0159): the formula or the molecule's place, then the list to pick it from.
+  // A formula alone on its line is a display block: `$$` at a line's start opens one, so an
+  // inline `$|$` there would turn every line below it into math until the next key.
+  formula: (v) => {
+    const st = v.state, r = st.selection.main, line = st.doc.lineAt(r.head);
+    if (!st.sliceDoc(line.from, r.head).trim()) insertBlock(v, "$$\n\n$$", 3);
+    else {
+      const pre = /\w/.test(st.sliceDoc(r.head - 1, r.head)) ? " " : ""; // `x$` closes math, it opens none
+      v.dispatch({ changes: { from: r.head, insert: pre + "$$" }, selection: { anchor: r.head + pre.length + 1 } });
+      v.focus();
+    }
+    window.CM.startCompletion(v);
+  },
+  molecule: (v) => { insertBlock(v, "```smiles\n\n```", 10); window.CM.startCompletion(v); },
   diagram: (v) => insertBlock(v, "```mermaid\nflowchart LR\n  A --> B\n```", 11),
   footnote: (v) => {
     const st = v.state, n = (st.doc.toString().match(/\[\^\d+\]:/g) || []).length + 1, at = st.selection.main.head;
