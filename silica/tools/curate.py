@@ -184,9 +184,10 @@ def silica_curate(
         with_cooccurrence=True,  # autolink candidates
     )
     plan = compose_curation_plan(report)
-    if not apply and not kinds and not targets:
+    if not apply and not kinds and not targets and not folder:
         # A whole dry run's plan waits in the review queue (ADR-0165), where a
-        # listing reads it instead of recomputing the report.
+        # listing reads it instead of recomputing the report. A narrowed one
+        # would replace the vault's lists with a part of them.
         from silica.config import CONFIG
         from silica.tools.review.curate import offer_plan
 

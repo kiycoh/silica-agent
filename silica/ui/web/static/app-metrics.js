@@ -1259,7 +1259,12 @@ const rvBtn = (label, go, fn) => {
 };
 
 function reviewSend(box, path, body, done) {
-  postJson(path, body).then(answerOf).then((r) => { if (done) done(r); })
+  postJson(path, body).then(answerOf).then((r) => {
+    if (done) done(r);
+    // A yes or a revert rewrote notes outside the editor: the note open in the
+    // drawer, and the Changes record, take the disk's bytes, as after an /undo.
+    loadChanges();
+  })
     .catch((e) => notify(e.message))
     .finally(() => loadReview(box));
 }

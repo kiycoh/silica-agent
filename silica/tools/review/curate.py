@@ -42,6 +42,13 @@ def _changed(before: str, after: str) -> str:
     return "\n".join(b.strip()[:200] for a, b in zip(before.splitlines(), after.splitlines()) if a != b)
 
 
+def _md(path: str) -> str:
+    """A vault path as the drawer and the writer take it. The report mixes two
+    keyspaces: the graph's carries `.md`, the embedding store's does not, and a
+    path without it was written as a file without it."""
+    return path if path.endswith(".md") else path + ".md"
+
+
 def offer_plan(vault: str, plan: CurationPlan) -> None:
     """The dry run's plan as proposals of the three kinds, in place of the last."""
     from silica.driver import DRIVER
@@ -52,7 +59,7 @@ def offer_plan(vault: str, plan: CurationPlan) -> None:
     titles = build_title_index(DRIVER.list_files()) if plan.by_kind("autolink") else []
     links = []
     for it in plan.by_kind("autolink"):
-        for src, dst in ((it.target, it.partner), (it.partner, it.target)):
+        for src, dst in ((_md(it.target), _md(it.partner)), (_md(it.partner), _md(it.target))):
             if (pair := _link(src, dst, titles)) is not None:
                 links.append(Proposal(
                     id=proposal_id("autolink", src, dst), kind="autolink",
@@ -61,13 +68,13 @@ def offer_plan(vault: str, plan: CurationPlan) -> None:
                 break
     offer(vault, "autolink", links)
     offer(vault, "orphan", [Proposal(
-        id=proposal_id("orphan", it.target), kind="orphan",
+        id=proposal_id("orphan", _md(it.target)), kind="orphan",
         title=f"Connect {clean_name(it.target)}", why="nothing links to it",
-        notes=(it.target,), data={"target": it.target}) for it in plan.by_kind("orphan")])
+        notes=(_md(it.target),), data={"target": it.target}) for it in plan.by_kind("orphan")])
     offer(vault, "duplicate", [Proposal(
-        id=proposal_id("duplicate", *sorted((it.target, it.partner))), kind="duplicate",
+        id=proposal_id("duplicate", *sorted((_md(it.target), _md(it.partner)))), kind="duplicate",
         title=f"{clean_name(it.target)} and {clean_name(it.partner)}", why=it.reason,
-        notes=(it.target, it.partner),
+        notes=(_md(it.target), _md(it.partner)),
         data={"target": it.target, "partner": it.partner, "score": it.score, "reason": it.reason})
         for it in plan.by_kind("dedup")])
 
@@ -92,10 +99,24 @@ def _apply_links(vault: str, props: list[Proposal]) -> dict[str, str | None]:
     return out
 
 
-# What the worker's verdict means to the person who said yes.
-_VERDICT = {"no_merge": "judged distinct: nothing merged",
-            "no_link": "the worker found no link worth writing",
-            "no_change": "the worker changed nothing"}
+# What the worker's verdict means to the person who said yes
+# (capabilities.orphan and .dedup return these).
+_VERDICT = {"no_link": "the worker found no link worth writing",
+            "no_candidates": "no note to link it from",
+            "skipped": "the worker skipped it"}
+
+
+def _landed(r: dict) -> str | None:
+    """None when the worker wrote, else what it decided. A duplicate family is
+    `partial` when its members' verdicts differ: one merge written is a yes
+    that landed. A contradiction is filed as a contested patch, `committed`."""
+    status = str(r.get("status") or "")
+    if status == "committed" or (status == "partial" and any(
+            x.get("status") == "committed" for x in r.get("results") or [])):
+        return None
+    if status == "no_merge":
+        return f"judged {r.get('verdict') or 'distinct'}: nothing merged"
+    return _VERDICT.get(status, f"not written ({status or 'no answer'})")
 
 
 def _apply_judged(vault: str, props: list[Proposal]) -> dict[str, str | None]:
@@ -110,10 +131,9 @@ def _apply_judged(vault: str, props: list[Proposal]) -> dict[str, str | None]:
     # A duplicate family is judged as one item under its merge target, which
     # may be either note of a pair: a result belongs to every pair that has it.
     for r in (res.get("batch") or {}).get("results") or []:
-        status = str(r.get("status") or "")
         for p in props:
-            if r.get("target") in p.notes:
-                out[p.id] = None if status == "committed" else _VERDICT.get(status, f"not written ({status})")
+            if _md(str(r.get("target") or "")) in p.notes:
+                out[p.id] = _landed(r)
     return out
 
 

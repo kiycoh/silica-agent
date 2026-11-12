@@ -17,11 +17,13 @@ def _said(out) -> str:
 
 @pytest.fixture
 def kinds(monkeypatch):
-    """The real kinds, on a registry this test owns."""
-    monkeypatch.setattr(queue, "KINDS", {})
+    """The real kinds, on a registry this test owns. Loaded first, so the
+    process's own registry is whole whatever test runs next."""
     import importlib
 
     import silica.tools.review as pkg
+    pkg.load()
+    monkeypatch.setattr(queue, "KINDS", {})
     for name in ("aliases", "curate", "deferred", "organize", "stale"):
         importlib.reload(importlib.import_module(f"silica.tools.review.{name}"))
     return pkg.load()
@@ -224,6 +226,95 @@ def test_the_command_lists_by_kind_and_refuses_a_yes_in_the_demo(tmp_vault, kind
     monkeypatch.setattr("silica.config.demo", lambda: True)
     out = dispatch("/review apply all", [])
     assert out.error and "demo" in out.error
+
+
+def test_a_judged_yes_lands_only_where_the_worker_wrote(tmp_vault, kinds, monkeypatch):
+    """orphan and duplicate go through /curate --apply's path; its per-item
+    statuses (capabilities.orphan, .dedup) decide what left the queue."""
+    from silica.config import CONFIG
+    from silica.kernel.write import gate
+
+    seen = []
+
+    def plan_apply(plan, vault_path=None, **_kw):
+        seen.append((gate.current_run(), [i.kind for i in plan.items]))
+        return {"batch": {"results": [
+            {"target": "O.md", "status": "no_link"},
+            {"target": "A.md", "status": "partial",
+             "results": [{"status": "no_merge"}, {"status": "committed"}]},
+            {"target": "C.md", "status": "no_merge", "verdict": "duplicate"},
+        ]}}
+
+    monkeypatch.setattr("silica.tools.curate.apply_curation_plan", plan_apply)
+    orphan = Proposal(id="o" * 10, kind="orphan", title="O", why="w", notes=("O.md",), data={"target": "O.md"})
+    dup = [Proposal(id=c * 10, kind="duplicate", title=c, why="w", notes=(f"{c.upper()}.md", "Z.md"),
+                    data={"target": f"{c.upper()}.md", "partner": "Z.md", "score": 0.9, "reason": "90% similar"})
+           for c in "ac"]
+    vault = CONFIG.vault_path
+    queue.offer(vault, "orphan", [orphan])
+    queue.offer(vault, "duplicate", dup)
+    res = queue.accept(vault, [orphan, *dup])
+    assert [p.id for p in res["applied"]] == ["a" * 10]
+    assert dict((p.id, why) for p, why in res["failed"]) == {
+        "o" * 10: "the worker found no link worth writing", "c" * 10: "judged duplicate: nothing merged"}
+    # One call per kind, both inside the one run of the batch.
+    assert [k for _run, k in seen] == [["orphan"], ["dedup", "dedup"]]
+    assert seen[0][0] and seen[0][0] == seen[1][0]
+
+
+def test_a_worker_batch_joins_the_run_it_is_inside(monkeypatch):
+    from silica.agent import subagent
+    from silica.kernel.workqueue import OrphanJob, WorkItem
+    from silica.kernel.write import gate
+
+    joined = []
+
+    class Ctx:
+        def spawn(self, fn):
+            return lambda *a, **k: None
+
+    monkeypatch.setattr(subagent.RunContext, "of_run", classmethod(lambda cls, undo=None, **k: joined.append(undo) or Ctx()))
+    item = WorkItem(kind="orphan", target_path="A.md", context=OrphanJob(candidates=[]), reason="r")
+    with gate.in_run(undo="batch-run"):
+        subagent.run_subagent_batch([item], max_workers=1)
+    assert joined == ["batch-run"]
+
+
+def test_a_stale_note_is_badged_to_head_and_leaves_the_queue(tmp_path, kinds, monkeypatch):
+    import subprocess
+
+    from silica.config import CONFIG
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "t@t.t")
+    git("config", "user.name", "t")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/m.py").write_text("def f():\n    return 1\n")
+    git("add", "src/m.py")
+    git("commit", "-q", "-m", "c1")
+    ref0 = git("rev-parse", "HEAD")
+    vault = tmp_path / "docs"
+    vault.mkdir()
+    (vault / "m.md").write_text(f"---\ndocuments:\n  - src/m.py\ncode_ref: {ref0}\n---\n\nbody\n")
+    (tmp_path / "src/m.py").write_text("def f(x):\n    return 1\n")
+    git("commit", "-q", "-am", "c2")
+    head = git("rev-parse", "HEAD")
+    monkeypatch.setattr(CONFIG, "vault_path", str(vault))
+    import silica.driver
+    silica.driver._driver = None
+
+    (p,) = queue.listing(str(vault))
+    assert p.kind == "stale" and "src/m.py" in p.why
+    assert queue.pick(str(vault), ["all"]) == []          # a person names it
+    res = queue.accept(str(vault), queue.pick(str(vault), ["stale"]))
+    assert res["run"] and f"code_ref: {head}" in (vault / "m.md").read_text()
+    assert queue.listing(str(vault)) == []
+    queue.revert(str(vault), res["run"])
+    assert f"code_ref: {ref0}" in (vault / "m.md").read_text()
+    silica.driver._driver = None
 
 
 def test_the_panel_lists_lands_a_yes_and_sends_a_model_yes_to_the_chat(tmp_vault, kinds):
