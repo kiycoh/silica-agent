@@ -1,0 +1,566 @@
+{
+ "arms": {
+  "D_O/native": {
+   "ndcg10_macro": 0.5429,
+   "ndcg10_micro": 0.5384,
+   "recall10": 0.5978,
+   "hit5": 0.8053,
+   "per_set": {
+    "hr": 0.5484,
+    "computer_science": 0.7217,
+    "finance_en": 0.5781,
+    "finance_fr": 0.3913,
+    "pharmaceuticals": 0.6175,
+    "energy": 0.5931,
+    "physics": 0.4567,
+    "industrial": 0.4366
+   }
+  },
+  "D_O/italian": {
+   "ndcg10_macro": 0.5074,
+   "ndcg10_micro": 0.5036,
+   "recall10": 0.5642,
+   "hit5": 0.7768,
+   "per_set": {
+    "hr": 0.4984,
+    "computer_science": 0.6877,
+    "finance_en": 0.5222,
+    "finance_fr": 0.3704,
+    "pharmaceuticals": 0.5965,
+    "energy": 0.5765,
+    "physics": 0.4521,
+    "industrial": 0.3555
+   }
+  },
+  "D_P/native": {
+   "ndcg10_macro": 0.5314,
+   "ndcg10_micro": 0.5257,
+   "recall10": 0.5818,
+   "hit5": 0.7916,
+   "per_set": {
+    "hr": 0.5509,
+    "computer_science": 0.7128,
+    "finance_en": 0.5751,
+    "finance_fr": 0.3646,
+    "pharmaceuticals": 0.5724,
+    "energy": 0.5829,
+    "physics": 0.4454,
+    "industrial": 0.4469
+   }
+  },
+  "D_P/italian": {
+   "ndcg10_macro": 0.5004,
+   "ndcg10_micro": 0.4954,
+   "recall10": 0.5536,
+   "hit5": 0.7623,
+   "per_set": {
+    "hr": 0.5018,
+    "computer_science": 0.6872,
+    "finance_en": 0.536,
+    "finance_fr": 0.3411,
+    "pharmaceuticals": 0.5608,
+    "energy": 0.5698,
+    "physics": 0.4387,
+    "industrial": 0.368
+   }
+  },
+  "H_O/native": {
+   "ndcg10_macro": 0.5672,
+   "ndcg10_micro": 0.563,
+   "recall10": 0.6253,
+   "hit5": 0.8276,
+   "per_set": {
+    "hr": 0.5835,
+    "computer_science": 0.7242,
+    "finance_en": 0.5924,
+    "finance_fr": 0.4382,
+    "pharmaceuticals": 0.6227,
+    "energy": 0.626,
+    "physics": 0.4595,
+    "industrial": 0.4913
+   }
+  },
+  "H_O/italian": {
+   "ndcg10_macro": 0.399,
+   "ndcg10_micro": 0.394,
+   "recall10": 0.4847,
+   "hit5": 0.6428,
+   "per_set": {
+    "hr": 0.3368,
+    "computer_science": 0.5926,
+    "finance_en": 0.4287,
+    "finance_fr": 0.2575,
+    "pharmaceuticals": 0.4888,
+    "energy": 0.4537,
+    "physics": 0.3425,
+    "industrial": 0.2916
+   }
+  },
+  "H_P/native": {
+   "ndcg10_macro": 0.516,
+   "ndcg10_micro": 0.511,
+   "recall10": 0.5654,
+   "hit5": 0.7652,
+   "hit8_chat": 0.7263,
+   "per_set": {
+    "hr": 0.5593,
+    "computer_science": 0.6758,
+    "finance_en": 0.4672,
+    "finance_fr": 0.3175,
+    "pharmaceuticals": 0.5809,
+    "energy": 0.599,
+    "physics": 0.4348,
+    "industrial": 0.4935
+   }
+  },
+  "H_P/italian": {
+   "ndcg10_macro": 0.3681,
+   "ndcg10_micro": 0.362,
+   "recall10": 0.4363,
+   "hit5": 0.5837,
+   "hit8_chat": 0.5763,
+   "per_set": {
+    "hr": 0.3285,
+    "computer_science": 0.5611,
+    "finance_en": 0.3277,
+    "finance_fr": 0.1862,
+    "pharmaceuticals": 0.4426,
+    "energy": 0.4319,
+    "physics": 0.3642,
+    "industrial": 0.3027
+   }
+  },
+  "L_O/native": {
+   "ndcg10_macro": 0.4916,
+   "ndcg10_micro": 0.4876,
+   "recall10": 0.5448,
+   "hit5": 0.7482,
+   "per_set": {
+    "hr": 0.501,
+    "computer_science": 0.6276,
+    "finance_en": 0.4893,
+    "finance_fr": 0.355,
+    "pharmaceuticals": 0.5499,
+    "energy": 0.5611,
+    "physics": 0.3842,
+    "industrial": 0.4649
+   }
+  },
+  "L_O/italian": {
+   "ndcg10_macro": 0.1879,
+   "ndcg10_micro": 0.1853,
+   "recall10": 0.2318,
+   "hit5": 0.3067,
+   "per_set": {
+    "hr": 0.1153,
+    "computer_science": 0.3313,
+    "finance_en": 0.2067,
+    "finance_fr": 0.1062,
+    "pharmaceuticals": 0.3095,
+    "energy": 0.1939,
+    "physics": 0.1111,
+    "industrial": 0.1292
+   }
+  },
+  "L_P/native": {
+   "ndcg10_macro": 0.4304,
+   "ndcg10_micro": 0.4263,
+   "recall10": 0.4787,
+   "hit5": 0.6767,
+   "hit8_chat": 0.6478,
+   "per_set": {
+    "hr": 0.4455,
+    "computer_science": 0.5597,
+    "finance_en": 0.3159,
+    "finance_fr": 0.2618,
+    "pharmaceuticals": 0.5109,
+    "energy": 0.5162,
+    "physics": 0.3718,
+    "industrial": 0.4615
+   }
+  },
+  "L_P/italian": {
+   "ndcg10_macro": 0.1725,
+   "ndcg10_micro": 0.1694,
+   "recall10": 0.2093,
+   "hit5": 0.2803,
+   "hit8_chat": 0.2658,
+   "per_set": {
+    "hr": 0.1037,
+    "computer_science": 0.3176,
+    "finance_en": 0.1611,
+    "finance_fr": 0.0962,
+    "pharmaceuticals": 0.282,
+    "energy": 0.1758,
+    "physics": 0.1125,
+    "industrial": 0.131
+   }
+  }
+ },
+ "comparisons": {
+  "H_P vs L_P (native)": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": 0.0846,
+    "ci95": [
+     0.0766,
+     0.0925
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.7652,
+    "acc_b": 0.6767,
+    "delta": 0.0885,
+    "delta_ci95": [
+     0.0736,
+     0.1033
+    ],
+    "discordant": {
+     "a_only": 282,
+     "b_only": 68
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "H_O vs L_O (native)": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": 0.0753,
+    "ci95": [
+     0.0676,
+     0.0831
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.8276,
+    "acc_b": 0.7482,
+    "delta": 0.0794,
+    "delta_ci95": [
+     0.0653,
+     0.0938
+    ],
+    "discordant": {
+     "a_only": 259,
+     "b_only": 67
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "H_P vs H_O (native)": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": -0.052,
+    "ci95": [
+     -0.0605,
+     -0.0438
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.7652,
+    "acc_b": 0.8276,
+    "delta": -0.0624,
+    "delta_ci95": [
+     -0.0761,
+     -0.0488
+    ],
+    "discordant": {
+     "a_only": 70,
+     "b_only": 221
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "H_P vs D_P (native)": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": -0.0148,
+    "ci95": [
+     -0.0239,
+     -0.0057
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.7652,
+    "acc_b": 0.7916,
+    "delta": -0.0265,
+    "delta_ci95": [
+     -0.0413,
+     -0.0112
+    ],
+    "discordant": {
+     "a_only": 141,
+     "b_only": 205
+    },
+    "mcnemar_p": 0.0007,
+    "significant_05": true
+   }
+  },
+  "H_P vs L_P (italian)": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": 0.1927,
+    "ci95": [
+     0.1825,
+     0.2028
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.5837,
+    "acc_b": 0.2803,
+    "delta": 0.3034,
+    "delta_ci95": [
+     0.2844,
+     0.322
+    ],
+    "discordant": {
+     "a_only": 756,
+     "b_only": 22
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "H_O vs L_O (italian)": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": 0.2087,
+    "ci95": [
+     0.1984,
+     0.2192
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.6428,
+    "acc_b": 0.3067,
+    "delta": 0.3361,
+    "delta_ci95": [
+     0.3167,
+     0.3555
+    ],
+    "discordant": {
+     "a_only": 838,
+     "b_only": 25
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "H_P vs H_O (italian)": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": -0.0319,
+    "ci95": [
+     -0.04,
+     -0.0242
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.5837,
+    "acc_b": 0.6428,
+    "delta": -0.0591,
+    "delta_ci95": [
+     -0.0748,
+     -0.0426
+    ],
+    "discordant": {
+     "a_only": 130,
+     "b_only": 273
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "H_P vs D_P (italian)": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": -0.1334,
+    "ci95": [
+     -0.1447,
+     -0.1219
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.5837,
+    "acc_b": 0.7623,
+    "delta": -0.1786,
+    "delta_ci95": [
+     -0.1976,
+     -0.1596
+    ],
+    "discordant": {
+     "a_only": 89,
+     "b_only": 521
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "D_O: native vs italian": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": 0.0348,
+    "ci95": [
+     0.0294,
+     0.0404
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.8053,
+    "acc_b": 0.7768,
+    "delta": 0.0285,
+    "delta_ci95": [
+     0.0186,
+     0.0389
+    ],
+    "discordant": {
+     "a_only": 113,
+     "b_only": 44
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "D_P: native vs italian": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": 0.0303,
+    "ci95": [
+     0.0248,
+     0.0361
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.7916,
+    "acc_b": 0.7623,
+    "delta": 0.0294,
+    "delta_ci95": [
+     0.019,
+     0.0401
+    ],
+    "discordant": {
+     "a_only": 118,
+     "b_only": 47
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "H_O: native vs italian": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": 0.169,
+    "ci95": [
+     0.1578,
+     0.1803
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.8276,
+    "acc_b": 0.6428,
+    "delta": 0.1848,
+    "delta_ci95": [
+     0.1662,
+     0.2034
+    ],
+    "discordant": {
+     "a_only": 533,
+     "b_only": 86
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "H_P: native vs italian": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": 0.1489,
+    "ci95": [
+     0.1375,
+     0.1607
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.7652,
+    "acc_b": 0.5837,
+    "delta": 0.1815,
+    "delta_ci95": [
+     0.1621,
+     0.2013
+    ],
+    "discordant": {
+     "a_only": 536,
+     "b_only": 97
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "L_O: native vs italian": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": 0.3024,
+    "ci95": [
+     0.2886,
+     0.3161
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.7482,
+    "acc_b": 0.3067,
+    "delta": 0.4415,
+    "delta_ci95": [
+     0.42,
+     0.4626
+    ],
+    "discordant": {
+     "a_only": 1120,
+     "b_only": 52
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  },
+  "L_P: native vs italian": {
+   "ndcg10": {
+    "n": 2419,
+    "delta": 0.257,
+    "ci95": [
+     0.2434,
+     0.2701
+    ]
+   },
+   "hit5": {
+    "n_paired": 2419,
+    "acc_a": 0.6767,
+    "acc_b": 0.2803,
+    "delta": 0.3964,
+    "delta_ci95": [
+     0.3754,
+     0.4175
+    ],
+    "discordant": {
+     "a_only": 1002,
+     "b_only": 43
+    },
+    "mcnemar_p": 0.0,
+    "significant_05": true
+   }
+  }
+ }
+}

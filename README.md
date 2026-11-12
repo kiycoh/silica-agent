@@ -151,8 +151,48 @@ Every number comes from a committed result file in [`evals/`](https://github.com
 | FActScore, facts in a written note its source supports | **0.961** to **0.999** across three write paths (5,855 facts) |
 | Write integrity on a real 796-note Obsidian vault | **796 of 796** notes left with no new structural violation |
 | MuSiQue multi-hop retrieval, 11,654-note vault | **61.3%** recall@10, **0.83** MRR |
+| ViDoRe V3 page retrieval, 8 public sets: 189 PDFs, 19,252 pages, 2,419 human-judged questions | NDCG@10 **0.516** asked in the documents' language, **0.368** asked in Italian; the page vectors alone **0.531** and **0.500** |
 
-Small samples, a flash-class judge, 2 of LoCoMo's 10 conversations: not comparable to vendor numbers, but re-runnable on your machine. The unflattering rows ship too: `/organize` agrees with a human's folders 32% of the time.
+Small samples, a flash-class judge, 2 of LoCoMo's 10 conversations: not comparable to vendor numbers, but re-runnable on your machine. ViDoRe V3 is the exception, scored as its paper scores it: on the same 8 sets and in the documents' language, the paper's text retrievers range from 0.458 to 0.549 and its best page-image model reaches 0.627. The unflattering rows ship too: `/organize` agrees with a human's folders 32% of the time, and on ViDoRe V3 the word index pulls Italian questions 13 points of NDCG@10, on average, under what the page vectors find alone, because the fusion does not yet step aside when a question's words are not in the documents.
+
+## How it compares
+
+Checked on 2026-11-08 against each product's own docs and release notes, and for Khoj and Reor their code. The columns are what people ask for most in these products' GitHub issues and in r/ObsidianMD and r/notebooklm, plus the two Silica is built on: checking a write and taking it back.
+
+✅ yes · 🟡 partly, see the notes below · ❌ no: the vendor says so, or the code has none · ❔ not documented · ➖ does not apply
+
+**What it is and where it runs**
+
+| | Licence | Price | Local models | Your folder, in place | PDF, DOCX, EPUB, PPTX | Phone | MCP |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Silica** 0.31.1 | AGPL-3.0 or commercial | Free | ✅ | ✅ | ✅ | 🟡 | ✅ |
+| **Obsidian Copilot** 4.0.18 | AGPL-3.0, closed hosted backend | Free; Plus $139.99/yr | ✅ | ✅ | 🟡 | 🟡 | ❔ |
+| **Smart Connections** 4.7.2 | Source-available, not open source | Free; Pro $30/mo | 🟡 | ✅ | 🟡 | ✅ | 🟡 |
+| **Khoj** 2.0.0-beta.28 | AGPL-3.0 | Free | ✅ | 🟡 | 🟡 | ✅ | 🟡 |
+| **NotebookLM** | Proprietary | Free; paid from $4.99/mo | ❌ | ❌ | ✅ | ✅ | 🟡 |
+| **Reor** 0.2.32, archived | AGPL-3.0 | Free | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+**How it answers and how it writes**
+
+| | Answers only from your sources | A citation opens the passage | Ask only some sources | Edits your notes | Asks before an edit | Checks each write | Undo after it lands | Study with spaced repetition |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Silica** | ✅ | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ | ✅ |
+| **Obsidian Copilot** | ❔ | 🟡 | 🟡 | ✅ | ✅ | ❔ | 🟡 | ❔ |
+| **Smart Connections** | ➖ | ➖ | ➖ | 🟡 | 🟡 | ❔ | ❌ | ❔ |
+| **Khoj** | 🟡 | 🟡 | 🟡 | 🟡 | ✅ | 🟡 | ❌ | ❌ |
+| **NotebookLM** | 🟡 | ✅ | ✅ | ❌ | ➖ | ➖ | ➖ | 🟡 |
+| **Reor** | ❌ | ❌ | ❔ | ✅ | 🟡 | ❌ | ❌ | ❌ |
+
+Notes, by product:
+
+- **Silica.** Phone: the web app at phone width, no native app. MCP: a client through `/connect`; the server is [silica-core](https://github.com/kiycoh/silica-core), a separate package. Asks before an edit: a write in the chat lands first, then a card to keep or revert it; it asks first only when its check is unsure, and bulk commands write only with `--apply`. Undo: per note, per run, or everything one source document produced. The hosted version is an invite-only pilot.
+- **Obsidian Copilot.** PDF and EPUB are read through Miyo, a separate app, which semantic search also needs; Office files are read by the agent's own tools, not converted. Phone: chat and commands on Obsidian mobile; the agent is desktop only. A PDF citation opens the page; a note is only linked. A project's context guides the agent but does not confine it. Asks first in Safe mode; Auto mode skips most prompts. Undo: one turn on one note, until the note is edited again.
+- **Smart Connections.** Local embeddings; local chat models only in the paid Smart Chat Pro. Notes only; PDFs and images through paid plugins. MCP: a server in the paid Connect Pro. The plugin has no chat: Smart Chat is a separate plugin. Edits only through the paid Connect Pro, whose proposal tools wait for review while its other write tools change notes directly. No undo: the vendor says to keep backups.
+- **Khoj.** Self-host only since its cloud closed on 2026-04-15; Ollama and llama.cpp, not LM Studio. Your files are synced into Khoj's own database. PDF and DOCX, no EPUB or PPTX. MCP: a client, in research mode only. A `/notes` mode keeps answers to your notes, but with no matching note it answers anyway. A citation opens the note at its heading, in Obsidian. One file per filter. Edits in Obsidian only, previewed in the note before Apply; every edit target must be found or none applies, and nothing undoes it after Apply.
+- **NotebookLM.** Renamed Gemini Notebook on 2026-07-16. Free up to 50 sources a notebook; sources are uploaded copies, and it never edits your files. MCP: a server in preview, to create notebooks and add sources only. Questions on the sources are refused when the sources do not hold the answer; the agentic chat can work without them. Flashcards and quizzes, with no review schedule documented.
+- **Reor.** Archived on GitHub; last commit 2025-05-13. Asks before a write tool runs, with no diff. A citation opens the note, not the passage. Flashcards were removed after 0.2.26.
+
+Where Silica is behind: no native phone app, no audio or video overviews, and a write in the chat lands before you see it, not after you approve it. Corrections are welcome.
 
 ## Use it from
 
