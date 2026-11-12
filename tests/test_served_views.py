@@ -135,6 +135,9 @@ SHARED_ROUTES = {
     # ADR-0158 point 8: a deep research starts from the chat's + and offers its /nucleate there
     "/research", "/research/plan", "/research/start", "/research/{job_id}/dismiss",
     "/research/{job_id}/nucleate", "/research/{job_id}/stop",
+    # ADR-0158 point 3: a long document written from the vault, beside the deep research
+    "/document", "/document/count", "/document/start", "/document/{job_id}/write",
+    "/document/{job_id}/replan", "/document/{job_id}/stop", "/document/{job_id}/dismiss",
     "/memory", "/memory/reset", "/memory/undo", "/memory/{scope}", "/messages", "/narration",
     "/narration/sse", "/note", "/note/asset", "/note/check", "/note/check/keep", "/note/history",
     "/note/history/diff", "/note/history/restore", "/note/let-go", "/note/new", "/note/raw",

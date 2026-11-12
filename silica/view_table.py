@@ -71,6 +71,9 @@ DEMO_OFF: dict[str, tuple[str, ...]] = {
         # a deep research (ADR-0158 point 8) fetches the open web and runs a
         # loop a sub-question, none of it through the door's count
         "/research",
+        # a long document (ADR-0158 point 3) runs a call a part of every note
+        # chosen and one a section, none of it through the door's count
+        "/document",
         # ADR-0142's two downloads: the owner has not decided (2026-10-31)
         "/vault/export",
     ),
