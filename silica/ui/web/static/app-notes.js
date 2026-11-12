@@ -3185,8 +3185,8 @@ document.addEventListener("click", (e) => {
   // `.wc-open` is the path on a write card, where the only thing worth reading
   // is what actually changed rather than what was claimed — so it opens the
   // diff, which falls back to the note when the session holds no baseline.
-  const changed = e.target.closest(".wc-open");
   // A page's change is read as the page (ADR-0171): its diff is HTML source.
+  const changed = e.target.closest(".wc-open");
   if (changed) { e.preventDefault(); isPage(changed.dataset.path) ? openFile(changed.dataset.path) : openDiff(changed.dataset.path); return; }
   // A numbered citation in an answer opens at the line it stands on (openCite,
   // app-chat.js); every other link opens the note at its top.
