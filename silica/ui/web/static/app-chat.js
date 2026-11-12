@@ -1173,6 +1173,9 @@ function setCtxTokens(m) {
 
 // Who answers in this session, filled by loadConfig (app-boot.js).
 let chatModels = null;
+// No model can answer yet (ADR-0172 point 1), as GET /config says; the setup
+// card (app-boot.js) shows while it holds.
+let setupNeeded = false;
 function renderCtxPanel() {
   const panel = $("#ctx-panel");
   const { used, max, parts, compactAt } = ctxMeter;
@@ -2398,6 +2401,9 @@ function autoGrow(el) {
 $("#composer").addEventListener("submit", (e) => {
   e.preventDefault();
   const t = input.value;
+  // A question with no model to answer it would fail: the card says what to do,
+  // and what was typed stays in the box. A /command still runs, as /report does.
+  if (setupNeeded && !t.trim().startsWith("/")) { pointToSetup(); return; }
   // Files ride the turn they were attached to and cannot wait in a text
   // queue, so an attach during a turn keeps the box as it is.
   if (streaming && staged.length) return;
@@ -2701,6 +2707,7 @@ $("#dock-composer").addEventListener("submit", (e) => {
   e.preventDefault();
   const t = dockInput.value;
   if (!t.trim()) return;
+  if (setupNeeded && !t.trim().startsWith("/")) { showTab("chat"); pointToSetup(); return; }
   dockInput.value = "";
   autoGrow(dockInput);
   if (streaming) { queueMessage(t); return; } // the same queue as the chat composer (P20)

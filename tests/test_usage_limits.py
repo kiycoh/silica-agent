@@ -329,7 +329,7 @@ def test_a_403_with_nothing_spent_and_a_bad_key_keep_the_credentials_sentence(fa
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
     out = explain(_Forbidden("403 Forbidden"))
-    assert out["error"].startswith("The provider rejected the credentials") and "limit" not in out
+    assert out["error"].startswith("The provider did not accept the API key") and "limit" not in out
     fake.body = key_record(week_spend=0.6)
     reads = fake.reads
     # A website's 403 under /fetch is not a spent allowance, and reads nothing.
@@ -337,7 +337,7 @@ def test_a_403_with_nothing_spent_and_a_bad_key_keep_the_credentials_sentence(fa
     assert "limit" not in out and fake.reads == reads
     fake.body = key_record(month_spend=1.5)
     out = explain(_Unauthorized("401 Unauthorized: User not found"))
-    assert out["error"].startswith("The provider rejected the credentials") and "limit" not in out
+    assert out["error"].startswith("The provider did not accept the API key") and "limit" not in out
     assert fake.reads == reads, "a bad key's 401 read the key"
 
 

@@ -33,12 +33,21 @@ _CLASSES: list[tuple[re.Pattern[str], str]] = [
     # endpoint failure (ADR-0092).
     (re.compile(r"not deleted: \d+ notes? links? to"),
      "Not deleted: other notes link to this note. Deleting it is yours to do, from its card or with /delete."),
+    # No model at all (ADR-0172 point 2): litellm's words for an empty model id,
+    # and the live probe's skip. The chat shows its setup card while this holds.
+    (re.compile(r"LLM Provider NOT provided|no model configured", re.I),
+     "No model is set up yet. Open the chat to choose one."),
+    # Before the credentials and the context rows: OpenRouter's 402 names
+    # "max_tokens" ("more credits, or fewer max_tokens"), which read as an
+    # overflowing conversation.
+    (re.compile(r"\b402\b|insufficient (credits|balance|funds)|more credits", re.I),
+     "The provider says this account has no credit left. Add credit on its site, then try again."),
     (re.compile(r"\b(401|403|unauthorized|forbidden|api[_ -]?key)\b", re.I),
-     "The provider rejected the credentials. Check the API key for this endpoint in settings."),
+     "The provider did not accept the API key. Check the key in Settings."),
     (re.compile(r"\b(429|rate limit)\b", re.I),
      "The provider is rate-limiting. Wait a moment and try again."),
     (re.compile(r"\b(50[0-9]|timeout|timed out|connection|ECONNREFUSED|unreachable)\b", re.I),
-     "The model endpoint didn't answer. Try again, or check the endpoint in settings."),
+     "The model didn't answer. Try again in a moment, or check the model in Settings."),
     (re.compile(r"lint failed", re.I),
      "The write was rolled back: the note would have broken a vault rule. The vault is unchanged."),
     (re.compile(r"not found in vault|no such note", re.I),

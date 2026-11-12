@@ -64,7 +64,72 @@ def get_config():
         "provider": CONFIG.provider or "",
         "context_window": window or 0,
         "show_thinking": CONFIG.show_thinking,
+        "setup": setup_needed(),
     }
+
+
+# --- the first run without a terminal (ADR-0172 point 1) ----------------------
+# The chat's setup card writes through POST /settings, the panel's own writer, so
+# the card and `silica init` land the same keys in the same file; these two only
+# say what this computer offers and send the one test request.
+
+
+def setup_needed() -> bool:
+    """Whether the chat shows its setup card: no model, or a hosted provider's
+    model with no key, which is check_chat_model's own fail. A model that is set
+    and does not answer is a failed turn with its own sentence, not this card.
+    Never on the server, whose model is the host's, nor where Settings is refused
+    (a demo), since the card writes through Settings."""
+    from silica.config import hosted, withheld
+    from silica.onboarding.checks import check_chat_model
+
+    if hosted() or "/settings" in withheld("routes"):
+        return False
+    return check_chat_model(CONFIG).status == "fail"
+
+
+def _no_setup_here() -> None:
+    from silica.config import hosted
+
+    if hosted():
+        # The tenant's front door refuses /settings/* already; this keeps the
+        # server from probing its own loopback ports for a tenant's page.
+        raise HTTPException(status_code=404, detail="not on this server")
+
+
+@router.get("/settings/setup")
+def setup_options():
+    """What the card offers: the online provider's key row, and LM Studio and
+    Ollama each probed for the chat models it serves. Asked when the card opens
+    and on its "Check again", never on a page load that shows no card."""
+    from silica.model.limits import base_url
+    from silica.onboarding.serve import chat_model_ids, endpoint_model_ids, ready
+    from silica.provider_table import PROVIDERS
+
+    _no_setup_here()
+    local = []
+    for name in ("lmstudio", "ollama"):
+        url = base_url(name)
+        up = ready(url)
+        local.append({"runtime": name, "label": PROVIDERS[name].label, "up": up,
+                      "models": chat_model_ids(endpoint_model_ids(url)) if up else []})
+    return {"needed": setup_needed(), "provider": CONFIG.provider or "", "model": CONFIG.model or "",
+            "key_env": PROVIDERS["openrouter"].key_env, "local": local}
+
+
+@router.post("/settings/setup/test")
+async def setup_test():
+    """The card's Test: `silica doctor --live`'s own probe, one tiny request to the
+    model just chosen, sent only when the person presses it. Its failure reads as
+    the chat's would (failures.py), the probe's own text kept as the detail."""
+    from silica.onboarding.checks import live_probe
+    from silica.ui.web.failures import explain
+
+    _no_setup_here()
+    result = await asyncio.to_thread(live_probe, CONFIG)
+    if result.status == "ok":
+        return {"ok": True, "model": CONFIG.model}
+    return {"ok": False, **explain(result.detail)}
 
 
 # --- settings panel ----------------------------------------------------------

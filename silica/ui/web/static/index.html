@@ -313,6 +313,40 @@
            is the one way back down that does not cost them their place. -->
       <div class="jump-lane"><button type="button" id="jump-latest" hidden>&#8595; new text below</button></div>
 
+      <!-- The first run without a terminal (ADR-0172 point 1): over the box while
+           no model can answer, which GET /config says. A question typed meanwhile
+           brings the person here instead of failing; a /command still runs, since
+           /report and search need no model. Filled and driven by app-boot.js. -->
+      <section id="setup-card" aria-labelledby="setup-h" hidden>
+        <h2 id="setup-h">Choose a model to start asking</h2>
+        <p class="setup-lead">A model writes Silica's answers from your notes. Search, Explore and your notes work without one.</p>
+        <div class="setup-opts">
+          <form class="setup-opt" id="setup-online">
+            <h3>Use an online model</h3>
+            <p>An API key is a password that lets Silica use a model online, billed to you by the provider for what you use. <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">Get an OpenRouter key</a></p>
+            <div class="setup-row">
+              <input id="setup-key" type="password" placeholder="Paste your OpenRouter key" aria-label="your OpenRouter key" autocomplete="off" spellcheck="false" />
+              <button type="submit" class="st-btn primary">Use this key</button>
+            </div>
+          </form>
+          <div class="setup-opt" id="setup-local">
+            <h3>Use a model on this computer</h3>
+            <p>Free and private: the model runs here, in LM Studio or Ollama.</p>
+            <div id="setup-runtimes"></div>
+            <button type="button" id="setup-again" class="linklike">Check again</button>
+          </div>
+        </div>
+        <div id="setup-done" hidden>
+          <p id="setup-model"></p>
+          <div class="setup-row">
+            <button type="button" id="setup-test" class="st-btn">Test</button>
+            <button type="button" id="setup-go" class="st-btn primary">Start asking</button>
+            <button type="button" id="setup-other" class="linklike">Choose another</button>
+          </div>
+        </div>
+        <p id="setup-said" role="status" aria-live="polite" hidden></p>
+      </section>
+
       <form id="composer">
         <div class="composer-shell">
           <div class="commands" id="commands" hidden></div>

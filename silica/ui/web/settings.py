@@ -431,7 +431,7 @@ def provider_group(provider: str) -> dict[str, str]:
     model is left alone and the user picks it in the row below.
     """
     from silica.model.limits import base_url as fixed_url
-    from silica.onboarding.serve import endpoint_model_ids
+    from silica.onboarding.serve import chat_model_ids, endpoint_model_ids
 
     updates = {"SILICA_PROVIDER": provider}
     base_url = fixed_url(provider)
@@ -439,7 +439,7 @@ def provider_group(provider: str) -> dict[str, str]:
     if hosted:
         updates["SILICA_MODEL"] = hosted[1][0]
     elif base_url:
-        found = endpoint_model_ids(base_url)
+        found = chat_model_ids(endpoint_model_ids(base_url))
         if found:
             updates["SILICA_MODEL"] = found[0]
     if base_url:

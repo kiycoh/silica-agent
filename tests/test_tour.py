@@ -86,6 +86,6 @@ def test_its_listeners_exist_before_the_first_lists_are_asked_for():
 
 def test_the_page_announces_what_the_tour_waits_on():
     page = app_js() + (WEB / "work.js").read_text(encoding="utf-8")
-    for event in ("silica:vault-info", "silica:sessions", "silica:turn-end", "silica:view", "silica:job", "silica:learn-view"):
+    for event in ("silica:vault-info", "silica:sessions", "silica:config", "silica:turn-end", "silica:view", "silica:job", "silica:learn-view"):
         assert f'new CustomEvent("{event}"' in page, event
         assert f'"{event}"' in TOUR, event

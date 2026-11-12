@@ -522,12 +522,20 @@ $("#tour-start").addEventListener("click", (e) => {
 });
 
 // --- the first visit ---------------------------------------------------------
-// Both lists the condition reads arrive once at start (app-settings.js), in
-// either order; the tour decides when it has seen the two.
+// A vault with no notes and no chats, on a browser the tour has not been turned
+// off in. Held while the setup card stands over the box (ADR-0172 point 1): the
+// tour's first steps ask a model, and its dim covered the card. The card's
+// Start asking calls this again.
+function tourFirstVisit() {
+  if (!tour && tourSaved() !== "off" && !tourFirstNote() && sessionCount === 0 && !setupNeeded) tourStart();
+}
+
+// The three answers the condition reads arrive once at start (app-settings.js),
+// in any order; the tour decides when it has seen them all.
 {
   let seen = 0;
   const boot = () => {
-    if (++seen !== 2) return;
+    if (++seen !== 3) return;
     const saved = tourSaved();
     if (saved?.run === "more" && TOUR_RUNS.more[saved.i]) {
       // the chapter's start, where Next waits for the data its later steps read
@@ -536,10 +544,9 @@ $("#tour-start").addEventListener("click", (e) => {
     } else if (saved && saved.step && TOUR_STEPS[saved.step]) {
       tour = saved;
       tourGo(TOUR_RESUME[saved.step] || saved.step);
-    } else if (saved !== "off" && !tourFirstNote() && sessionCount === 0) {
-      tourStart();
-    }
+    } else tourFirstVisit();
   };
   document.addEventListener("silica:vault-info", boot, { once: true });
   document.addEventListener("silica:sessions", boot, { once: true });
+  document.addEventListener("silica:config", boot, { once: true });
 }
