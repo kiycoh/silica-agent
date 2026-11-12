@@ -74,6 +74,7 @@ def nucleate(c: Call) -> Result:
     return out.to_model(ingest.nucleate(
         w.files, target_dir=w.target, hub=w.hub, seen=w.seen, profile=w.profile,
         keep_sources=w.keep_sources, user_input=c.raw, console=out, ask=c.ask and c.ask.text,
+        anyway=ingest.ANYWAY in w.flags,
     ))
 
 

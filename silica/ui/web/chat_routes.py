@@ -401,6 +401,26 @@ async def narration_sse(request: Request, from_seq: int = 0):
             pass   # loop closed: the client is gone, and GET /jobs answers its next page
 
     BUS.subscribe(jobs.TOPIC, on_job)
+    # A deep research's parts too (ADR-0158 point 8), for its row in the same tray.
+    from silica.sources import deep_research
+
+    def on_research(rec: dict) -> None:
+        try:
+            loop.call_soon_threadsafe(q.put_nowait, ("research", rec))
+        except RuntimeError:
+            pass   # loop closed: the client is gone, and GET /research answers its next page
+
+    BUS.subscribe(deep_research.TOPIC, on_research)
+    # A long document's stages too (ADR-0158 point 3), for its row in the same tray.
+    from silica.sources import long_document
+
+    def on_document(rec: dict) -> None:
+        try:
+            loop.call_soon_threadsafe(q.put_nowait, ("document", rec))
+        except RuntimeError:
+            pass   # loop closed: the client is gone, and GET /document answers its next page
+
+    BUS.subscribe(long_document.TOPIC, on_document)
     # The page vectors' build too, for the rail's line (ADR-0156, amended 2026-11-08).
     from silica.ui.web import vectors
 
@@ -444,6 +464,8 @@ async def narration_sse(request: Request, from_seq: int = 0):
         finally:
             BUS.unsubscribe(_narr.BEAT_TOPIC, on_beat)
             BUS.unsubscribe(jobs.TOPIC, on_job)
+            BUS.unsubscribe(deep_research.TOPIC, on_research)
+            BUS.unsubscribe(long_document.TOPIC, on_document)
             BUS.unsubscribe(vectors.TOPIC, on_vectors)
 
     return StreamingResponse(gen(), media_type="text/event-stream",

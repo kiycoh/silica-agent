@@ -508,14 +508,17 @@
 
   // A footnote reference draws as the reader's does, a superscript number in
   // first-reference order, and a press goes to its definition, as the
-  // reader's `#fn` anchor scrolls there.
+  // reader's `#fn` anchor scrolls there. Hovering it shows the definition: a
+  // claim's footnote holds the passage it stands on (ADR-0158 points 3 and 9),
+  // which is the whole reason to look, and the definition sits at the end.
   class FootnoteRef extends WidgetType {
-    constructor(n, def) { super(); this.n = n; this.def = def; }
-    eq(o) { return o.n === this.n && o.def === this.def; }
+    constructor(n, def, text) { super(); this.n = n; this.def = def; this.text = text; }
+    eq(o) { return o.n === this.n && o.def === this.def && o.text === this.text; }
     toDOM(view) {
       const s = document.createElement("sup");
       s.className = "footnote-ref";
       s.textContent = String(this.n);
+      if (this.text) s.title = this.text;
       s.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
         e.preventDefault();
@@ -1063,7 +1066,10 @@
       const key = label(from, to);
       if (!defAt.has(key)) continue;
       if (!num.has(key)) num.set(key, num.size + 1);
-      if (live) add(Decoration.replace({ widget: new FootnoteRef(num.get(key), defAt.get(key)) }), from, to);
+      // The definition's line, less its label, wikilink brackets read as names.
+      const said = doc.lineAt(defAt.get(key)).text.replace(/^\[\^[^\]]+\]:\s*/, "")
+        .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, t, alias) => alias || t.split("/").pop());
+      if (live) add(Decoration.replace({ widget: new FootnoteRef(num.get(key), defAt.get(key), said) }), from, to);
       else add(MARK.FootnoteRef, from, to);
     }
     for (const [from, to, live] of defs) {

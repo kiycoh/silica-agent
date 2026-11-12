@@ -192,7 +192,7 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/nucleate",
         group="workflow",
-        usage="<file...> [--target=DIR] [--hub=H] [--profile=P] [--seen=YYYY-MM-DD] [--no-keep-sources]",
+        usage="<file...> [--target=DIR] [--hub=H] [--profile=P] [--seen=YYYY-MM-DD] [--no-keep-sources] [--anyway]",
         summary="turn files into notes in your vault, one checked write per file; code "
                 "becomes outline notes",
         examples=(

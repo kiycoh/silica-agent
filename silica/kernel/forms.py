@@ -142,6 +142,37 @@ def stamped_form(text: str) -> str:
     return val if val in FORMS else ""
 
 
+# A deep research's part cites the quote each sentence stands on, [Q3], where a
+# /web-search note cites the page, [1] (ADR-0158 point 9). The ingress says so
+# under a key of its own, because the citations are not a register: they change
+# what /nucleate keeps on a line and how CLEANUP resolves it. The part's form
+# is stamped beside it (`form: study`, web_research.build_note), so no sniff
+# and no folder vote picks its lens or files it as a draft.
+CITATIONS_KEY = "citations"
+QUOTE_CITATIONS = "quotes"
+
+
+def cites_quotes(text: str) -> bool:
+    """The source's ingress stamp says its markers name banked quotes."""
+    from silica.kernel.base import frontmatter
+
+    data, _, _ = frontmatter.split(text)
+    return isinstance(data, dict) and str(data.get(CITATIONS_KEY) or "").strip().lower() == QUOTE_CITATIONS
+
+
+def stamped_shape(text: str) -> str:
+    """A deep research's shape, as its part was stamped (`shape:`, ADR-0158
+    point 10); "" for any other source or a shape this code does not know."""
+    from silica.kernel.base import frontmatter
+    from silica.kernel.base.noteshape import RESEARCH_SHAPES
+
+    data, _, _ = frontmatter.split(text)
+    if not (isinstance(data, dict) and cites_quotes(text)):
+        return ""
+    shape = str(data.get("shape") or "").strip().lower()
+    return shape if shape in RESEARCH_SHAPES else ""
+
+
 # Dispatch (draft filing) and PAYLOAD (profile pin) both resolve the same
 # file in one /nucleate run; the memo makes the second resolution free.
 _sniff_memo: dict[str, str] = {}

@@ -1495,7 +1495,7 @@ def test_plan_replaces_the_previous_plan():
 
 
 def test_reset_turn_clears_the_plan():
-    wr._PLAN = "## Stale"
+    wr._turn().plan = "## Stale"
     wr._reset_turn()
     assert wr._PLAN == ""
 

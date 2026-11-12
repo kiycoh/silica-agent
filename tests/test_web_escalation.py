@@ -150,7 +150,7 @@ def test_a_fallback_lane_is_named_under_the_sources_block(monkeypatch):
     """/web is where a challenged primary lane is felt first, so the answer the
     user reads carries the same lane line the kept note does."""
     turn = _turn_with_trace(results=[_HITS])
-    monkeypatch.setattr(wr, "_LANES", ["mojeek", "wikipedia", "wikipedia"])
+    monkeypatch.setattr(wr._turn(), "lanes", ["mojeek", "wikipedia", "wikipedia"])
 
     out = turn.attribute("Answer.", [])
 
@@ -160,7 +160,7 @@ def test_a_fallback_lane_is_named_under_the_sources_block(monkeypatch):
 
 def test_a_healthy_turn_carries_no_lane_line(monkeypatch):
     turn = _turn_with_trace(results=[_HITS])
-    monkeypatch.setattr(wr, "_LANES", ["duckduckgo", "duckduckgo"])
+    monkeypatch.setattr(wr._turn(), "lanes", ["duckduckgo", "duckduckgo"])
 
     assert "Search lanes" not in turn.attribute("Answer.", [])
 

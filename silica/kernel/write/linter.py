@@ -65,6 +65,10 @@ def check_plan_status(data: dict) -> list[str]:
     raw = (data or {}).get("status")
     if raw is None:
         return []
+    from silica.kernel.base.noteshape import is_claim_note
+
+    if is_claim_note(data):
+        return []  # an investigation's claim (ADR-0158 point 10): a claim's status, not a plan's
     from silica.kernel.plans import VALID_STATUS
     status = str(raw).strip()
     if status not in VALID_STATUS:

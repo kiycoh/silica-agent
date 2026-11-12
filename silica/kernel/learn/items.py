@@ -63,6 +63,8 @@ _REL_IN_RE = re.compile(r"^- \[\[([^\]|]+)(?:\|[^\]]*)?\]\] ([a-z][a-z ]*?) this
 # noteshape.CLAIMS_END_RE, which ends a note's claims: this also leaves out the
 # note's links and a reader's own additions, wherever they sit.
 _SKIP_SECTIONS = ("relations", "sources", "superseded", "additional notes")
+# A quote-keyed definition (ADR-0158 point 9): `[^<leaf>-Q3]: [[leaf]] "quote" <url>`.
+_QUOTE_DEF_RE = re.compile(r'^\[\^([A-Za-z0-9_-]+-Q\d+)\]:\s*\[\[[^\]]+\]\]\s*"(.*)"')
 
 
 def minutes(questions: int) -> int:
@@ -108,6 +110,12 @@ def headings_of(text: str) -> list[str]:
         if m and not fence:
             out.append(m.group(2))
     return out
+
+
+def _banked_quotes(body: str) -> dict[str, str]:
+    """{label: the banked quote} of the note's quote-keyed definitions."""
+    return {m.group(1): m.group(2) for line in body.splitlines()
+            if (m := _QUOTE_DEF_RE.match(line.strip()))}
 
 
 def _footnote_leaves(body: str) -> dict[str, str]:
@@ -223,6 +231,7 @@ def claims_of(path: str, text: str | None = None) -> list[dict]:
     text = read_note(path) if text is None else text
     _data, _raw, body = frontmatter.split(text)
     leaves = _footnote_leaves(body)
+    quotes = _banked_quotes(body)
     title = title_of(path, text)
     heading, fence, skip = title, False, False
     out: list[dict] = []
@@ -248,6 +257,12 @@ def claims_of(path: str, text: str | None = None) -> list[dict]:
             continue
         leaf = next((leaves[lb] for lb in labels if lb in leaves), "")
         ln, span = span_of(claim, leaf_text(leaf)) if leaf else (0, "")
+        if leaf and not ln:
+            # A reworded claim (a deep research's part, ADR-0158 point 9)
+            # grounds on the quote its footnote names, which the leaf holds
+            # verbatim; matched as words, it never would.
+            said = next((quotes[lb] for lb in labels if lb in quotes), "")
+            ln, span = span_of(said, leaf_text(leaf)) if said else (0, "")
         out.append({"text": claim, "heading": heading, "note_line": no,
                     "label": labels[0], "leaf": leaf, "line": ln, "span": span, "self": False})
     if not out:

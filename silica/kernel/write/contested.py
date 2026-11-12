@@ -100,6 +100,56 @@ def append_before_superseded(content: str, block: str) -> str:
     return head.rstrip() + "\n" + block.rstrip() + "\n\n" + tail
 
 
+def apply_shape_props(content: str, props: dict[str, str]) -> str:
+    """A research shape's fields onto a note a later part patches (ADR-0158
+    point 10).
+
+    A field the note lacks, or holds empty, takes the incoming value; one it
+    holds keeps it, so a second part's reading of a study's design does not
+    overwrite the first's. A claim's status is the one exception, because a
+    status has a history: of two different claim statuses the later one is
+    current, and the other is filed, with its date, who asserted it and the
+    kind of source, under `## Superseded`. Later by `status_as_of` when both
+    carry one; by arrival otherwise, the one order there is. A status that is
+    not a claim's (a plan's `todo`) is never touched, and an incoming ""
+    never replaces a status. Filing the same history twice adds nothing.
+    """
+    from silica.kernel.base.noteshape import CLAIM_STATUSES, SUPERSEDABLE
+    from silica.kernel.write.moc import merge_moc_section
+    from silica.kernel.write.templates import upsert_props
+
+    data, raw, body = frontmatter.split(content)
+    if not isinstance(data, dict) or raw is None:
+        return content
+    head = content[: len(content) - len(body)]
+    have = {k: str(data.get(k) or "") for k in props}
+    old, new = str(data.get("status") or ""), props.get("status", "")
+    updates = {k: v for k, v in props.items() if k not in data or (v and not have[k])}
+    if old in CLAIM_STATUSES and new and new != old:
+        current = {k: str(data.get(k) or "") for k in SUPERSEDABLE}
+        incoming = {k: str(props.get(k) or "") for k in SUPERSEDABLE}
+        older_incoming = bool(incoming["status_as_of"] and current["status_as_of"]
+                              and incoming["status_as_of"] < current["status_as_of"])
+        gone, kept = (incoming, current) if older_incoming else (current, incoming)
+        line = _status_line(gone, kept)
+        if line not in body:
+            body = merge_moc_section(body, SUPERSEDED_MARKER, [line])
+        if not older_incoming:
+            updates.update({k: props[k] for k in SUPERSEDABLE if k in props})
+    return upsert_props(head + body, updates) if updates else head + body
+
+
+def _status_line(gone: dict[str, str], kept: dict[str, str]) -> str:
+    """One claim status as `## Superseded` keeps it, and the one after it."""
+    def said(values: dict[str, str]) -> str:
+        when = values.get("status_as_of", "")
+        return values["status"] + (f", as of {when}" if when else "")
+
+    who, kind = gone.get("asserted_by", ""), gone.get("source_kind", "")
+    return (f"- Status: {said(gone)}" + (f", asserted by {who}" if who else "")
+            + (f" ({kind})" if kind else "") + f". Followed by: {said(kept)}.")
+
+
 def _split_at_superseded(body: str) -> tuple[str, str]:
     """(live body, superseded section incl. heading). Tail is "" when absent."""
     m = SUPERSEDED_RE.search(body)

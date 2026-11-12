@@ -1608,6 +1608,14 @@ function neighbourRows(d) {
     es.addEventListener("job", (e) => {
       try { document.dispatchEvent(new CustomEvent("silica:job", { detail: JSON.parse(e.data) })); } catch { /* one malformed frame is not the stream */ }
     });
+    // And a deep research's parts (app-research.js, ADR-0158 point 8).
+    es.addEventListener("research", (e) => {
+      try { document.dispatchEvent(new CustomEvent("silica:research", { detail: JSON.parse(e.data) })); } catch { /* one malformed frame is not the stream */ }
+    });
+    // And a long document's stages (app-document.js, ADR-0158 point 3).
+    es.addEventListener("document", (e) => {
+      try { document.dispatchEvent(new CustomEvent("silica:document", { detail: JSON.parse(e.data) })); } catch { /* one malformed frame is not the stream */ }
+    });
     // So do the page vectors' steps, for the rail's line (app-notes.js).
     es.addEventListener("vectors", (e) => {
       try { document.dispatchEvent(new CustomEvent("silica:vectors", { detail: JSON.parse(e.data) })); } catch { /* one malformed frame is not the stream */ }

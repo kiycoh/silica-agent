@@ -31,8 +31,9 @@ import json
 import logging
 import re
 from datetime import datetime
+from functools import partial
 from pathlib import Path
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any, Literal
 
 from silica.kernel.base.home import resolve_vault_path
@@ -42,6 +43,7 @@ from silica.kernel.base.noteshape import CLAIMS_END_RE
 from silica.kernel.base.syntax import (
     EMBED_TOKEN,
     INLINE_CODE_RE,
+    QUOTE_MARK_RE,
     WIKILINK_FLAT_RE,
     WIKILINK_TOKEN,
     WIKILINK_TOKEN_RE,
@@ -1053,15 +1055,45 @@ def footnote_label(source_basename: str) -> str:
     return _FOOTNOTE_LABEL_RE.sub("-", source_basename.removesuffix(".md")).strip("-")
 
 
+def _claim_lines(lines: list[str]) -> Iterator[tuple[str, bool]]:
+    """Each line of a note body, and whether a citation may go on it.
+
+    Shut: everything from `## Sources` or `## Superseded` onward, fenced code
+    (a marker inside a fence would corrupt the code it attributes), display
+    math, headings and table rows. One walk for both attributions, so a quote
+    marker and a verbatim marker keep out of the same places.
+    """
+    fenced = math = ended = False
+    for raw in lines:
+        if ended or CLAIMS_END_RE.match(raw):
+            ended = True
+            yield raw, False
+            continue
+        if raw.lstrip().startswith("```"):
+            fenced = not fenced
+            yield raw, False
+            continue
+        # An odd number of `$$` opens or closes display math; inside it the
+        # marker reaches MathJax as LaTeX and `^` superscripts the label
+        # (97 equations in one vault, 2026-09-05). A table row cannot carry it
+        # either: after the closing pipe it is an extra cell, and on the
+        # delimiter row that cell is not dashes, so the table dissolves into
+        # a paragraph.
+        if raw.count("$$") % 2:
+            math = not math
+            yield raw, False
+            continue
+        yield raw, not (fenced or math or raw.lstrip().startswith(("#", "|")))
+
+
 def attribute_lines(note: str, source: str, label: str) -> str:
     """Mark every line of *note* that is verbatim from *source* with `[^label]`.
 
     The same span test the extractive invariant uses (`nonextractive_lines`),
     read the other way round: there it names the lines that failed, here the
-    ones that passed. Left alone: the frontmatter block, headings, blank and
-    short lines, fenced code (a marker inside a fence would corrupt the code
-    it attributes), everything from `## Sources` or `## Superseded` onward, and
-    any line already carrying this label — re-running over a note is a no-op.
+    ones that passed. Left alone: the frontmatter block, the lines
+    `_claim_lines` shuts, blank and short lines, and any line already carrying
+    this label: re-running over a note is a no-op.
     """
     from silica.kernel.base import frontmatter
 
@@ -1071,33 +1103,16 @@ def attribute_lines(note: str, source: str, label: str) -> str:
     head = note[: len(note) - len(body)] if raw_fm is not None else ""
     src = _norm_extract(source)
     marker = f"[^{label}]"
-    lines = body.splitlines()
     out: list[str] = []
     marked = False
-    fenced = False
-    math = False
-    for i, raw in enumerate(lines):
-        if CLAIMS_END_RE.match(raw):
-            out.extend(lines[i:])
-            break
-        if raw.lstrip().startswith("```"):
-            fenced = not fenced
-            out.append(raw)
-            continue
-        # An odd number of `$$` opens or closes display math; inside it the
-        # marker reaches MathJax as LaTeX and `^` superscripts the label
-        # (97 equations in one vault, 2026-09-05). A table row cannot carry it
-        # either: after the closing pipe it is an extra cell, and on the
-        # delimiter row that cell is not dashes, so the table dissolves into
-        # a paragraph. A trailing bare URL autolinks whatever follows it.
-        if raw.count("$$") % 2:
-            math = not math
+    for raw, open_ in _claim_lines(body.splitlines()):
+        if not open_:
             out.append(raw)
             continue
         line = WIKILINK_FLAT_RE.sub(r"\1", _LEADING_MARKER_RE.sub("", raw))
         norm = _norm_extract(line)
-        if (fenced or math or raw.lstrip().startswith(("#", "|")) or marker in raw
-                or _TRAILING_URL_RE.search(raw) or _NOT_A_CLAIM_RE.match(raw.strip())
+        # A trailing bare URL autolinks whatever follows it.
+        if (marker in raw or _TRAILING_URL_RE.search(raw) or _NOT_A_CLAIM_RE.match(raw.strip())
                 or len(norm) < _EXTRACTIVE_MIN_CHARS or norm not in src):
             out.append(raw)
             continue
@@ -1106,6 +1121,129 @@ def attribute_lines(note: str, source: str, label: str) -> str:
     if not marked:
         return note
     return head + "\n".join(out) + ("\n" if body.endswith("\n") else "")
+
+
+# A deep research's part cites the banked quote a sentence stands on
+# (QUOTE_MARK_RE; web_research.bind_citations keeps the markers), and its leaf
+# opens on the bank those ids name (web_research.write_leaf).
+_BANK_ROW_RE = re.compile(r"^\[(Q\d+)\] (\S+)\s*$")
+_BULLET_ONLY_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)]|>)?\s*$")
+EVIDENCE_BANK = "## Evidence bank"
+
+
+def evidence_bank(leaf_body: str) -> dict[str, tuple[str, str]]:
+    """{"Q3": (url, quote)} from a leaf's evidence bank; {} when it has none.
+
+    write_leaf writes a row per quote: `[Qk] <url>`, the quote after `> ` (a
+    quote's own line breaks continue unprefixed), `why: ...`, a blank line.
+    The raw trace follows the last row with no heading of its own, so the bank
+    ends at the first line after a `why:` that does not open a row. The quote
+    comes back on one line: it is printed inside a footnote definition.
+    """
+    if EVIDENCE_BANK not in leaf_body:
+        return {}
+    bank: dict[str, tuple[str, str]] = {}
+    qid = url = ""
+    quote: list[str] = []
+    for line in leaf_body.split(EVIDENCE_BANK, 1)[1].splitlines():
+        row = _BANK_ROW_RE.match(line)
+        if row:
+            qid, url, quote = row.group(1), row.group(2), []
+        elif qid and line.startswith("why:"):
+            bank[qid] = (url, " ".join(" ".join(quote).split()))
+            qid = ""
+        elif qid:
+            quote.append(line[2:] if line.startswith("> ") else line)
+        elif line.strip():
+            break  # past the last row: the raw trace
+    return bank
+
+
+def scholarly_hits(leaf_body: str) -> dict[str, dict]:
+    """{url: {"retracted": bool, "type": str}} from the scholarly_search
+    results in a leaf's raw trace (ADR-0158 point 10: the retraction join by
+    identifier, done by code). Each result is one JSON line, as json.dumps
+    writes it; a web hit carries no `retracted` and is not one of these."""
+    hits: dict[str, dict] = {}
+    for line in leaf_body.splitlines():
+        if not line.startswith("[{"):
+            continue
+        try:
+            items = json.loads(line)
+        except ValueError:
+            continue  # a page line that only looks like JSON: not a result
+        for it in items if isinstance(items, list) else []:
+            if isinstance(it, dict) and it.get("url") and "retracted" in it:
+                hits[str(it["url"])] = {"retracted": bool(it["retracted"]), "type": str(it.get("type") or "")}
+    return hits
+
+
+def attribute_quotes(note: str, bank: dict[str, tuple[str, str]], key: str, link: str,
+                     settled: frozenset[str] = frozenset()) -> tuple[str, list[str], int]:
+    """Key every `[Qk]` on a claim line of *note* to the leaf: `[^<key>-Qk]`.
+
+    ADR-0158 point 9: `attribute_lines` marks only a line verbatim from the
+    leaf, so a reworded claim kept no source of its own. Here the marker the
+    distiller kept on the line names the quote. Two parts each have their own
+    Q1, and one note can take lines from two parts or two runs, so the key
+    carries the leaf. A marker naming no quote of `bank` is dropped, the
+    string check `bind_citations` makes before /nucleate, made again because
+    the distiller can write one.
+
+    Left alone: the frontmatter, the lines `_claim_lines` shuts, and every
+    line in `settled`, the lines the note held before this source wrote: a
+    bare `[Q1]` there is the person's own text, or another source's marker,
+    never this leaf's. Re-running is a no-op: a keyed footnote is not a bare
+    marker. Returns the note, the definitions it lacks for the keys it cites,
+    and how many markers were dropped. A definition is one line, so two in a
+    row parse as two footnotes, and opens on `link` to the leaf as every leaf
+    footnote does: Learn reads a claim's leaf off that shape
+    (learn.items._FOOTDEF_RE). The quote and its URL follow.
+    """
+    from silica.kernel.base import frontmatter
+
+    _data, raw_fm, body = frontmatter.split(note)
+    head = note[: len(note) - len(body)] if raw_fm is not None else ""
+    dropped = 0
+
+    def _key(match: re.Match, *, raw: str) -> str:
+        nonlocal dropped
+        refs: list[str] = []
+        for qid in re.split(r"\s*,\s*", match.group(1)):
+            if qid not in bank:
+                dropped += 1
+                continue
+            # shortcut: a kept marker is checked only for naming a quote the
+            # leaf banked (point 9's first check). The second, a judge that the
+            # quote supports the line, waits for that judge's audit on the 30
+            # hand-checked claims of point 12; the third, a status or date still
+            # current, waits for a shape that carries one (investigation). Both
+            # go here, per marker; reopen by 2026-12-31 if the audit has not run.
+            ref = f"[^{key}-{qid}]"
+            if ref not in refs:
+                refs.append(ref)
+        # Glued to the claim, as attribute_lines glues its marker: the space
+        # before `[Q3]` goes with it, and a dropped marker leaves no "claim ."
+        # Unless nothing but a bullet precedes it: "- [Q3] text" glued would
+        # be "-[^k-Q3] text", no longer a list item.
+        refs_text = "".join(refs)
+        lead = match.group(0)[: len(match.group(0)) - len(match.group(0).lstrip())]
+        return lead + refs_text if refs_text and _BULLET_ONLY_RE.match(raw[: match.start()]) else refs_text
+
+    lines = body.splitlines()
+    out = [QUOTE_MARK_RE.sub(partial(_key, raw=raw), raw)
+           if open_ and raw.strip() not in settled else raw
+           for raw, open_ in _claim_lines(lines)]
+    if out != lines:
+        note = head + "\n".join(out) + ("\n" if body.endswith("\n") else "")
+    # Every key a claim line cites, this run's or an earlier one's, gets its
+    # definition once: a rerun adds none, and one lost by hand comes back.
+    ref_re = re.compile(rf"\[\^{re.escape(key)}-(Q\d+)\](?!:)")
+    cited = [q for raw, open_ in _claim_lines(out) if open_ for q in ref_re.findall(raw)]
+    defs = [f'[^{key}-{qid}]: {link} "{bank[qid][1]}" <{bank[qid][0]}>'
+            for qid in dict.fromkeys(cited)
+            if qid in bank and f"[^{key}-{qid}]:" not in note]
+    return note, defs, dropped
 
 
 def content_sha256(source_path: str) -> str:

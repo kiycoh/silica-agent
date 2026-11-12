@@ -456,8 +456,11 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         from silica.kernel.write.templates import append_source
         from silica.kernel.base.layout import SOURCES_DIR
         from silica.kernel.base.manifest import in_write_dir
+        from silica.kernel.forms import cites_quotes
         from silica.kernel.write.provenance import (
             attribute_lines,
+            attribute_quotes,
+            evidence_bank,
             footnote_label,
             is_deriving_op,
             source_event_date,
@@ -471,9 +474,10 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         # The label stays the segment's, because the patch executor already
         # cited the segment's prose with it.
         try:
-            src_data, _, _ = frontmatter.split(DRIVER.read_note(source_file).content or "")
+            src_text = DRIVER.read_note(source_file).content or ""
+            src_data, _, _ = frontmatter.split(src_text)
         except Exception:
-            src_data = {}  # the leaf loses the source's stamps, not its existence
+            src_text, src_data = "", {}  # the leaf loses the source's stamps, not its existence
         if not isinstance(src_data, dict):
             src_data = {}
         owner = src_data.get("source_leaf")
@@ -571,6 +575,15 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         # every block pointed at the spine and the leaf was unreachable
         # (2026-09-04, 231 notes in one vault).
         link = f"[[{leaf_rel.removesuffix('.md')}]]"
+        # ADR-0158 point 9: a deep research's part cites quote ids, and each
+        # one is keyed to this leaf's bank. On the source's stamp, never on
+        # the bank alone: a /web-search leaf banks quotes too, and the notes
+        # its source fed are not this rewrite's to touch. The key is the
+        # leaf's whole name: two research folders can hold a part each named
+        # alike, and their Q1s are two quotes.
+        bank = evidence_bank(leaf_body) if cites_quotes(src_text) else {}
+        quote_key = footnote_label(leaf_name)
+        phantoms = 0
 
         for rel in notes:
             note_path = f"{rel}.md"  # manifest paths carry no .md
@@ -588,6 +601,15 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             already = prior.split(_SOURCES_MARKER, 1)[1] if _SOURCES_MARKER in prior else ""
             linked = link in already or f"[[{leaf_stem}]]" in already
             attributed = attribute_lines(prior, leaf_body, label)
+            quote_defs: list[str] = []
+            if bank:
+                attributed, quote_defs, dropped = attribute_quotes(
+                    attributed, bank, quote_key, link, settled=_lines_before(fsm, note_path))
+                phantoms += dropped
+                ledger = getattr(fsm, "warning_ledger", None)
+                if dropped and ledger is not None:
+                    ledger.add(note_path, "phantom_quote",
+                               f"{dropped} marker(s) named no quote banked in {leaf_rel} and were removed")
             # The patch executor defined its marker as the plain source name
             # (it cannot know a leaf will exist); now one does, so the
             # definition is this block's and points at the leaf.
@@ -602,19 +624,23 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             # `[^id]` and never a definition nothing points at.
             cited = marker in attributed.split(_SOURCES_MARKER, 1)[0]
             add_def = cited and f"{marker}:" not in attributed
-            if linked and not add_def and attributed == prior:
+            if linked and not add_def and not quote_defs and attributed == prior:
                 continue  # re-ingest no-op
             # The definition carries the link, so it is the entry: a bare copy
             # beside it listed every leaf twice in reading view. The bare link
-            # is the entry only while nothing in the note cites the leaf.
+            # is the entry only while nothing in the note cites the leaf, and a
+            # quote's definition cites it too.
             # Inside the block, not at EOF: a patch appended after the block
             # used to push the next link under whatever section came last.
-            entry = f"{marker}: {link}" if add_def else ("" if linked else link)
+            entry = f"{marker}: {link}" if add_def else ("" if linked or quote_defs else link)
             new = append_source(attributed, entry) if entry else attributed
+            for definition in quote_defs:
+                new = append_source(new, definition)
             from silica.kernel.write.preserve import Loss
 
-            # CITE: verbatim lines gain their [^label] and the patch's own
-            # definition gives way to the one that links the leaf.
+            # CITE: verbatim lines gain their [^label], quote markers become
+            # keyed footnotes or go, and the patch's own definition gives way
+            # to the one that links the leaf.
             DRIVER.overwrite(note_path, new, loss=Loss.CITE)
             fsm.run_inverses.append(
                 (note_path,
@@ -622,8 +648,45 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
                            prior_content=prior),
                  None)
             )
+        if phantoms:
+            # Declared in the run report beside the file's counts, as a claim
+            # the extractive gate dropped is: the file's entry was appended by
+            # log_nucleate_completion just before this ran.
+            summary = getattr(getattr(fsm, "run_state", None), "files_summary", None) or []
+            row = next((e for e in reversed(summary) if e.get("file") == basename), None)
+            if row is not None:
+                row["phantom_quotes"] = phantoms
     except Exception as exc:
         logger.debug("CLEANUP: source leaf skipped (non-fatal): %s", exc)
+
+
+def _lines_before(fsm: "InjectorFSM", note_path: str) -> frozenset[str]:
+    """The lines `note_path` held before this chunk wrote it, from the chunk's
+    transaction: none for a note it created, the prior body for one it patched.
+
+    Files run one after another, so an earlier part's CLEANUP has keyed its
+    own markers before this part's WRITE. A bare marker the note held before
+    this chunk is not this leaf's for that reason alone: the person's own
+    `[Q1]`, or a marker whose CLEANUP was skipped (a file with a failed
+    chunk). The first inverse per path is the one before the chunk: later
+    phases append theirs. A note this chunk's transaction does not name (an
+    earlier chunk of a keyphrase file wrote it) reads as wholly new; the
+    outline lane, the one a part takes, writes a file in one chunk.
+    """
+    from silica.kernel.write.ops import InverseOpKind
+
+    txn = getattr(getattr(fsm, "chunk", None), "txn", None)
+    key = note_path.removesuffix(".md")
+    for inv in getattr(txn, "inverses", None) or []:
+        path = inv.get("path") if isinstance(inv, dict) else getattr(inv, "path", None)
+        if (path or "").removesuffix(".md") != key:
+            continue
+        kind = inv.get("kind") if isinstance(inv, dict) else getattr(inv, "kind", None)
+        prior = inv.get("prior_content") if isinstance(inv, dict) else getattr(inv, "prior_content", None)
+        if str(getattr(kind, "value", kind)) == InverseOpKind.restore_version.value and prior:
+            return frozenset(line.strip() for line in prior.splitlines() if line.strip())
+        return frozenset()
+    return frozenset()
 
 
 def txn_touched_paths(txn) -> set[str]:

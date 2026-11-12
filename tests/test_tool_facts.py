@@ -23,7 +23,9 @@ SILICA_ROOT = Path(__file__).resolve().parent.parent / "silica"
 # The sets as they stood before they were derived (2026-11-06), each one a
 # behaviour: a fact that moves changes what a turn offers, compacts or taints.
 INGRESS = {"silica_web_answer", "silica_run_injector", "silica_read", "web_fetch", "web_search",
-           "find_in_page", "remember", "silica_session_search"}
+           "find_in_page", "remember", "silica_session_search",
+           # 2026-11-12, ADR-0158 point 10: a deep research's literature lane
+           "scholarly_search"}
 PARALLEL = {"silica_search_context", "silica_read", "silica_read_note", "silica_outline",
             "silica_files", "silica_exists", "silica_search", "silica_semantic_search",
             "silica_related", "silica_timeline", "silica_recall", "silica_concepts",

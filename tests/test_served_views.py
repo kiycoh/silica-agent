@@ -133,6 +133,12 @@ SHARED_ROUTES = {
     "/connectors/{name}/{action}", "/context", "/docs", "/docs/oauth2-redirect", "/endpoints",
     "/endpoints/start", "/file", "/file/chapters", "/file/cover", "/vectors", "/vectors/refresh", "/file/ocr", "/file/study", "/find", "/flag", "/health", "/instructions", "/jobs", "/jobs/running",
     "/jobs/{job_id}/dismiss", "/jobs/{job_id}/retry", "/jobs/{job_id}/turn", "/limits", "/mail/upload",
+    # ADR-0158 point 8: a deep research starts from the chat's + and offers its /nucleate there
+    "/research", "/research/plan", "/research/start", "/research/{job_id}/dismiss",
+    "/research/{job_id}/nucleate", "/research/{job_id}/notes", "/research/{job_id}/stop",
+    # ADR-0158 point 3: a long document written from the vault, beside the deep research
+    "/document", "/document/count", "/document/start", "/document/{job_id}/write",
+    "/document/{job_id}/replan", "/document/{job_id}/stop", "/document/{job_id}/dismiss",
     "/memory", "/memory/reset", "/memory/undo", "/memory/{scope}", "/messages", "/narration",
     "/narration/sse", "/note", "/note/asset", "/note/check", "/note/check/keep", "/note/history",
     "/note/history/diff", "/note/history/restore", "/note/let-go", "/note/link-title", "/note/new", "/note/raw", "/note/similar",
@@ -170,7 +176,7 @@ SHARED_TOOLS = {
     "silica_search", "silica_search_context", "silica_semantic_search", "silica_session_search",
     "silica_tables", "silica_timeline", "silica_unresolved",
     "silica_vault_report", "silica_vaults", "silica_web_answer", "silica_write_note", "silica_write_page",
-    "web_fetch", "web_search",
+    "web_fetch", "web_search", "scholarly_search",
 }
 SHARED_COMMANDS = {
     "/aliases", "/anneal", "/changes", "/check", "/clear", "/connect", "/contested", "/contradictions", "/convert", "/council", "/decide", "/decisions", "/outcome",
