@@ -2402,7 +2402,8 @@ $("#composer").addEventListener("submit", (e) => {
   e.preventDefault();
   const t = input.value;
   // A question with no model to answer it would fail: the card says what to do,
-  // and what was typed stays in the box. A /command still runs, as /report does.
+  // and what was typed stays in the box. A /command still runs: /decide, /undo
+  // and /status need no model, and one that does says so in its own failure.
   if (setupNeeded && !t.trim().startsWith("/")) { pointToSetup(); return; }
   // Files ride the turn they were attached to and cannot wait in a text
   // queue, so an attach during a turn keeps the box as it is.
