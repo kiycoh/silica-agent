@@ -100,6 +100,41 @@ def append_before_superseded(content: str, block: str) -> str:
     return head.rstrip() + "\n" + block.rstrip() + "\n\n" + tail
 
 
+def apply_shape_props(content: str, props: dict[str, str]) -> str:
+    """A research shape's fields onto a note a later part patches (ADR-0158
+    point 10).
+
+    A field the note lacks, or holds empty, takes the incoming value; one it
+    holds keeps it, so a second part's reading of a study's design does not
+    overwrite the first's. A claim's status is the one exception, because a
+    status has a history: a different incoming status files the old one, with
+    its date, who asserted it and the kind of source, under `## Superseded`,
+    and then replaces those four. An incoming "" never replaces a status.
+    """
+    from silica.kernel.base.noteshape import SUPERSEDABLE
+    from silica.kernel.write.moc import merge_moc_section
+    from silica.kernel.write.templates import upsert_props
+
+    data, raw, body = frontmatter.split(content)
+    if not isinstance(data, dict) or raw is None:
+        return content
+    head = content[: len(content) - len(body)]
+    have = {k: str(data.get(k) or "") for k in props}
+    old, new = str(data.get("status") or ""), props.get("status", "")
+    updates = {k: v for k, v in props.items() if k not in data or (v and not have[k])}
+    if old and new and new != old:
+        def said(status: str, values: dict) -> str:
+            when = str(values.get("status_as_of") or "")
+            return status + (f", as of {when}" if when else "")
+        who = str(data.get("asserted_by") or "")
+        kind = str(data.get("source_kind") or "")
+        line = (f"- Status: {said(old, data)}" + (f", asserted by {who}" if who else "")
+                + (f" ({kind})" if kind else "") + f". Followed by: {said(new, props)}.")
+        body = merge_moc_section(body, SUPERSEDED_MARKER, [line])
+        updates.update({k: props[k] for k in SUPERSEDABLE if k in props})
+    return upsert_props(head + body, updates) if updates else head + body
+
+
 def _split_at_superseded(body: str) -> tuple[str, str]:
     """(live body, superseded section incl. heading). Tail is "" when absent."""
     m = SUPERSEDED_RE.search(body)

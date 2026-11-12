@@ -207,3 +207,66 @@ def note_clock(content: str) -> str | None:
     data, _raw, _body = frontmatter.split(content or "")
     dates += [str(e.get("at")) for e in verified_entries(data) if e.get("at")]
     return max(dates) if dates else None
+
+
+# --- a research shape's fields (ADR-0158 point 10) ---------------------------
+#
+# A deep research's part says its shape (`shape:`, web_research.build_note) and
+# the notes /nucleate makes of it carry that shape's fields in their
+# frontmatter. The model names each value in a typed field of its reply; code
+# keeps a value only when it is one of the allowed ones, and "" otherwise, so a
+# free sentence never stands where a status should. Strings throughout, as
+# templates.upsert_props writes them: a date stays the text it was, never a
+# YAML date object, and `retracted` is "true", "false" or "" (unknown).
+
+RESEARCH_SHAPES = ("literature", "investigation", "anchored", "cluster")
+# The steps of a claim's life, from a name in the papers to a final ruling.
+CLAIM_STATUSES = ("named", "reported", "alleged", "charged", "convicted-not-final",
+                  "convicted-final", "denied", "dismissed", "acquitted", "settled")
+# None: free text, one line. A tuple: the only values kept. "date": a year, a
+# month or a day, ISO.
+SHAPE_FIELDS: dict[str, dict[str, tuple[str, ...] | str | None]] = {
+    "investigation": {"asserted_by": None, "source_kind": ("primary", "reporting"),
+                      "status": CLAIM_STATUSES, "status_as_of": "date", "about": None},
+    "literature": {"identifier": None, "version": ("preprint", "published"), "design": None,
+                   "population": None, "outcome": None, "retracted": ("true", "false")},
+}
+SHAPE_KEYS = frozenset(k for keys in SHAPE_FIELDS.values() for k in keys)
+_DATE_RE = re.compile(r"^\d{4}(?:-\d{2}(?:-\d{2})?)?$")
+_FREE_TEXT_CHARS = 200
+
+
+def shape_value(key: str, value: object) -> str:
+    """`value` as the frontmatter keeps it under `key`, or "" when it is not
+    one the key allows. Free text loses its wikilink brackets: a name in a
+    field is the source's word, and as a link it would join the note to every
+    note of that name (point 10: a co-mention never becomes a link)."""
+    kind = next((keys[key] for keys in SHAPE_FIELDS.values() if key in keys), "")
+    if isinstance(value, bool):
+        value = "true" if value else "false"
+    if not isinstance(value, (str, int, float)) or kind == "":
+        return ""
+    text = " ".join(str(value).split())
+    if isinstance(kind, tuple):
+        text = text.lower()
+        return text if text in kind else ""
+    if kind == "date":
+        return text if _DATE_RE.match(text) else ""
+    return text.replace("[[", "").replace("]]", "")[:_FREE_TEXT_CHARS].strip()
+
+
+def shape_fields(shape: str, raw: object) -> dict[str, str]:
+    """Every field `shape` names, each checked by `shape_value`; {} for a
+    shape that has none."""
+    keys = SHAPE_FIELDS.get(shape) or {}
+    got = raw if isinstance(raw, dict) else {}
+    return {k: shape_value(k, got.get(k, "")) for k in keys}
+
+
+def is_claim_note(data: dict | None) -> bool:
+    """An investigation's claim note: its `status` is a claim's, not a plan's."""
+    return isinstance(data, dict) and "asserted_by" in data
+# What a later status replaces in a claim note, its old values filed under
+# `## Superseded` first (contested.apply_shape_props). ADR-0093: these keys
+# change value on that one write, and the preservation rule is told so.
+SUPERSEDABLE = ("status", "status_as_of", "asserted_by", "source_kind")

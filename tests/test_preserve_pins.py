@@ -50,6 +50,8 @@ FREE_PINS = {
     ("silica/kernel/learn/plans.py", "close_plan", "('status', 'completed')"): 2,
     ("silica/kernel/vault.py", "set_prop", "(name,)"): 1,   # one site now: both transports write under the Vault
     ("silica/kernel/vault.py", "unset_prop", "(name,)"): 1,   # ADR-0143: a globe clears publish:
+    # ADR-0158 point 10: a claim's new status, the old one filed under ## Superseded first
+    ("silica/kernel/write/bulk.py", "_execute_patch", "SUPERSEDABLE if shaped != nc.content else ()"): 2,
 }
 
 _FORWARDS = {"loss", "free", "None", "()"}
@@ -105,7 +107,7 @@ def test_the_counts_the_record_states():
     off = sum(n for (_f, _fn, v), n in LOSS_PINS.items()
               if Loss[v.rsplit(".", 1)[-1].split()[0]] in _RELAX_ALL)
     assert off == 20  # STAGED relaxes all, PERSON too: ADR-0129 point 5, ADR-0155 point 8 and ADR-0156 point 7 add one each
-    assert sum(FREE_PINS.values()) == 7  # ADR-0143: unset_prop beside set_prop
+    assert sum(FREE_PINS.values()) == 9  # ADR-0143: unset_prop beside set_prop; ADR-0158 point 10: a claim's status, twice in one patch
 
 
 def test_a_reason_never_rides_on_an_op():

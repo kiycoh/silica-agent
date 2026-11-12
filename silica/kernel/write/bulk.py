@@ -30,6 +30,7 @@ this distinction to decide whether a revert is needed.
 from __future__ import annotations
 
 from silica.driver import DRIVER, NoteNotFound
+from silica.kernel.base.noteshape import SUPERSEDABLE
 from silica.kernel.write import templates
 from silica.kernel.write.merge import three_way_merge
 from silica.kernel.write.notetype import stamp_type
@@ -119,6 +120,9 @@ def render_write(op: Op, snippet: str | None = None) -> str:
         # readers (note_authored_by, already_distilled, citation_of, the MOC)
         # compare sources entries to a basename by equality.
         content = templates.upsert_props(content, {"section": op.section})
+    if op.props:
+        # A research shape's fields (ADR-0158 point 10), checked by Op itself.
+        content = templates.upsert_props(content, op.props)
     return content
 
 
@@ -167,6 +171,13 @@ def _execute_patch(op: Op, path: str) -> dict:
     except RuntimeError as e:
         # Preserve the historical message so callers/tests can match on it.
         raise ValueError(f"Cannot patch; {e}") from e
+    # A research shape's fields go on before either branch below: a claim
+    # whose sentence the note already holds can still arrive with a new
+    # status, and the duplicate branch must not lose it (ADR-0158 point 10).
+    shaped = nc.content
+    if op.props:
+        from silica.kernel.write.contested import apply_shape_props
+        shaped = apply_shape_props(nc.content, op.props)
 
     # Idempotent re-injection: skip the append when this note already carries
     # this source's content (deterministic, no LLM). A relation bullet is keyed
@@ -217,9 +228,9 @@ def _execute_patch(op: Op, path: str) -> dict:
         # `partial`: the agent contributed a hub link, not the body — the note
         # stays human-tier in a contest (contested.reliability_tier).
         repaired = templates.ensure_ai_flag(
-            templates.ensure_hub_link(nc.content, op.hub), value="partial")
+            templates.ensure_hub_link(shaped, op.hub), value="partial")
         if repaired != nc.content:
-            DRIVER.overwrite(path, repaired)
+            DRIVER.overwrite(path, repaired, free=SUPERSEDABLE if shaped != nc.content else ())
         return {"path": path, "op": "patch", "success": True, "skipped": "duplicate"}
 
     new_content = templates.patch_snippet(
@@ -227,7 +238,7 @@ def _execute_patch(op: Op, path: str) -> dict:
         snippet=snippet,
         source_basename=source_basename,
         hub=op.hub,
-        existing_content=nc.content,
+        existing_content=shaped,
         valid_from=op.valid_from,
         relation=op.relation,
     )
@@ -241,7 +252,9 @@ def _execute_patch(op: Op, path: str) -> dict:
     new_content = templates.stamp_sources(new_content, source_basename)
     from silica.kernel.write.provenance import citation_of
     new_content = templates.stamp_citation(new_content, citation_of(source_basename))
-    DRIVER.overwrite(path, new_content)
+    # A claim's new status replaces the old one in the frontmatter; the old one
+    # was filed under ## Superseded first (contested.apply_shape_props).
+    DRIVER.overwrite(path, new_content, free=SUPERSEDABLE if shaped != nc.content else ())
     err = _verify_landed(op, path, new_content)
     if err:
         raise VerifyMismatchError(err)
