@@ -58,7 +58,7 @@ def note_text(decision: str, *, today: str, why: str = "", expect: str = "", rev
             "status: open", "---", ""]
     parts = [("Decision", decision), ("Why", why), ("Expected", expect), ("Outcomes", "")]
     body = [f"## {h}\n\n{t.strip()}\n" if t.strip() else f"## {h}\n" for h, t in parts]
-    return "\n".join(head) + "\n".join(body)
+    return "\n".join(head) + "\n" + "\n".join(body)
 
 
 def add_outcome(content: str, what: str, today: str, status: str = "") -> str:
