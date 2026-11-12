@@ -104,6 +104,14 @@ def test_a_cloze_takes_its_wrong_options_from_its_own_note_with_no_call(tmp_vaul
     assert "under Tipi" in it["wrong_why"]["agente basato su obiettivi"]
 
 
+def test_a_cloze_option_is_a_note_name_or_one_bold_term_never_link_syntax_or_the_text_between_two():
+    # seen 2026-11-12 on the docs vault: "Nucleate#The Sources block" and "menu (" were offered as answers
+    tmp = "Un **agente reattivo** non ricorda, vedi [[Ambiente#Tipi di ambiente]].\n\nIl **+** menu (**riassumi**, **spiega**) e [[#Tipi]].\n"
+    wrong, why = items._cloze_wrong("AI/Agenti.md", tmp)
+    assert wrong == ["agente reattivo", "riassumi", "spiega", "Ambiente"]
+    assert why["Ambiente"] == "This note links to Ambiente, another note."
+
+
 def test_a_pick_is_graded_by_its_key_with_the_caps_of_a_recognition():
     it = {"options": ["a", "b", "c", "d"], "key": 2, "wrong_why": {"b": "b is another note."}, "claim": "c", "span": "s"}
     right = grade.choice_grade(it, pick=2, conf=90, hints=0)
