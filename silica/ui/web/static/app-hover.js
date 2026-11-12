@@ -94,7 +94,9 @@
     if (e.pointerType === "touch") return;
     pt = { x: e.clientX, y: e.clientY };
     const a = e.target.closest && e.target.closest(LINK);
-    if (a) point(a);
+    // A link in the box is the box's: pointing there closed it, link and all. A click
+    // on it opens its note, by the app's own handler.
+    if (a && !(pop && pop.contains(a))) point(a);
   });
   document.addEventListener("pointerout", (e) => {
     if (!at || e.pointerType === "touch") return;

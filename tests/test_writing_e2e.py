@@ -102,6 +102,28 @@ def test_a_wikilink_shows_its_note_on_a_pause_and_not_before(app):  # noqa: F811
     assert not p.js("!!document.querySelector('.hv-pop')"), "an unresolved link shows nothing"
 
 
+def test_the_preview_stays_while_the_pointer_is_on_a_link_inside_it(app):  # noqa: F811
+    """The box closed the moment the pointer reached a link in it (2026-11-12): the
+    pointer's arrival there read as pointing at a new link, which closed the box with
+    the link in it, so nothing showed at all."""
+    p, vault = app
+    (vault / "Topic" / "Source.md").write_text(BODY_LINKED, encoding="utf-8")
+    (vault / "Topic" / "Other.md").write_text("See [[Source]].\n", encoding="utf-8")
+    p.js("openNote('Topic/Other.md')")
+    p.wait("!!document.querySelector('#note-edit a.cm-link-live[data-target=\"Source\"]')", 8, "the live link")
+    time.sleep(0.6)
+    x, y = p.center("document.querySelector('#note-edit a.cm-link-live[data-target=\"Source\"]')")
+    p.mouse("mouseMoved", x, y)
+    p.wait("!!document.querySelector('.hv-pop .note-link')", 3, "the preview, a link in it")
+    ix, iy = p.center("document.querySelector('.hv-pop .note-link')")
+    p.mouse("mouseMoved", ix, iy)
+    time.sleep(0.8)
+    assert p.js("document.querySelector('.hv-pop .hv-title')?.textContent") == "Source"
+
+
+BODY_LINKED = "A source sentence that names [[Other]].\n\nThe second paragraph of the source.\n"
+
+
 def test_a_pasted_address_takes_its_pages_title(app, monkeypatch):  # noqa: F811
     p, _ = app
     monkeypatch.setattr("silica.sources.web_fetch.link_title", lambda url: "A [page] title")
