@@ -38,6 +38,9 @@ PAGE_HEADERS = {
     "Content-Security-Policy": "sandbox allow-scripts; default-src 'none'; img-src 'self' data:; "
                                "style-src 'unsafe-inline'; script-src 'unsafe-inline'",
     "X-Content-Type-Options": "nosniff",
+    # A revision keeps the page's address; without this the browser's heuristic
+    # freshness showed a page /undo had removed (checked 2026-11-12, Chrome 156).
+    "Cache-Control": "no-cache",
 }
 
 # The raws the drawer shows in the browser's own viewer (ADR-0129 point 1);

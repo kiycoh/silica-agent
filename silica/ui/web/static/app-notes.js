@@ -1318,6 +1318,9 @@ async function openFile(path, state, act) {
   if (!(await releaseNote())) return false; // what was typed into the note reaches the disk first
   if (detailsLent) { detailsLent = false; detailsOn = false; }
   drawerFile = { path, state: state || "unread", act: act || "" };
+  // A page opened again may be a revision under the same address (ADR-0171):
+  // asked for, it loads afresh, where a redraw of the drawer keeps its place.
+  if (isPage(path)) $("#raw-frame").dataset.url = "";
   drawerMode = "file";
   lastNotePath = null;
   lastViewedPath = path;
