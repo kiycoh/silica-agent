@@ -39,7 +39,7 @@ def test_a_new_record_carries_both_quotes_and_the_day_without_an_em_dash():
     (r,) = cx.records(text)
     assert (r["other"], r["note"], r["their"], r["mine"], r["found"]) == (
         "[[B]]", "B", "The meeting is on Wednesday.", MINE, TODAY)
-    assert r["how"] == cx.FOUND_BY and "—" not in cx.callout("[[B]]", "x", "y", TODAY)
+    assert r["how"] == cx.FOUND_BY and "\u2014" not in cx.callout("[[B]]", "x", "y", TODAY)
     assert _refs(text) == ["source: [[B]]"]
 
 

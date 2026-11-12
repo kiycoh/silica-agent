@@ -135,7 +135,7 @@ def path(c: Call) -> Result:
 
 
 def contested(c: Call) -> Result:
-    """/contested — the open contradictions, each with its age and both sides
+    """/contested: the open contradictions, each with its age and both sides
     (ADR-0166 point 4). Read off the notes once per file-state epoch."""
     out = c.out
     from rich.markup import escape
