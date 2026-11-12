@@ -238,6 +238,13 @@ def undo(c: Call) -> Result:
     if not note_path:
         out.print("  Nothing to undo — no patches recorded in this session.")
         return out
+    from silica.kernel.write.pages import is_page, undo_page
+
+    if is_page(note_path):
+        # A page is a file and not a note (ADR-0171): its bytes go back past
+        # the driver, from the same restore points a note's do.
+        out.print("  " + undo_page(Path(vault or "."), note_path), markup=False)
+        return out
 
     try:
         on_disk = DRIVER.read_note(note_path).content
@@ -291,6 +298,21 @@ def undo(c: Call) -> Result:
         # is all there is to say.
         out.print(f"  [red]Undo failed:[/] {exc}")
     return out
+
+
+def page(c: Call) -> Result:
+    """/page "<what>": a page built from the notes (ADR-0171). The model reads,
+    then writes through silica_write_page, whose card the person can revert."""
+    what = " ".join(c.args).strip()
+    if not what:
+        return c.out.refused(f"Usage: {c.row.synopsis}  (what the page is about)")
+    return c.out.to_model(
+        f"Make a page: {what}\n"
+        "Read what the notes say about it first, as for any answer. Then write it with "
+        "silica_write_page: one self-contained HTML document at Pages/<slug>.html, its CSS and JS "
+        "inline and no request to any other host. For a site of several pages, write one file each "
+        "under Pages/<slug>/, index.html first, linked by relative paths. Name the notes each page "
+        "draws on in `sources`. Then say in one line what you wrote.")
 
 
 def delete(c: Call) -> Result:

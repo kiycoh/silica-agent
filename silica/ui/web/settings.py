@@ -86,7 +86,9 @@ _EMBED_WARN = "changing this invalidates every stored vector"
 # by a bare POST. By section, not one flat tuple of keys, because the model is
 # also a Brains row and Brains is hidden.
 HOSTED_ROWS: dict[str, tuple[str, ...]] = {
-    "Session": ("SILICA_MODEL", "context", "SILICA_SHOW_THINKING"),
+    # General knowledge (ADR-0169 point 4) is the person's to turn off: a prompt
+    # line, no endpoint and no cost.
+    "Session": ("SILICA_MODEL", "context", "SILICA_SHOW_THINKING", "SILICA_GENERAL_KNOWLEDGE"),
     "Language": ("SILICA_STT_LANG", "SILICA_STT_BROWSER"),
     "Display": ("SILICA_USER_NAME", "SILICA_THEME", "SILICA_SHOW_THINKING",
                 "SILICA_GRAPH_PARTICLES", "SILICA_GRAPH_SHADING"),
@@ -119,6 +121,9 @@ def sections() -> dict[str, tuple[Row, ...]]:
             Row("context", "context", "readonly", "tokens a turn is cut to"),
             Row("SILICA_SHOW_THINKING", "thinking", "toggle",
                 "show the model's reasoning as it works"),
+            Row("SILICA_GENERAL_KNOWLEDGE", "general knowledge", "toggle",
+                "answer from the model's knowledge when your notes have nothing · "
+                "labelled as such, never mixed into cited sentences · from the next chat"),
         ),
         "Vault": (
             Row(VAULT_KEY, "vault", "text",
@@ -158,6 +163,8 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 "used for distilling · falls back to the chat model", models_of="chat"),
             Row("SILICA_FALLBACK_MODELS", "fallback models", "text",
                 "comma-separated · tried in order when a model's endpoint fails"),
+            Row("SILICA_COUNCIL_MODELS", "council models", "text",
+                "comma-separated · 2 to 5 models that each answer /council from the same notes"),
             Row("SILICA_TAVILY_API_KEY", "web search key", "secret",
                 "tavily, the backstop when duckduckgo challenges us"),
             *_hosted_key_rows(),

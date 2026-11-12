@@ -215,6 +215,11 @@
   font-size: 12px;
 }
 
+/* "partly from general knowledge" (ADR-0169) wears the block's caution ink */
+.turn-note.general {
+  color: var(--warn);
+}
+
 /* Flagging an answer (ADR-0100 point 6). The control stays as quiet as the
    hint above it, because most answers never need it; it brightens on hover
    like the copy button and never takes the accent, which stays for the one
@@ -696,6 +701,24 @@
 
 :is(.msg, #peek-body, #note-edit, #nv-edit) .tag {
   color: var(--accent);
+}
+
+/* The part of an answer the notes did not give (ADR-0169): its own words say so
+   in the head, and a caution edge sets it apart, never teal, which is for what
+   can be pressed. Upright where a quote is italic: it is the answer's own prose.
+   --warn on the brightest plane it may touch, measured 2026-11-12: 5.99:1 on
+   --bubble (graphite), 4.98:1 on --bubble (paper). */
+:is(.msg, #peek-body) blockquote.callout-general {
+  border-left-color: var(--warn);
+  font-style: normal;
+  color: var(--text);
+}
+
+:is(.msg, #peek-body) .callout-general > .callout-title {
+  color: var(--warn);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  margin-bottom: 0.3em;
 }
 
 :is(.msg, #peek-body, #note-edit, #nv-edit) li.task {

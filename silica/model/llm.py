@@ -979,6 +979,7 @@ def call_llm(
     api_key: str | None = None,
     reasoning: bool | None = None,
     sdk_retries: int | None = None,
+    fallback: bool = True,
 ) -> LLMResponse:
     """Narrating wrapper around the real call (`_call_llm`).
 
@@ -986,6 +987,10 @@ def call_llm(
     subagents, the distill pool — which is why the `call` beat lives here and
     not at each caller (spec §4). No open session → narrate() no-ops, so
     batch entry points pay one dict lookup and nothing else.
+
+    `fallback=False` keeps the call on `model` alone: a council member's answer
+    is attributed to its model, and one a fallback wrote would be misnamed
+    (ADR-0170).
     """
     from silica.obs.narration import NARRATOR
     import uuid as _uuid
@@ -994,7 +999,7 @@ def call_llm(
     trace = _trace_on()
     wire = [to_wire(m) for m in messages] if trace else None
     retries = 0
-    chain = fallback_chain(model)
+    chain = fallback_chain(model) if fallback else [model]
     used = chain[0]
     if any(m.startswith("openrouter/") for m in chain):
         # ADR-0102 point 5: here and not at the turn's start, so Learn's

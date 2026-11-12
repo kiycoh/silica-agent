@@ -129,6 +129,10 @@ def set_setting(payload: dict):
         raise HTTPException(status_code=400, detail=result["error"])
     if key in ("SILICA_MODEL", "SILICA_PROVIDER"):
         meter.resolve_context_budget()  # the window the ring and the compaction budget read is the model's
+    if key == "SILICA_GENERAL_KNOWLEDGE":
+        # The rule is in the seed's system prompt (ADR-0169), and the next new
+        # chat starts from the seed built after the last turn, the rule's old state.
+        session.prewarm_seed()
     return result
 
 

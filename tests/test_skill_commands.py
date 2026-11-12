@@ -6,6 +6,7 @@ next to the Python ones and expanded by the same dispatch."""
 from __future__ import annotations
 
 from silica.config import silica_home
+from silica.prompts import VAULT_ONLY
 
 from pathlib import Path
 
@@ -28,7 +29,8 @@ def test_a_vault_skill_is_listed_and_expanded():
     row = next(c for c in commands() if c.name == "/weekly")
     assert (row.group, row.usage) == ("workflow", "<folder>")
     assert row.summary == "weekly review of the inbox (vault skill)"
-    assert expand("/weekly Inbox/") == "Review Inbox/."
+    # the vault-only line follows the skill's own words (ADR-0169 point 4)
+    assert expand("/weekly Inbox/") == f"Review Inbox/.\n{VAULT_ONLY}"
     assert refusal("/weekly").startswith("/weekly needs 1 argument")
 
 

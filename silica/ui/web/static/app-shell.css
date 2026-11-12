@@ -451,6 +451,12 @@ html[data-hosted] :is([data-tab], [data-view], [data-route]):not([data-served]) 
   display: none !important;
 }
 
+/* /council is the laptop's in this version (ADR-0170): its handler refuses it
+   on the server, whose door counts one model call a question. */
+html[data-hosted] #attach-menu [data-action="/council"] {
+  display: none;
+}
+
 /* A help row about the server's downloads (ADR-0142): a laptop has none. */
 html:not([data-hosted]) .hp-hosted {
   display: none;

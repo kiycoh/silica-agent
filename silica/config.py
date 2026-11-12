@@ -705,6 +705,11 @@ class SilicaConfig:
     # lmstudio/qwen3.5-9b"; empty keeps every call on its own model, as before.
     fallback_models: str = from_env("SILICA_FALLBACK_MODELS", doc=True, hosted=True)
 
+    # /council's members (ADR-0170): 2 to 5 comma-separated litellm ids, the
+    # syntax of the fallbacks above. Empty by design: Silica picks no models to
+    # spend the person's key on, and /council says how to name them.
+    council_models: str = from_env("SILICA_COUNCIL_MODELS", doc=True)
+
     # Distiller-only upstream-provider pin. Lets the constrained-decoding path
     # (kernel.prep_delegation.run_distiller) route to a different OpenRouter
     # provider than the interactive loop and the other workers. Falls back to
@@ -822,6 +827,11 @@ class SilicaConfig:
     # (no snapshot, no write) and keeps the files; the Settings editor and its
     # reset still work, because erasing must not depend on this switch.
     user_memory: bool = from_env("SILICA_MEMORY", True, true_word, doc=True)
+
+    # ADR-0169: when the notes hold nothing on a question, the chat answers from
+    # the model's own knowledge in a block labelled as such. On by the owner's
+    # choice; False is the strict prompt of before, cited or refused.
+    general_knowledge: bool = from_env("SILICA_GENERAL_KNOWLEDGE", True, true_word, doc=True)
 
     # Episodic memory lane (kernel/recall/episodic.py, ADR-0057): TTL in LIVED
     # days (days the lane captured or delivered a fact) since a chain head was

@@ -142,7 +142,7 @@ def test_cli_dedup_seeds_ledger():
     assert cap == "silica_dedup_pairs"
     assert payloads == [{"pairs": pairs}]
     assert seed.call_args.kwargs["kind"] == "dedup"
-    assert msg == "ledger msg"
+    assert msg.split("\n")[0] == "ledger msg"  # then the vault-only line (ADR-0169)
 
 
 def test_cli_dedup_no_pairs_handled_inline():

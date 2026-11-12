@@ -683,6 +683,22 @@ def note_history_restore(payload: dict):
     return {"restored": note, "id": payload.get("id")}
 
 
+@router.get("/page/{path:path}")
+def page(path: str):
+    """A page the chat wrote (ADR-0171), by its vault path, and any vault image it
+    names by a relative one: path-shaped, so a site's links and its images resolve
+    against the page as they do on disk. Every account's, on the server too: the
+    page runs in its own origin (render.PAGE_HEADERS), never the app's."""
+    from silica.kernel.write.pages import is_page, page_file
+
+    if is_page(path):
+        found = page_file(Path(CONFIG.vault_path), path)
+        if found is None:
+            raise HTTPException(status_code=404)
+        return FileResponse(found, media_type="text/html", headers=render.PAGE_HEADERS)
+    return asset(path)
+
+
 @router.get("/asset")
 def asset(path: str = ""):
     """Vault-relative attachment for the note drawer, `<img>`-only by contract.

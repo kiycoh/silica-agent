@@ -136,7 +136,7 @@ SHARED_ROUTES = {
     "/memory", "/memory/reset", "/memory/undo", "/memory/{scope}", "/messages", "/narration",
     "/narration/sse", "/note", "/note/asset", "/note/check", "/note/check/keep", "/note/history",
     "/note/history/diff", "/note/history/restore", "/note/let-go", "/note/link-title", "/note/new", "/note/raw", "/note/similar",
-    "/note/render", "/note/save", "/nucleate",
+    "/note/render", "/note/save", "/nucleate", "/page/{path:path}",
     "/openapi.json", "/path", "/phone/new", "/phone/turn", "/raw", "/raw/cover", "/redoc", "/reset", "/session/delete",
     "/session/load", "/session/rename", "/sessions", "/settings", "/settings/confirm", "/skills",
     "/skills/proposed/{name}/dismiss", "/skills/proposed/{name}/install", "/skills/{name}", "/static",
@@ -168,15 +168,15 @@ SHARED_TOOLS = {
     "silica_rework", "silica_run_injector", "silica_run_organizer",
     "silica_search", "silica_search_context", "silica_semantic_search", "silica_session_search",
     "silica_tables", "silica_timeline", "silica_unresolved",
-    "silica_vault_report", "silica_vaults", "silica_web_answer", "silica_write_note",
+    "silica_vault_report", "silica_vaults", "silica_web_answer", "silica_write_note", "silica_write_page",
     "web_fetch", "web_search",
 }
 SHARED_COMMANDS = {
-    "/aliases", "/anneal", "/changes", "/check", "/clear", "/connect", "/contested", "/contradictions", "/convert", "/decide", "/decisions", "/outcome",
+    "/aliases", "/anneal", "/changes", "/check", "/clear", "/connect", "/contested", "/contradictions", "/convert", "/council", "/decide", "/decisions", "/outcome",
     "/cooccur", "/curate", "/dedup", "/delete", "/embed", "/enrich", "/episodes", "/exit", "/fetch",
     "/find", "/flashcards", "/graph", "/help", "/impact", "/incognito", "/keep", "/lexical", "/mail",
     "/map", "/memory", "/migrate", "/model", "/new", "/nucleate", "/organize", "/path", "/persona",
-    "/plans", "/promote", "/remember", "/report", "/resume", "/revert", "/review", "/sessions",
+    "/page", "/plans", "/promote", "/remember", "/report", "/resume", "/revert", "/review", "/sessions",
     "/settings", "/slides", "/stale", "/status", "/thinking", "/tools", "/trash", "/undo", "/vault",
     "/verbose", "/verify", "/web", "/web-search", "/wiki", "/zotero",
 }

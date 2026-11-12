@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 
+from silica.agent.general_knowledge import looks_in_vault
 from silica.obs.events import ToolCompleteEvent
 from silica.kernel.recall.search import degraded_lines
 from silica.kernel.write.provenance import number_tokens, unfounded_numbers
@@ -55,11 +56,15 @@ class RecallWatch:
         # Every number the turn's results showed, from the event and not from the
         # tool message, which the loop may already have stubbed (ADR-0095).
         self.numbers: set[str] = set()
+        # Did the turn search the vault or read a note at all? A general-knowledge
+        # block before any such call is said under the answer (ADR-0169 point 2).
+        self.looked = False
 
     def __call__(self, event) -> None:
         if isinstance(event, ToolCompleteEvent):
             if event.name == "silica_web_answer":
                 self.web_answer = True
+            self.looked = self.looked or looks_in_vault(event.name)
             self.numbers |= result_numbers(event.result, event.args)
             self._inspect(event)
         if self._inner is not None:

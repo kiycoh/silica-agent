@@ -68,6 +68,20 @@ def dispatch(text: str, messages: list[dict], *, ask: Ask | None = None,
     runs an agent loop of its own. `live` prints a line the moment it is said, for
     the surface that shows work as it happens.
     """
+    result = _dispatch(text, messages, ask, progress, live)
+    if result is not None and result.directive and CONFIG.general_knowledge:
+        # A command answers from the notes alone (ADR-0169 point 4): here and not
+        # in each handler, so a skill, /quiz's grading and /page are held to it
+        # alike. The general-knowledge rule is the chat's, for a typed question.
+        from silica.prompts import VAULT_ONLY
+
+        result.directive += "\n" + VAULT_ONLY
+    return result
+
+
+def _dispatch(text: str, messages: list[dict], ask: Ask | None,
+              progress: Callable[[Result], AbstractContextManager],
+              live: Callable[..., None] | None) -> Result | None:
     from silica.tools import catalog
 
     catalog.load()

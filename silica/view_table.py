@@ -73,5 +73,7 @@ DEMO_OFF: dict[str, tuple[str, ...]] = {
         "/vault/export",
         # the review queue's yes writes the vault outside a turn (ADR-0165)
         "/metrics/review",
+        # a page the chat wrote runs its own script (ADR-0171 point 7)
+        "/page",
     ),
 }

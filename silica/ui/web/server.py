@@ -245,7 +245,10 @@ def index(request: Request):
     html = html.replace(ROOT_TAG, " ".join([ROOT_TAG, *root]), 1)
     # Last: the markers above are found by pattern over the whole page, and a word
     # in the table must never read as one.
-    return HTMLResponse(html.replace(VOCAB_ISLAND, VOCAB_ISLAND + vocabulary.island(), 1))
+    # Its own policy, so on the server it says the image rule the middleware would.
+    policy = security.APP_FRAMES + (f"; {security.HOSTED_IMAGES}" if hosted() else "")
+    return HTMLResponse(html.replace(VOCAB_ISLAND, VOCAB_ISLAND + vocabulary.island(), 1),
+                        headers={"Content-Security-Policy": policy})
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

@@ -28,6 +28,21 @@ ASSET_HEADERS = {
     "X-Content-Type-Options": "nosniff",
 }
 
+# A page the chat wrote (ADR-0171) runs its own script, so it is served the way
+# ASSET_HEADERS serves an SVG, with only inline script let in: `sandbox`
+# without allow-same-origin gives it an opaque origin, so its script never
+# reaches the app's cookies, storage or routes, also when the address bar opens
+# it alone; default-src 'none' stops every request it could make, and only its
+# inline style and script, and the vault's images, load.
+PAGE_HEADERS = {
+    "Content-Security-Policy": "sandbox allow-scripts; default-src 'none'; img-src 'self' data:; "
+                               "style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+    "X-Content-Type-Options": "nosniff",
+    # A revision keeps the page's address; without this the browser's heuristic
+    # freshness showed a page /undo had removed (checked 2026-11-12, Chrome 156).
+    "Cache-Control": "no-cache",
+}
+
 # The raws the drawer shows in the browser's own viewer (ADR-0129 point 1);
 # every other one is a download.
 # shortcut: PDF only, the one type checked in an iframe under ASSET_HEADERS'
