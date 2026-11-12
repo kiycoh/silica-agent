@@ -402,12 +402,16 @@ def truncate(text: str, limit: int = _MAX_CHARS) -> str:
 
 
 def close_fence(text: str) -> str:
-    """`text` with a code fence it left open closed at its end. Lines that
-    start with a fence are counted, not lines that are one: an opening fence
-    names its language (```bash) and only the closing one is bare."""
-    if sum(1 for ln in text.splitlines() if ln.lstrip().startswith(_FENCE)) % 2:
+    """`text` with a code fence it left open closed at its end. An opening
+    fence names its language (```bash) and only the closing one is bare, so
+    a bare line is not the rule; a backtick after the run is, since a fence's
+    info string holds none (CommonMark): ```pip install x``` is inline code."""
+    if sum(1 for ln in text.splitlines() if _FENCE_LINE.fullmatch(ln)) % 2:
         return f"{text}\n{_FENCE}"
     return text
+
+
+_FENCE_LINE = re.compile(r"[ \t]*`{3,}[^`]*")
 
 
 _MAX_TITLE = 120

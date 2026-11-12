@@ -172,6 +172,20 @@ def test_a_code_fence_left_open_closes_where_its_post_or_comment_ends(served):
     assert text.index("print(1)") < text.index("\n```", text.index("print(1)")) < text.index("**u/next**")
 
 
+def test_a_line_of_inline_code_in_triple_backticks_is_not_a_fence(served):
+    """`` ```pip install x``` `` on a line of its own is inline code: a fence's
+    info string holds no backtick (CommonMark). Counted as a fence it got a
+    fence appended, which opened a block over every comment after it."""
+    table, _ = served
+    table["https://www.reddit.com/"] = _resp(_thread(
+        [_comment("c1", "one", "```pip install x```"), _comment("c2", "next", "Thanks.")],
+        selftext="Run ```make``` first."))
+    assert sf.page("https://redd.it/abc123").text.count("```") == 4
+    table["https://api.github.com/"] = _resp({"state": "open", "comments": 0, "user": {"login": "x"},
+                                              "body": "```npm ci```"})
+    assert sf.page("https://github.com/o/r/issues/1").text.count("```") == 2
+
+
 def test_a_page_that_is_only_its_title_writes_nothing(served, tmp_vault):
     """A subreddit, to a reader with no Reddit session, is a script's shell whose
     only words are its title: /fetch wrote a note that said "Reddit" and nothing

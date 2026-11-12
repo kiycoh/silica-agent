@@ -906,6 +906,12 @@ def test_truncation_closes_a_fence_that_names_its_language():
     assert sum(ln.startswith("```") for ln in body.splitlines()) == 6
 
 
+def test_truncation_leaves_a_line_of_inline_triple_backticks_alone():
+    """```pip install x``` is inline code, not a fence: a fence's info string
+    holds no backtick."""
+    assert wf.truncate("```pip install x```\n" + "y" * 200, limit=40).count("```") == 2
+
+
 # --- image alt text ---------------------------------------------------------
 
 
