@@ -64,9 +64,11 @@ def file_cover(path: str = ""):
     return cover_response(_vault_file(path))
 
 
-# /asset's sandbox and nosniff, and asked again each time: the address names
-# the file, not the drawing, and a file changed under it draws a new cover.
-_COVER_HEADERS = {**render.ASSET_HEADERS, "Cache-Control": "private, no-cache"}
+# /asset's sandbox and nosniff, kept five minutes: the address names the file
+# and not the drawing, so a file changed under it shows its new cover within
+# 300 s. Not no-cache: this FileResponse answers If-None-Match with a 200
+# (checked 2026-11-12), so every rail redraw would send every cover again.
+_COVER_HEADERS = {**render.ASSET_HEADERS, "Cache-Control": "private, max-age=300"}
 
 
 def cover_response(found: Path):

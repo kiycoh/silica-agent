@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import hashlib
 import posixpath
+import threading
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote
 
 COVER_EXTS = (".pdf", ".epub")
@@ -43,8 +45,9 @@ def cover(full: Path) -> tuple[Path, str] | None:
     """(the kept image, its media type) for the vault file `full`, drawn now if
     it never was; None for a file with no cover.
 
-    shortcut: covers of files deleted from the vault stay; about 60 KB each, so
-    prune with Discover's ceiling (200 MB) when a folder of them passes it."""
+    shortcut: covers of files deleted from the vault stay (a PDF's measured 25
+    KB, an EPUB's up to EPUB_COVER_BYTES); prune with Discover's ceiling
+    (200 MB) when the folder passes it."""
     from silica.kernel.base.durable import atomic_write_bytes
 
     if full.suffix.lower() not in COVER_EXTS:
@@ -53,20 +56,38 @@ def cover(full: Path) -> tuple[Path, str] | None:
     who = hashlib.sha1(str(full.resolve()).encode("utf-8")).hexdigest()[:16]
     stamp = f"{who}-{st.st_size:x}-{st.st_mtime_ns:x}"
     cdir = covers_dir()
+    if (found := _kept(cdir, who, stamp)) is not _MISSING:
+        return found
+    # One draw at a time, asked again under the lock: on the server each draw
+    # is a child of up to 1 GiB, and a rail of raws asks for a dozen at once
+    # inside the tenant's own 1 GB.
+    with _DRAWING:
+        if (found := _kept(cdir, who, stamp)) is not _MISSING:
+            return found
+        drawn = _draw(full)
+        cdir.mkdir(parents=True, exist_ok=True)
+        # A file with nothing to draw is kept as such, so a library's rail does
+        # not open every coverless book again on each look.
+        out = cdir / f"{stamp}.{drawn[1] if drawn else 'none'}"
+        atomic_write_bytes(out, drawn[0] if drawn else b"")
+    return (out, MEDIA[drawn[1]]) if drawn else None
+
+
+_DRAWING = threading.Lock()
+_MISSING: Any = object()
+
+
+def _kept(cdir: Path, who: str, stamp: str) -> Any:
+    """The kept cover of `stamp` (None when it was kept as having none), or
+    _MISSING; a cover of the file as it was before is removed on the way."""
     if cdir.is_dir():
         for kept in cdir.glob(f"{who}-*"):
             name, _, ext = kept.name.partition(".")
             if name != stamp:
-                kept.unlink(missing_ok=True)  # drawn from the file as it was
+                kept.unlink(missing_ok=True)
             else:
                 return (kept, MEDIA[ext]) if ext in MEDIA else None
-    drawn = _draw(full)
-    cdir.mkdir(parents=True, exist_ok=True)
-    # A file with nothing to draw is kept as such, so a library's rail does not
-    # open every coverless book again on each look.
-    out = cdir / f"{stamp}.{drawn[1] if drawn else 'none'}"
-    atomic_write_bytes(out, drawn[0] if drawn else b"")
-    return (out, MEDIA[drawn[1]]) if drawn else None
+    return _MISSING
 
 
 def _draw(full: Path) -> tuple[bytes, str] | None:
