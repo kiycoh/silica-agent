@@ -46,7 +46,14 @@
 
   async function show(a) {
     const d = await load(keyOf(a));
-    if (at !== a || !a.isConnected || !d) return;
+    if (at !== a || !d) return;
+    if (!a.isConnected) {
+      // The editor redrew its line under a still pointer (a note just opened sets its
+      // broken links, a focus change): the same link is the one under the pointer now.
+      const b = pt && document.elementFromPoint(pt.x, pt.y)?.closest(LINK);
+      if (!b || keyOf(b) !== keyOf(a)) return;
+      at = a = b;
+    }
     if (pop) pop.remove();
     pop = document.createElement("div");
     pop.className = "hv-pop";
@@ -81,8 +88,11 @@
   }
 
   // A pen or a finger has no hover: a press is the click it always was.
+  let pt = null; // the pointer's last place, for a link redrawn under it
+  document.addEventListener("pointermove", (e) => { pt = { x: e.clientX, y: e.clientY }; }, { passive: true });
   document.addEventListener("pointerover", (e) => {
     if (e.pointerType === "touch") return;
+    pt = { x: e.clientX, y: e.clientY };
     const a = e.target.closest && e.target.closest(LINK);
     if (a) point(a);
   });
