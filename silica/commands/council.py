@@ -67,6 +67,19 @@ def _member_messages(question: str, context: str) -> list[dict]:
             {"role": "user", "content": f"Question: {question}\n\nPassages from the notes:\n{passages}"}]
 
 
+def _passages(question: str) -> str:
+    """The body search's passages, for a recall that found nothing: a vault whose
+    recall indexes were never built (no /cooccur, no /embed) answers nothing
+    there while the passage index, which builds itself, still finds the notes.
+    The chat's model turns to it then, and so does the council (seen live
+    2026-11-12 on a fresh copy of the test vault)."""
+    from silica.tools.atomic import silica_search_context
+
+    hits = answered(silica_search_context, question).get("hits") or []
+    return "\n\n".join(f"[[{h['path']}]], {h.get('section') or 'line ' + str(h.get('line'))}:\n{h.get('snippet', '')}"
+                       for h in hits if isinstance(h, dict) and h.get("path"))
+
+
 def _synthesis_messages(question: str, heard: list[_Heard]) -> list[dict]:
     system = (
         "You compare a council's answers to one question, each written from the same passages of "
@@ -153,7 +166,7 @@ def council(c: Call) -> Result:
     found = answered(silica_recall, question)
     if "error" in found:
         return out.refused(f"the search of your notes failed: {found['error']}")
-    asked = _member_messages(question, str(found.get("context") or ""))
+    asked = _member_messages(question, str(found.get("context") or "") or _passages(question))
     heard = [_Heard(_LETTERS[i], m) for i, m in enumerate(names)]
     with ThreadPoolExecutor(max_workers=len(heard)) as pool:
         heard = list(pool.map(lambda h: _ask(h, asked), heard))

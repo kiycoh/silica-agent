@@ -149,3 +149,12 @@ def test_the_meter_rides_the_answer_and_stays_on_it(council):
         assert SESSION.chat.messages[-1][turn_notes.KEY] == done["notes"]
     finally:
         SESSION.reset()
+
+
+def test_a_recall_with_no_index_falls_back_to_the_body_search(council, monkeypatch):
+    monkeypatch.setattr("silica.tools.graph.silica_recall", lambda q, **kw: {"query": q, "context": "", "notes": []})
+    monkeypatch.setattr("silica.tools.atomic.silica_search_context", lambda q, **kw: {"hits": [
+        {"path": "Science/Galileo.md", "section": "Trial", "line": 9, "snippet": "tried in 1633"}]})
+    _run('/council "why was galileo tried?"')
+    member = next(c for c in council.calls if c["model"] == MODEL)
+    assert "[[Science/Galileo.md]], Trial:\ntried in 1633" in member["messages"][1]["content"]
