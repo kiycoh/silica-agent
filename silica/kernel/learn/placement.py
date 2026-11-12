@@ -91,7 +91,9 @@ def candidates(plan: dict, view: dict | None = None, steps: list[list[str]] | No
 
 
 def met_unaided(entry: dict) -> bool:
-    return bool(entry.get("correct") and not entry.get("hints") and not entry.get("told"))
+    from silica.kernel.learn.reasons import outcome
+
+    return outcome(entry) == "met"
 
 
 def placed_steps(plan: dict, entries: list[dict], steps: list[list[str]] | None = None) -> list[int]:

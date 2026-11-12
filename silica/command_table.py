@@ -309,9 +309,9 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/quiz",
         group="workflow",
-        usage='[note|folder] [--n=10] [--focus="passage"]',
-        summary="active-recall quiz; graded answers resurface the notes you miss. No target = review queue",
-        examples=("/quiz Concepts/ML --n=5", "/quiz"),
+        usage='[note|folder] [--n=10] [--focus="passage"] [--choice]',
+        summary="active-recall quiz; graded answers resurface the notes you miss. No target = review queue; --choice asks among four options",
+        examples=("/quiz Concepts/ML --n=5", "/quiz", "/quiz Concepts/ML --choice"),
         handler="silica.commands.learn:quiz", shlex=True, view="learn",
     ),
     Command(

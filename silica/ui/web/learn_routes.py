@@ -421,7 +421,7 @@ def answer(payload: dict):
         return session.answer(str(payload.get("id") or ""), payload.get("i"), conf=payload.get("conf"),
                               hints=payload.get("hints"), told=payload.get("told"), production=payload.get("production"),
                               modality=payload.get("modality"), self_graded=payload.get("self"),
-                              force_model=payload.get("force_model"))
+                              force_model=payload.get("force_model"), pick=payload.get("pick"))
 
 
 @router.post("/skip")
