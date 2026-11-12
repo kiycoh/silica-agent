@@ -282,7 +282,7 @@ def test_the_frame_renders_each_layer_when_it_has_something(tmp_path):
     assert 'id="cb-coupled"' in ctx["coupled_row"]
     # The load-bearing row is a legend entry, not a control: the ring it names
     # is always drawn, so it carries the swatch and the count and no input.
-    assert "load-bearing" in ctx["cut_row"] and ">1<" in ctx["cut_row"]
+    assert "only bridge" in ctx["cut_row"] and ">1<" in ctx["cut_row"]
     assert "<input" not in ctx["cut_row"]
 
 

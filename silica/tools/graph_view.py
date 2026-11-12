@@ -354,7 +354,7 @@ def _frame_context(
         f'<div class="filter-row" title="Removing this note disconnects the graph: every path '
         f'between the notes it strands and the rest goes through it. Always ringed in 2D and '
         f'named on hover in 3D; the Work panel says what each one carries.">'
-        f'<span class="ring" style="border-color:var(--warn)"></span>holds parts together'
+        f'<span class="ring" style="border-color:var(--warn)"></span>only bridge'
         f'<span class="ct">{n_cut}</span>'
         f'</div>'
     ) if n_cut else ""

@@ -4402,7 +4402,7 @@ function buildGraph() {
         // ring says load-bearing and cannot say how MANY strands, and it is
         // gone below RING_MIN_PX of disc, which is most of a zoomed-out frame.
         const cut = n.cut
-          ? "load-bearing · strands " + (n.strands || 0) : null;
+          ? "only bridge for " + (n.strands || 0) + " notes" : null;  // the note pane's words (placeReadings)
         return '<div class="g3d-tip"><b>' + escHtml(n.label) + '</b>' + paperTip(n) +
           (bits.length ? '<i>' + escHtml(bits.join(" · ")) + '</i>' : '') +
           (cut ? '<i>' + escHtml(cut) + '</i>' : '') + '</div>';
