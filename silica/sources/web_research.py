@@ -1581,7 +1581,15 @@ def fetch_to_inbox(url: str) -> str:
         # web_fetch's guard still validates the https form, and agent-issued
         # calls (which always carry a scheme) stay strict.
         url = f"https://{url}"
-    page = _web_fetch.fetch_page(url)
+    from silica.sources.site_fetch import PERSON_ASKED
+
+    # The person typed this address: theirs is the one fetch that may carry
+    # their GITHUB_TOKEN (ADR-0162 point 5).
+    asked = PERSON_ASKED.set(True)
+    try:
+        page = _web_fetch.fetch_page(url)
+    finally:
+        PERSON_ASKED.reset(asked)
     text = page.text.strip()
     first_line = _first_line_of(text)
     if not first_line:

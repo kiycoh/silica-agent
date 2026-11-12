@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import re
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from urllib.parse import urlencode, urlsplit
 
@@ -52,6 +53,11 @@ _GH_API = "https://api.github.com"
 _GH_RAW = "https://raw.githubusercontent.com"
 # GitHub's largest page of comments; more pages follow while the ceiling has room.
 _GH_PAGE = 100
+# Set by `fetch_to_inbox` around the person's own /fetch: only an address they
+# typed carries their GITHUB_TOKEN. The model's web_fetch, Discover and the
+# check reach `fetch_page` too, on addresses a page or a feed named, and a
+# token there would let a page's words read the person's private repositories.
+PERSON_ASKED: ContextVar[bool] = ContextVar("site_fetch_person_asked", default=False)
 _MARKDOWN = (".md", ".markdown", ".mdown", ".mkd")
 
 
@@ -168,15 +174,24 @@ def _reddit_comments(children: list, depth: int, parent: str) -> list[str]:
 # --- GitHub ---------------------------------------------------------------------
 
 def _gh_headers() -> dict[str, str]:
-    """GitHub's JSON, with the person's GITHUB_TOKEN when they set one. Never on
-    the server: a token in the host's environment is the operator's, and every
-    tenant would read whatever it can (ADR-0162 point 5)."""
+    """GitHub's JSON, with the person's GITHUB_TOKEN when they set one and
+    typed the address themselves (PERSON_ASKED). Never on the server: a token
+    in the host's environment is the operator's, and every tenant would read
+    whatever it can (ADR-0162 point 5)."""
     from silica.config import hosted, live_env
 
     out = {**HEADERS, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
-    if (token := live_env("GITHUB_TOKEN")) and not hosted():
+    if PERSON_ASKED.get() and (token := live_env("GITHUB_TOKEN")) and not hosted():
         out["Authorization"] = f"Bearer {token}"
     return out
+
+
+def _token_hint(said: str) -> str:
+    """`said` on a laptop, where the person can set GITHUB_TOKEN; "" on the
+    server, whose tenants cannot and whose reads never carry one."""
+    from silica.config import hosted
+
+    return "" if hosted() else said
 
 
 def _gh_fetch(url: str) -> httpx.Response | None:
@@ -186,8 +201,9 @@ def _gh_fetch(url: str) -> httpx.Response | None:
         return resp
     except wf.Refused as exc:
         if exc.status == 429 or exc.headers.get("x-ratelimit-remaining") == "0":
-            raise wf.SiteRefused("GitHub's limit on reads without a token is spent (60 an hour): set "
-                                 "GITHUB_TOKEN, or try again later. Nothing was written.") from None
+            raise wf.SiteRefused("GitHub's limit on reads without a token is spent (60 an hour): "
+                                 + _token_hint("set GITHUB_TOKEN, or ")
+                                 + "try again later. Nothing was written.") from None
         if exc.status == 401:
             raise wf.SiteRefused("GitHub refused the token in GITHUB_TOKEN (401). Nothing was written.") from None
         raise wf.SiteRefused(f"GitHub refused to show it ({exc.status}). Nothing was written.") from None
@@ -199,8 +215,8 @@ def _gh_fetch(url: str) -> httpx.Response | None:
 
 def _gh_found(url: str, what: str) -> httpx.Response:
     if (resp := _gh_fetch(url)) is None:
-        raise wf.SiteRefused(f"GitHub has no {what} there, or it is private: a private one needs "
-                             "GITHUB_TOKEN. Nothing was written.")
+        raise wf.SiteRefused(f"GitHub has no {what} there, or it is private"
+                             + _token_hint(": a private one needs GITHUB_TOKEN") + ". Nothing was written.")
     return resp
 
 

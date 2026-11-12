@@ -249,15 +249,31 @@ def test_a_missing_issue_is_named_and_a_missing_repo_falls_back_to_the_page(serv
     assert sf.page("https://github.com/features/copilot") is None
 
 
-def test_the_token_goes_to_github_on_a_laptop_and_never_on_the_server(served, monkeypatch):
+def test_the_token_goes_only_with_the_persons_own_fetch_on_a_laptop(served, monkeypatch, tmp_vault):
+    """The person's /fetch carries it; the model's web_fetch, Discover and the
+    check reach the same adapter on addresses a page named, and never do."""
+    from silica.sources import web_research
+
     table, seen = served
-    table["https://api.github.com/"] = _resp({"full_name": "o/r", "comments": 0, "state": "open"})
+    table["https://api.github.com/"] = _resp({"title": "t", "comments": 0, "state": "open"})
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_secret")
-    sf.page("https://github.com/o/r/issues/1")
+
+    web_research.fetch_to_inbox("https://github.com/o/r/issues/1")
     assert seen[-1][1]["Authorization"] == "Bearer ghp_secret"
-    monkeypatch.setenv("SILICA_HOSTED", "1")
-    sf.page("https://github.com/o/r/issues/1")
+    wf.web_fetch("https://github.com/o/r/issues/2")
     assert "Authorization" not in seen[-1][1]
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    web_research.fetch_to_inbox("https://github.com/o/r/issues/3")
+    assert "Authorization" not in seen[-1][1]
+
+
+def test_on_the_server_githubs_refusals_name_no_token(served, monkeypatch):
+    table, _ = served
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    table["https://api.github.com/"] = wf.Refused(429, "raw", httpx.Headers())
+    with pytest.raises(wf.SiteRefused) as got:
+        sf.page("https://github.com/o/r/issues/1")
+    assert "GITHUB_TOKEN" not in got.value.said and "try again later" in got.value.said
 
 
 def test_a_redirect_to_another_host_drops_the_token(monkeypatch):
