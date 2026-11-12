@@ -663,3 +663,129 @@ def test_an_address_with_brackets_is_fetched_whole(stats, tmp_vault):
 
     _sheet(fetch=fetch)
     assert asked == [url]
+
+
+# --- what the build copies is what the check read ---------------------------------
+
+def test_the_build_copies_the_image_the_check_showed_and_not_another_of_its_name(stats, tmp_vault):
+    """The check shows one file for a name (vault_files.images_by_name); a note naming another
+    file of that name by its path published that one, which nobody saw."""
+    (stats / "Private").mkdir()
+    (stats / "Private" / "Pasted image 1.png").write_bytes(PNG + b"never shown")
+    tmp_vault.note("Stats/Descriptive/Box plot.md", "Quartiles.\n\n![[Private/Pasted image 1.png]]\n")
+    [shown] = [i for g in _sheet()["groups"] for i in g["images"] if i["name"] == "Pasted image 1.png"]
+    assert "Private" not in shown["src"]
+    _say("folder:Stats/Descriptive", "mine")
+    _build()
+    assert [p.read_bytes() for p in (_live(stats) / "assets").iterdir()] == [PNG + b"Pasted image 1.png"]
+
+
+def test_open_pressed_before_a_license_holds_a_marked_note_as_it_was_and_breaks_nothing(stats, tmp_vault):
+    """Open is saved with no license until one is chosen, the order the screen invites."""
+    from silica.kernel import rights
+
+    _written(stats, "Stats/Bayes.md")
+    tmp_vault.note("Stats/Bayes.md", "In my own words, after the exam.\n")
+    rights.set_rewritten("Stats/Bayes.md", True)
+    _say(ROSS, "open")
+    assert _sheet()["files"]
+    _build()
+    assert "bayes.html" in _names(stats)
+
+
+def test_an_image_many_notes_cite_is_fetched_once_and_read_once(stats, tmp_vault, monkeypatch):
+    from silica.kernel import rights
+
+    url = "https://dead.test/banner.png"
+    for n in range(3):
+        tmp_vault.note(f"Stats/Cite {n}.md", f"![]({url})\n\n![[Pasted image 1.png]]\n")
+    read: list[str] = []
+    located = rights._located
+    monkeypatch.setattr(rights, "_located", lambda p: read.append(p.name) or located(p))
+    asked: list[str] = []
+    _sheet(fetch=lambda u: asked.append(u) or {"data": b"", "type": "", "why": "Could not be read"})
+    assert asked == [url] and read.count("Pasted image 1.png") == 1
+
+
+def test_the_check_stops_fetching_at_its_deadline_and_the_rest_stay_links(stats, tmp_vault, monkeypatch):
+    from silica.sources.discover import read
+    from silica.ui.web import public_routes
+
+    _web(tmp_vault)
+    asked: list[str] = []
+    monkeypatch.setattr(read, "fetch_figure", lambda u: asked.append(u) or _png(u))
+    monkeypatch.setattr(public_routes, "_FETCH_SECONDS", 0)
+    sites = [g for g in public_routes._sheet("stats", fresh=True)["groups"] if g["kind"] == "site"]
+    assert asked == [] and sites
+    monkeypatch.setattr(public_routes, "_FETCH_SECONDS", 60)
+    public_routes._sheet("stats", fresh=True)
+    assert len(asked) == 2
+
+
+# --- a location written as XMP ------------------------------------------------------
+
+XMP_ATTR = (b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF><rdf:Description exif:GPSLatitude="45,26.1234N" '
+            b'exif:GPSLongitude="9,11.5678E" tiff:Orientation="6"/></rdf:RDF></x:xmpmeta>')
+XMP_ELEM = (b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF><rdf:Description>'
+            b'<exif:GPSLatitude>45,26.1234N</exif:GPSLatitude><exif:GPSLongitude>9,11.5678E</exif:GPSLongitude>'
+            b'<tiff:Orientation>6</tiff:Orientation></rdf:Description></rdf:RDF></x:xmpmeta>')
+
+
+def _jpeg_xmp(xmp: bytes, exif: bool = False) -> bytes:
+    body = b"http://ns.adobe.com/xap/1.0/\x00" + xmp
+    first = b""
+    if exif:
+        tiff = b"Exif\x00\x00" + _tiff(gps=False)
+        first = b"\xff\xe1" + struct.pack(">H", len(tiff) + 2) + tiff
+    return (b"\xff\xd8" + first + b"\xff\xe1" + struct.pack(">H", len(body) + 2) + body
+            + b"\xff\xda\x00\x02\xff\xd9")
+
+
+def _png_xmp(xmp: bytes) -> bytes:
+    body = b"XML:com.adobe.xmp\x00\x00\x00\x00\x00" + xmp
+    crc = struct.pack(">I", zlib.crc32(b"iTXt" + body))
+    return b"\x89PNG\r\n\x1a\n" + struct.pack(">I", len(body)) + b"iTXt" + body + crc
+
+
+def _webp_xmp(xmp: bytes) -> bytes:
+    chunk = b"XMP " + struct.pack("<I", len(xmp)) + xmp + (b"\x00" if len(xmp) & 1 else b"")
+    return b"RIFF" + struct.pack("<I", 4 + len(chunk)) + b"WEBP" + chunk
+
+
+@pytest.mark.parametrize("data", [_jpeg_xmp(XMP_ATTR), _jpeg_xmp(XMP_ELEM), _jpeg_xmp(XMP_ATTR, exif=True),
+                                  _png_xmp(XMP_ATTR), _webp_xmp(XMP_ELEM)])
+def test_a_location_written_as_xmp_is_found_and_blanked_in_place(data):
+    from silica.kernel.image_meta import has_location, strip_location
+
+    assert has_location(data)
+    clean = strip_location(data)
+    assert len(clean) == len(data) and not has_location(clean)
+    assert b"45,26" not in clean and b"9,11" not in clean and b"Orientation" in clean
+
+
+def test_a_pngs_xmp_keeps_a_checksum_that_holds():
+    from silica.kernel.image_meta import strip_location
+
+    clean = strip_location(_png_xmp(XMP_ATTR))
+    length = struct.unpack(">I", clean[8:12])[0]
+    assert struct.unpack(">I", clean[16 + length:20 + length])[0] == zlib.crc32(clean[12:16 + length])
+
+
+def test_xmp_with_no_location_comes_back_as_it_came():
+    from silica.kernel.image_meta import has_location, strip_location
+
+    data = _jpeg_xmp(b'<rdf:Description tiff:Orientation="6"/>')
+    assert strip_location(data) == data and not has_location(data)
+
+
+def test_a_compressed_png_xmp_holding_a_location_goes_whole():
+    """Compressed, it cannot be blanked at its length; a PNG has no offsets between chunks."""
+    from silica.kernel.image_meta import has_location, strip_location
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+    iend = chunk(b"IEND", b"")
+    data = b"\x89PNG\r\n\x1a\n" + chunk(b"iTXt", b"XML:com.adobe.xmp\x00\x01\x00\x00\x00" + zlib.compress(XMP_ATTR)) + iend
+    assert has_location(data)
+    assert strip_location(data) == b"\x89PNG\r\n\x1a\n" + iend

@@ -403,3 +403,18 @@ def test_a_swap_that_cannot_put_the_old_folder_back_says_where_it_waits(host, mo
     old = [p for p in tmp.iterdir() if p.name.endswith("-old")]
     assert len(old) == 1 and (old[0] / "Forgetting curve.md").is_file()
     assert "could not be put back" in caplog.text and old[0].name in caplog.text
+
+
+def test_two_computer_wikis_each_publish_their_own_first_image(host):
+    """A computer numbers its images from 1 in every wiki it sends, so two wikis both hold
+    `1-image.png`; each page shows its own, never the other's or none."""
+    tc, tmp = host
+    for folder, blob in (("Biology", PNG + b"cell"), ("Chemistry", PNG + b"flask")):
+        notes = {"Intro.md": f"Look.\n\n![[{folder}/assets/1-image.png]]\n"}
+        r = send(tc, package(notes=notes, assets={"1-image.png": blob}, folder=folder, slug=folder.lower(),
+                             title=folder, answers={}))
+        assert r.status_code == 200, r.text
+    for slug, blob in (("biology", PNG + b"cell"), ("chemistry", PNG + b"flask")):
+        live = tmp / "public" / "marta" / "live" / slug
+        assert [p.read_bytes() for p in (live / "assets").iterdir()] == [blob]
+        assert "Image not published" not in (live / "intro.html").read_text(encoding="utf-8")

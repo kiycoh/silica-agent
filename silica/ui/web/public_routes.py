@@ -304,7 +304,19 @@ async def public_publish(payload: dict | None = None):
         if hosted():
             if turn_on:
                 publish.set_visibility(slug, "public")
-            out = await asyncio.to_thread(build, slug)
+            try:
+                out = await asyncio.to_thread(build, slug)
+            except Exception:
+                # Turning on put the paused copy back at its address before the build ran, so a
+                # build that fails served the notes struck since; the wiki goes back Off. Its
+                # "Off since Free" line is not restored: set_visibility clears it either way.
+                if turn_on:
+                    try:
+                        publish.set_visibility(slug, "off")
+                    except Exception as undo:
+                        # Logged and not raised: the build's error is the one the person must read.
+                        logger.warning("publish: %s not turned back off (%s: %s)", slug, type(undo).__name__, undo)
+                raise
         else:
             # "Turn off on your account" sends the Off wiki as it is, so its copy there leaves its
             # address; otherwise an Off wiki goes out Public, and the row turns Public only once the
@@ -563,6 +575,14 @@ def public_reveal(payload: dict):
 # changes only what is made of them. One process per account, so one screen.
 _WIKI: dict[str, dict] = {}
 
+# The check fetches a wiki's remote images one after another (rights.read_wiki), each allowed
+# web_fetch's 30 s a step and 120 s a body, and a failed one is fetched again at every check.
+# Past this the rest stay links until the next check, so a wiki citing a dozen dead hosts opens
+# its screen inside the hosted edge's 125 s cut (linked_publish._refusal) and not after 6 minutes.
+# shortcut: the fetch in flight at the deadline still runs to web_fetch's limits, 90 s worst on a
+# dead host; pass the deadline into web_fetch if a check is ever cut at the edge with this in place.
+_FETCH_SECONDS = 60
+
 
 def _thumbnail(img: dict) -> str:
     """Where the screen reads an image: a kept copy from the route below, the vault's through
@@ -576,7 +596,14 @@ def _sheet(slug: str, *, fresh: bool = False) -> dict:
 
     if fresh or slug not in _WIKI:
         _WIKI.clear()
-        _WIKI[slug] = rights.read_wiki(slug, fetch=fetch_figure)
+        end = time.monotonic() + _FETCH_SECONDS
+
+        def fetch(url: str) -> dict:
+            if time.monotonic() >= end:
+                return {"data": b"", "type": "", "why": "Not read in time"}
+            return fetch_figure(url)
+
+        _WIKI[slug] = rights.read_wiki(slug, fetch=fetch)
     return rights.sheet(_WIKI[slug], rights.answers(), _thumbnail)
 
 
@@ -688,6 +715,12 @@ async def _write_turn(fn, *args, **kwargs):
             out = await asyncio.to_thread(fn, *args, **kwargs)
         except ValueError as exc:
             raise Refused(400, exc)
+        except OSError as exc:
+            # This vault's disk, full or not writable, partway through the notes: not the page's
+            # host, which the 502 below would blame. httpx wraps its socket errors, and web_fetch
+            # turns a name that does not resolve into a ValueError, so neither lands here.
+            logger.warning("save failed: %s: %s", type(exc).__name__, exc)
+            raise HTTPException(500, f"the notes could not be written here ({exc.strerror or exc})")
         except Exception as exc:
             logger.warning("save failed: %s: %s", type(exc).__name__, exc)
             raise HTTPException(502, "that page could not be read right now")

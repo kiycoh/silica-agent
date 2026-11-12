@@ -97,7 +97,9 @@ def collect(public: Path, pairs: list[tuple[str, str]], ok: set[tuple[str, str]]
                 if f.stat().st_size > _MAX_MANIFEST:
                     continue
                 e = entry(json.loads(f.read_text(encoding="utf-8")), h, d.name)
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError):
+                # One account's file, unreadable or not JSON or nested past the parser's depth (a
+                # few KB of `[` does it), skips that wiki: raised, it stopped every account's index.
                 continue
             if e:
                 out.append(e)

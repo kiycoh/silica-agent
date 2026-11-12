@@ -539,3 +539,17 @@ def test_words_that_spell_the_apps_image_route_are_words_and_copy_nothing(marta,
     assert not [p for p in (live / "assets").iterdir() if "scan" in p.name]
     assert "in prose" in (live / "forgetting-curve.html").read_text(encoding="utf-8")
     assert "/asset?path=private-scan.png in prose" in (live / "forgetting-curve.html").read_text(encoding="utf-8")
+
+
+def test_a_manifest_nested_past_the_parser_skips_that_wiki_and_lists_the_rest(tmp_path):
+    """An account writes its own vault.json: one too deep for json.loads stopped the whole index."""
+    import json
+
+    from silica.ui.web import pages_catalog
+
+    for slug, body in (("deep", "[" * 100_000), ("fine", json.dumps({"listed": True, "title": "Fine"}))):
+        d = tmp_path / "t01" / "marta" / "live" / slug
+        d.mkdir(parents=True)
+        (d / "vault.json").write_text(body, encoding="utf-8")
+    out = pages_catalog.collect(tmp_path, [("marta", "t01")], {("t01", "deep"), ("t01", "fine")})
+    assert [e["slug"] for e in out] == ["fine"]

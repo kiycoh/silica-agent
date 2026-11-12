@@ -186,3 +186,23 @@ def test_a_wiki_file_stops_before_it_copies_the_image_that_passes_the_cap(marta,
     # the first photo fits and is copied; the second would pass the cap, so it is never even read
     assert read.count(len(big)) == 1 and sum(read) <= 1_000_000
     assert not list(silica_tmp_dir().iterdir())
+
+
+def test_every_image_a_wiki_file_holds_is_one_its_opener_keeps(marta, build_file, tmp_vault):
+    """Open a file keeps only the assets saved_page._ASSET takes, so a name past its length or a
+    type outside it would leave a note pointing at an image the reader never gets."""
+    import re
+
+    from silica.sources.saved_page import _ASSET
+    from tests.test_public_site import PNG
+
+    long = "a figure drawn by hand " * 8 + ".png"
+    (marta / "vault" / long).write_bytes(PNG)
+    (marta / "vault" / "scan.bmp").write_bytes(b"BM" + b"\x00" * 30)
+    tmp_vault.note("Memory/Figures.md", f"Two.\n\n![[{long}]]\n\n![[scan.bmp]]\n")
+    path, _ = build_file("memory")
+    names = _names(path)
+    assets = {n.rsplit("/", 1)[1] for n in names if "/assets/" in n}
+    assert len(assets) == 2 and all(_ASSET.fullmatch(a) for a in assets)
+    cited = {m for n in names if n.endswith(".md") for m in re.findall(r"assets/([^)\s]+)", _read(path, n))}
+    assert cited <= assets

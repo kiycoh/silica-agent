@@ -457,6 +457,11 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
     _mark_edits(notes, vault)
 
     on_disk = images_by_name(vault)
+    if conf["from_link"]:
+        # A computer numbers its images from 1 in every wiki it sends (linked_publish._pack), so two
+        # received wikis both hold `1-image.png`; by name alone the second showed the first's file,
+        # which `decide` then held back as nobody's. This wiki's notes point at its own copies.
+        on_disk.update(images_by_name(vault / conf["folder"] / "assets"))
     local: dict[str, dict] = {}
     remote: dict[str, dict] = {}
     titles = {Path(p).stem.casefold(): p for p in paths}
@@ -476,16 +481,21 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
             found = on_disk.get(name)
             if found is None:
                 continue
-            row = local.setdefault(name, {
-                "name": found.name, "src": found.relative_to(vault).as_posix(), "notes": [],
-                "file": leaves["traced"].get(name), "group": "folder:" + _folder_of(p, conf["folder"]),
-                "location": _located(found)})
-            row["notes"].append(p)
+            # Built once a name and not through setdefault, whose default is evaluated on every
+            # call: a logo 500 notes embed was read whole 500 times.
+            if name not in local:
+                local[name] = {
+                    "name": found.name, "src": found.relative_to(vault).as_posix(), "notes": [],
+                    "file": leaves["traced"].get(name), "group": "folder:" + _folder_of(p, conf["folder"]),
+                    "location": _located(found)}
+            local[name]["notes"].append(p)
         # A computer's remote image goes out as the link naming its host (ADR-0153 point 23b): its
         # author answered on the computer, so this account is asked nothing and fetches nothing.
         for url in shown_remote if not conf["from_link"] else ():
-            row = remote.setdefault(url, _remote_row(url, vault, fetch))
-            row["notes"].append(p)
+            # once an address: a dead host ten notes cite cost ten 30 s timeouts
+            if url not in remote:
+                remote[url] = _remote_row(url, vault, fetch)
+            remote[url]["notes"].append(p)
     for row in local.values():
         if row["file"] and row["file"] not in files:
             files[row["file"]] = {"notes": [], "images": [], "credit": leaves["credits"].get(row["file"], "")}
@@ -585,8 +595,11 @@ def decide(wiki: dict, ans: dict) -> dict:
 
     note_credits: dict[str, str] = {}
     for p in notes:
+        # Open is saved before its license is chosen (save_answer keeps only what was said), and
+        # a note marked as its author's goes out meanwhile: a credit names a license or nothing.
         said = [f"{a['credit']}, {a['license']}" if a.get("credit") else a["license"]
-                for f in wiki["notes"][p]["files"] if (a := ans.get(f, {})).get("answer") == "open"]
+                for f in wiki["notes"][p]["files"]
+                if (a := ans.get(f, {})).get("answer") == "open" and a.get("license")]
         # a computer's note carries its answer itself: the ledger naming its files stayed there
         if (a := _sent(wiki, p)).get("answer") == "open" and a.get("license"):
             said.append(f"{a['credit']}, {a['license']}" if a.get("credit") else a["license"])

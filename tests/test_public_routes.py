@@ -808,3 +808,42 @@ def test_a_file_leaves_out_what_publish_leaves_out_until_it_is_answered(client, 
     tc.post("/public/check/answer", json={"vault": "memory", "key": "Book.pdf", "answer": "mine"})
     assert len(pages()) == 2 and "memory/forgetting-curve.html" in pages()
     assert tc.post("/public/publish", json={"vault": "memory"}).json()["result"]["notes"] == 2
+
+
+@pytest.mark.parametrize("exc", [ValueError("this account has no room"), OSError(28, "No space left on device")])
+def test_a_turn_on_whose_build_fails_leaves_the_wiki_off_and_its_old_copy_paused(client, monkeypatch, exc):
+    """Turning on puts the paused copy back before the build: one that fails served the old notes."""
+    from silica.kernel import public_site
+
+    _as_hosted(monkeypatch)
+    tc, tmp = client
+    tc.post("/public/vault", json={"folder": "Memory"})
+    tc.post("/public/publish", json={"vault": "memory"})
+    tc.post("/public/vault/memory", json={"visibility": "off"})
+    root = tmp / "public" / "marta"
+    assert (root / "paused" / "memory").is_dir()
+
+    def broken(slug, vault=None):
+        raise exc
+
+    monkeypatch.setattr(public_site, "build", broken)
+    if isinstance(exc, ValueError):
+        assert tc.post("/public/publish", json={"vault": "memory"}).status_code == 400
+    else:
+        with pytest.raises(OSError):
+            tc.post("/public/publish", json={"vault": "memory"})
+    assert tc.get("/public").json()["vaults"][0]["visibility"] == "off"
+    assert not (root / "live" / "memory").exists() and (root / "paused" / "memory").is_dir()
+
+
+def test_a_save_the_disk_refuses_says_so_and_not_that_the_page_was_unreachable(client, monkeypatch):
+    from silica.sources import saved_page
+
+    tc, _ = client
+
+    def full(*a, **kw):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(saved_page, "save_invitation", full)
+    r = tc.post("/vault/invitations/save", json={"author": "sara", "vault": "tesi"})
+    assert r.status_code == 500 and "No space left on device" in r.text and "could not be read" not in r.text
