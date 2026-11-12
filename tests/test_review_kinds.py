@@ -345,6 +345,27 @@ def test_the_panel_lists_lands_a_yes_and_sends_a_model_yes_to_the_chat(tmp_vault
     assert api.post("/metrics/review/apply", json={"ids": [orphan.id]}).status_code == 404
 
 
+def test_a_bare_undo_takes_back_the_newest_accepted_batch(tmp_vault, monkeypatch):
+    """/undo takes back the last thing Silica wrote. A yes from the queue is one
+    run of many notes, so it goes back whole, as the batch's revert does: before,
+    /undo after a yes said there was nothing to undo (seen 2026-11-12 in the
+    chat, after a yes typed there and after one clicked in Examine)."""
+    from silica.commands import dispatch
+    from silica.config import CONFIG
+
+    vault = CONFIG.vault_path
+    a, b = tmp_vault.note("A.md", "# A\n"), tmp_vault.note("B.md", "# B\n")
+    _toy(monkeypatch, tmp_vault)
+    queue.offer(vault, "toy", [Proposal(id=proposal_id("toy", n), kind="toy", title=n, why="w", notes=(n,),
+                                        data={"path": n}) for n in ("A.md", "B.md")])
+    assert queue.accept(vault, queue.pick(vault, ["toy"]))["run"]
+
+    said = _said(dispatch("/undo", []))
+    assert tmp_vault.read(a) == "# A\n" and tmp_vault.read(b) == "# B\n", said
+    assert queue.batches(vault)[0]["reverted"]
+    assert "Nothing to undo" in _said(dispatch("/undo", []))
+
+
 def test_a_duplicate_judged_a_pure_copy_lands_when_the_worker_marks_the_other_note(tmp_vault, kinds, monkeypatch):
     """dedup._route_verdict merges no text into a pure duplicate: it points the
     other note at the winner (superseded_by), records its name as an alias and
