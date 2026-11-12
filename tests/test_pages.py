@@ -176,6 +176,17 @@ def test_the_app_takes_messages_only_from_its_own_origin(script):
     assert listeners and all("e.origin !== location.origin" in first for first in listeners)
 
 
+def test_a_page_navigating_its_frame_cannot_make_the_app_call_the_model(client, monkeypatch):
+    """frame-src 'self' lets a page navigate its own frame to any route of the app:
+    `location = "/vault_brief?refresh=1"` from a hand-written page was a worker-model
+    call (2026-11-13). Its navigation comes from an opaque origin, so cross-site."""
+    from silica.config import CONFIG
+
+    monkeypatch.setattr(CONFIG, "vault_brief", False)
+    assert client.get("/vault_brief?refresh=1", headers={"sec-fetch-site": "cross-site"}).status_code == 403
+    assert client.get("/vault_brief", headers={"sec-fetch-site": "same-origin"}).json() == {"enabled": False, "text": ""}
+
+
 def test_a_host_header_that_is_no_host_puts_nothing_in_the_page_policy():
     from silica.ui.web import render
 
