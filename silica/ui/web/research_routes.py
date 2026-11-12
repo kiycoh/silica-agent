@@ -75,6 +75,12 @@ def dismiss_research(job_id: str):
     return {"ok": True}
 
 
+@router.get("/{job_id}/notes")
+def admitted_notes(job_id: str):
+    """The notes /nucleate wrote from the parts, for the study plan offer."""
+    return {"notes": deep_research.admitted(job_id)}
+
+
 @router.post("/{job_id}/nucleate")
 def nucleate_parts(job_id: str, payload: dict | None = None):
     """The finished job's offer (point 8, Deliver): /nucleate over the parts

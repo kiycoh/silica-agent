@@ -295,7 +295,11 @@ function rsRow(rec) {
     const written = rec.parts.filter((p) => p.note).length;
     what.append(`${written} part${written === 1 ? "" : "s"} in the Inbox · `);
     what.append(jobButton("open", "job-note linklike", "open the note that lists the parts", () => openNote(rec.parent)));
-    if (rec.nucleated) what.append(" · nucleated");
+    if (rec.nucleated) {
+      what.append(" · nucleated");
+      acts.append(jobButton("make a study plan", "job-alt linklike", "a plan in Memorize over the notes the parts became",
+        () => rsStudy(rec)));
+    }
   } else {
     what.textContent = rec.error || (rec.state === "interrupted" ? "the server restarted while this research was running" : "it stopped");
   }
@@ -372,14 +376,31 @@ function rsChooser(rec, row) {
 
 function rsTopics(rec) {
   const box = mkEl("div", "rs-topics");
-  box.append(mkEl("span", "rs-aside", "Met on the way, not researched in this run:"));
-  for (const t of rec.topics) {
-    const item = mkEl("span", "rs-topic", t + " ");
-    item.append(jobButton("research this", "linklike", "a new research on this topic, with its own plan",
+  box.append(mkEl("span", "rs-aside", "Met on the way, not researched in this run; each opens a new research:"));
+  // The topic is the button: "research this" beside each of six doubled the row.
+  rec.topics.forEach((t, i) => {
+    if (i) box.append(mkEl("span", "rs-aside", "·"));
+    box.append(jobButton(t, "linklike rs-topic", "research this: a new run, with its own plan",
       () => rsOpen({ shape: rec.shape === "anchored" ? "literature" : rec.shape, question: t, depth: rec.depth })));
-    box.append(item);
-  }
+  });
   return box;
+}
+
+// The notes the parts became, as a Memorize plan's Study (ADR-0158 point 10):
+// the same fields "Test me on this…" fills, with these notes as its items.
+async function rsStudy(rec) {
+  try {
+    const { notes } = await api(`/research/${rec.id}/notes`);
+    if (!notes.length) { notify("no note came of the parts yet: plan it once /nucleate has written them", "warn"); return; }
+    const stems = notes.map(noteStem);
+    const name = rec.question.slice(0, 80);
+    lrFormReset({ step: "fields", scope: "notes", target: stems, label: name, name, nameTouched: true });
+    if (activeTab !== "learn") showTab("learn");
+    lrGo({ view: "new" });
+    lrPreviewScope();
+  } catch (e) {
+    notify(e.status ? e.message : "the server could not be reached");
+  }
 }
 
 function rsNucleate(rec, parts) {

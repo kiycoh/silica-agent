@@ -350,6 +350,47 @@ def mark_nucleated(job_id: str, parts: list[str]) -> list[str]:
     return chosen
 
 
+def admitted(job_id: str) -> list[str]:
+    """The vault notes /nucleate wrote from this job's parts, which the row
+    offers as a study plan in Memorize (ADR-0158 point 10, the cluster shape:
+    notes the person never read are the vault's, not yet their knowledge).
+    Found by the part's file name in a note's `sources:`, which the distiller
+    writes and which a part keeps when /nucleate moves it out of the Inbox."""
+    from silica.kernel.base import frontmatter
+    from silica.kernel.base.layout import is_inbox_path
+    from silica.kernel.base.noteshape import is_spine
+
+    rec = read(job_id)
+    if rec is None:
+        raise Refused("there is no such research")
+    names = {Path(p["note"]).name for p in rec["parts"] if p.get("note")}
+    root = Path(CONFIG.vault_path or ".")
+    out: list[str] = []
+    # A walk of the files and not the note index: the notes were written a
+    # moment ago, and the index catches up on its own schedule.
+    for path in sorted(root.rglob("*.md")):
+        rel = path.relative_to(root).as_posix()
+        if any(part.startswith(".") for part in path.relative_to(root).parts) \
+                or is_inbox_path(rel) or rel.startswith("sources/"):
+            continue
+        try:
+            data, _, _ = frontmatter.split(path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue  # one unreadable note is one note not offered
+        if not isinstance(data, dict):
+            continue
+        # Not the person's own notes the run patched (`AI: partial`, measured
+        # on the first live run: two of thirteen), nor a spine, nor the
+        # folder's hub (`Notes/Notes.md`): those are not what the run taught.
+        if str(data.get("AI", "")).lower() == "partial" or is_spine(data) or path.stem == path.parent.name:
+            continue
+        srcs = data.get("sources")
+        srcs = [srcs] if isinstance(srcs, str) else srcs or []
+        if any(Path(str(s)).name in names for s in srcs):
+            out.append(rel)
+    return out
+
+
 def _run(rec: dict, stop: threading.Event) -> None:
     from silica.model import llm
     from silica.model.usage_limits import UsageLimited

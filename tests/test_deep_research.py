@@ -253,3 +253,16 @@ def test_nucleate_holds_a_document_silica_wrote_from_the_vault_back(tmp_vault):
     assert ingest.nucleate(["Documents/Book.md"], console=_Out()) == ""
     assert "written by Silica from your notes" in said[-1] and "--anyway" in said[-1]
     assert "written by Silica" in ingest.run_injector(["Documents/Book.md"], "Notes")["error"]
+
+
+def test_the_notes_the_parts_became_are_found_by_their_sources(tmp_vault, monkeypatch):
+    monkeypatch.setattr(wr, "web_research", _fake_loop({"Sub-question 0?": 4}, []))
+    monkeypatch.setattr(dr, "_ask", lambda m: "[]")
+    rec, stop = _started(_approved(1))
+    dr._run(rec, stop)
+    part = Path(dr.read(rec["id"])["parts"][0]["note"]).name
+    tmp_vault.note("Notes/Born of it.md", f'---\nsources:\n  - "{part}"\n---\nA claim.\n')
+    tmp_vault.note("Notes/Unrelated.md", '---\nsources:\n  - "Other.md"\n---\nB.\n')
+    tmp_vault.note("Notes/Mine, patched.md", f'---\nAI: partial\nsources:\n  - "{part}"\n---\nC.\n')
+    tmp_vault.note("Notes/Notes.md", f'---\nsources:\n  - "{part}"\n---\nhub\n')
+    assert dr.admitted(rec["id"]) == ["Notes/Born of it.md"]

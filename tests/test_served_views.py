@@ -134,7 +134,7 @@ SHARED_ROUTES = {
     "/jobs/{job_id}/dismiss", "/jobs/{job_id}/retry", "/jobs/{job_id}/turn", "/limits", "/mail/upload",
     # ADR-0158 point 8: a deep research starts from the chat's + and offers its /nucleate there
     "/research", "/research/plan", "/research/start", "/research/{job_id}/dismiss",
-    "/research/{job_id}/nucleate", "/research/{job_id}/stop",
+    "/research/{job_id}/nucleate", "/research/{job_id}/notes", "/research/{job_id}/stop",
     "/memory", "/memory/reset", "/memory/undo", "/memory/{scope}", "/messages", "/narration",
     "/narration/sse", "/note", "/note/asset", "/note/check", "/note/check/keep", "/note/history",
     "/note/history/diff", "/note/history/restore", "/note/let-go", "/note/new", "/note/raw",
