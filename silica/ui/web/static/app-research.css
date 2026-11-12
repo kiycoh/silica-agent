@@ -1,4 +1,4 @@
-/* --- a deep research (ADR-0158 point 8) -------------------------------------- */
+/* --- a deep research and a long document (ADR-0158 points 8 and 3) ----------- */
 /* The form and the plan are a card in the conversation, at the transcript's
    measure; the running job is a row in its own tray above the field, shaped
    like the conversions' (app-jobs.css). Teal only on what is clickable; amber
@@ -20,6 +20,9 @@
   order: -2;
   flex: 1 0 100%;
   padding: 0.2rem 0.2rem 0;
+  /* A finished run's parts can run long; the field stays in view. */
+  max-height: 45vh;
+  overflow-y: auto;
 }
 
 .rs-row {
@@ -79,6 +82,9 @@
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--ash);
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
 }
 
 .rs-q input[type="checkbox"] {
@@ -95,13 +101,18 @@
   text-underline-offset: 2px;
 }
 
-.rs-choose,
 .rs-topics {
+  flex: 1 0 100%;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line);
+}
+
+.rs-choose {
   flex: 1 0 100%;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem 0.8rem;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
   padding-top: 0.4rem;
   border-top: 1px solid var(--line);
 }
@@ -110,8 +121,35 @@
   margin-left: auto;
 }
 
-.rs-topic {
-  color: var(--frost);
+.rs-topics summary {
+  cursor: pointer;
+}
+
+.rs-topics summary:hover {
+  color: var(--accent);
+}
+
+.rs-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.rs-row .rs-topic {
+  text-align: left;
+  background: none;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-meta);
+  padding: 0.15rem 0.6rem;
+  cursor: pointer;
+}
+
+.rs-row .rs-topic:hover {
+  border-color: var(--accent);
 }
 
 .rs-aside {
@@ -413,5 +451,137 @@
   .rs-pwhat {
     grid-column: 2;
     text-align: left;
+  }
+}
+
+/* --- a long document (ADR-0158 point 3) ---------------------------------------- */
+
+#documents {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  position: relative;
+  z-index: 1;
+}
+
+#documents[hidden] {
+  display: none;
+}
+
+#composer #documents {
+  order: -2;
+  flex: 1 0 100%;
+  padding: 0.2rem 0.2rem 0;
+}
+
+.dc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.dc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--frost);
+  font-size: var(--fs-meta);
+  padding: 0.1rem 0.2rem 0.1rem 0.65rem;
+}
+
+.dc-chip .rs-x {
+  padding: 0.1rem 0.35rem;
+}
+
+.dc-pick {
+  background: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--ash);
+  font: inherit;
+  font-size: var(--fs-meta);
+  padding: 0.28rem 0.5rem;
+  cursor: pointer;
+}
+
+.dc-pick:hover,
+.dc-pick:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.dc-count {
+  margin: 0.4rem 0 0;
+}
+
+.dc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.dc-outline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dc-ch {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr) auto auto;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--line);
+  font-size: 13.5px;
+}
+
+.dc-ch.dropped .dc-title {
+  color: var(--ash-dim);
+  text-decoration: line-through;
+}
+
+.dc-title {
+  color: var(--frost);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dc-thin {
+  color: var(--warn);
+}
+
+.dc-gaps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--warn);
+  border-radius: var(--r);
+}
+
+.dc-gaps-head {
+  margin: 0;
+  color: var(--frost);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.dc-gaps .rs-help {
+  margin: 0;
+}
+
+.dc-gap-acts {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 600px) {
+  .dc-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

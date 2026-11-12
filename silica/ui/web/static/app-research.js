@@ -70,7 +70,8 @@ function rsCard() {
 }
 
 function rsOpen(prefill = {}) {
-  const st = { shape: "literature", question: "", depth: "standard", scholarly: true, ...prefill };
+  const shape = prefill.shape || "literature";
+  const st = { shape, question: "", depth: "standard", scholarly: shape === "literature", ...prefill };
   if (st.shape === "anchored" && !st.note) st.note = rsOpenNote();
   rsForm(rsCard(), st);
 }
@@ -301,7 +302,9 @@ function rsRow(rec) {
         () => rsStudy(rec)));
     }
   } else {
-    what.textContent = rec.error || (rec.state === "interrupted" ? "the server restarted while this research was running" : "it stopped");
+    // recover() writes the conversions' sentence on every kind it interrupts
+    what.textContent = rec.state === "interrupted" ? "the server restarted while this research was running; the parts written are in the Inbox"
+      : rec.error || "it stopped";
   }
   if (rec.state !== "running") {
     const x = jobButton("✕", "job-x", "dismiss; the notes stay where they are", async () => {
@@ -374,15 +377,21 @@ function rsChooser(rec, row) {
   return foot;
 }
 
+// Closed by default: six topics opened under the row took half a phone's
+// height above the field. Each topic is a pill that opens a new research.
+const rsTopicsOpen = new Set();
 function rsTopics(rec) {
-  const box = mkEl("div", "rs-topics");
-  box.append(mkEl("span", "rs-aside", "Met on the way, not researched in this run; each opens a new research:"));
-  // The topic is the button: "research this" beside each of six doubled the row.
-  rec.topics.forEach((t, i) => {
-    if (i) box.append(mkEl("span", "rs-aside", "·"));
-    box.append(jobButton(t, "linklike rs-topic", "research this: a new run, with its own plan",
+  const box = mkEl("details", "rs-topics");
+  box.open = rsTopicsOpen.has(rec.id);
+  box.addEventListener("toggle", () => { if (box.open) rsTopicsOpen.add(rec.id); else rsTopicsOpen.delete(rec.id); });
+  const n = rec.topics.length;
+  box.append(mkEl("summary", "rs-aside", `${n} topic${n === 1 ? "" : "s"} met on the way, not researched in this run`));
+  const pills = mkEl("div", "rs-pills");
+  for (const t of rec.topics) {
+    pills.append(jobButton(t, "rs-topic", "research this: a new run, with its own plan",
       () => rsOpen({ shape: rec.shape === "anchored" ? "literature" : rec.shape, question: t, depth: rec.depth })));
-  });
+  }
+  box.append(pills);
   return box;
 }
 
