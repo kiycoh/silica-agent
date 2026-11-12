@@ -333,6 +333,26 @@ def test_the_token_goes_only_with_the_persons_own_fetch_on_a_laptop(served, monk
     assert "Authorization" not in seen[-1][1]
 
 
+def test_discover_and_the_check_read_github_without_the_token(served, monkeypatch):
+    """Through their own entry points, not `_gh_headers`: an article Discover
+    reads and a page the check of a selection opens are addresses a feed or a
+    search named (ADR-0162 point 5)."""
+    from silica.kernel.check import web as check_web
+    from silica.session.check import web_legs
+    from silica.sources.discover import story
+
+    table, seen = served
+    table["https://api.github.com/"] = _resp({"title": "t", "comments": 0, "state": "open"})
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_secret")
+
+    story.article_text({"url": "https://github.com/o/r/issues/1", "title": "t"})
+    check_web._read([{"url": "https://github.com/o/r/issues/2"}], web_legs()[1], "a claim")
+
+    assert [url for url, _ in seen] == ["https://api.github.com/repos/o/r/issues/1",
+                                        "https://api.github.com/repos/o/r/issues/2"]
+    assert all("Authorization" not in headers for _, headers in seen)
+
+
 def test_on_the_server_githubs_refusals_name_no_token(served, monkeypatch):
     table, _ = served
     monkeypatch.setenv("SILICA_HOSTED", "1")
