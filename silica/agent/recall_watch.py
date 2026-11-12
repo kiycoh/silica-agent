@@ -57,7 +57,7 @@ class RecallWatch:
         # tool message, which the loop may already have stubbed (ADR-0095).
         self.numbers: set[str] = set()
         # Did the turn search the vault or read a note at all? A general-knowledge
-        # block before any such call is said under the answer (ADR-0169 point 2).
+        # block in a turn with no such call is held back (ADR-0169 point 2).
         self.looked = False
 
     def __call__(self, event) -> None:
