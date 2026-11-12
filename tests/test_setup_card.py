@@ -32,6 +32,9 @@ def card(tmp_vault, tmp_path, monkeypatch):
     monkeypatch.setattr(SESSION, "busy", False)
     monkeypatch.setattr(CONFIG, "model", "")
     monkeypatch.setattr(CONFIG, "_provider", "lmstudio")
+    # /config and a provider write read the model's window, from openrouter.ai or
+    # the local server: unknown here, as with no answer.
+    monkeypatch.setattr("silica.model.limits._model_limits_fetch", lambda provider, model: (0, 0))
     for key in _CARD_KEYS:  # apply() makes a key live in os.environ
         monkeypatch.setenv(key, "")
     return TestClient(server.app), env
@@ -117,6 +120,9 @@ def test_the_card_shows_without_a_model_or_its_key_and_never_on_the_server(card,
     ("failed: OpenrouterException 402: This request requires more credits, or fewer max_tokens",
      "The provider says this account has no credit left"),
     (None, "No model is set up yet"),  # the probe's own skip, CONFIG having no model
+    # the chat's first question in the audit, as litellm worded it
+    ("failed: litellm.BadRequestError: LLM Provider NOT provided. Pass in the LLM provider you are "
+     "trying to call. You passed model=", "No model is set up yet"),
 ])
 def test_test_says_what_failed_in_one_sentence_and_keeps_the_probe_as_detail(card, monkeypatch, detail, said):
     from silica.onboarding import checks

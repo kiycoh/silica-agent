@@ -1099,21 +1099,29 @@ document.addEventListener("keydown", (e) => {
 
 // The doctor's rows in plain words (ADR-0172 point 2), by check name: its own
 // text is `silica doctor`'s too and names env vars and tool names, so it is kept
-// under "details" and rewritten here, not in checks.py. A row not named here
-// shows as the doctor wrote it.
+// under "details" and rewritten here, not in checks.py. Each entry reads the
+// detail for the one branch of the check it describes and answers null for the
+// others, which show as the doctor wrote them: one check has several causes.
 const NOTICE_SAID = {
-  "chat model": () => ["No model is set up, so the chat cannot answer yet.",
-    "The chat shows how to choose one: an online model with a key, or one on this computer."],
-  "chat endpoint": () => ["The model does not answer: what runs it is not running.",
-    "Start LM Studio or Ollama, or choose another model in Settings, Brains."],
+  "chat model": (r) => /is unset/.test(r.detail)
+    ? ["The model has no API key, so the chat cannot answer yet.", "The chat shows where to paste one."]
+    : ["No model is set up, so the chat cannot answer yet.",
+       "The chat shows how to choose one: an online model with a key, or one on this computer."],
+  "chat endpoint": (r) => /unreachable/.test(r.detail)
+    ? ["The model does not answer: what runs it is not running.",
+       "Start LM Studio or Ollama, or choose another model in Settings, Brains."] : null,
   vault: (r) => /inbox folder/.test(r.detail)
     ? ["This vault has no Inbox folder, where links and documents to turn into notes land.",
        "Create a folder named Inbox at the top of the vault."] : null,
-  embeddings: () => ["Search by meaning is off, so search matches words only.",
-    "It needs the model that reads for meaning; Settings, Brains, names it as the embedding model."],
-  rerank: () => ["Search results are not reordered by a second model. This is optional.", ""],
-  "recall indexes": () => ["Search by meaning has no index yet.",
-    "Type /embed in the chat to build it, then /cooccur."],
+  embeddings: (r) => /index holds/.test(r.detail)
+    ? ["Search by meaning is off until its index is built again for the new model.", "Type /embed in the chat."]
+    : /unreachable|should return/.test(r.detail)
+      ? ["Search by meaning is off, so search matches words only.",
+         "It needs the model that reads for meaning; Settings, Brains, names it as the embedding model."] : null,
+  "recall indexes": (r) => /embedding index is empty/.test(r.detail)
+    ? ["Search by meaning has no index yet.", "Type /embed in the chat to build it."]
+    : /no retrieval index/.test(r.detail)
+      ? ["Search by meaning has no index yet.", "Type /embed in the chat to build it, then /cooccur."] : null,
   dictation: () => ["Dictation is off. This is optional.",
     "Settings, Language, browser speech turns on the browser's own."],
   converters: (r) => /office missing/.test(r.detail)

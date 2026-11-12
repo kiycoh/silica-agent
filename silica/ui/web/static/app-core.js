@@ -73,7 +73,9 @@ const postJson = (url, body) => fetch(url, {
 });
 async function answerOf(r) {
   const data = await r.json().catch(() => ({})); // an empty or HTML body: the status still says what happened
-  if (!r.ok) throw Object.assign(new Error(failureSaid(data, `HTTP ${r.status}`)), { status: r.status, data });
+  // A body with no sentence of its own (a proxy's page, a crash) still gives one,
+  // the status kept in it for whoever reports it (ADR-0172 point 5).
+  if (!r.ok) throw Object.assign(new Error(failureSaid(data, `The server refused this (HTTP ${r.status}). Try again, or reload the page.`)), { status: r.status, data });
   return data;
 }
 const api = async (url, init) => answerOf(await fetch(url, init));
