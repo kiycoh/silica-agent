@@ -128,6 +128,8 @@ def test_the_page_command_asks_the_model_to_read_then_write(vault):
     asked = expansion('/page "a timeline of Rome"')
     assert "a timeline of Rome" in asked and "silica_write_page" in asked
     assert refusal("/page").startswith("Usage: /page")
+    # An apostrophe is a letter in what the page is about, not an open quote.
+    assert "Make a page: a site on Caravaggio's light\n" in expansion("/page a site on Caravaggio's light")
 
 
 # --- the route --------------------------------------------------------------------
