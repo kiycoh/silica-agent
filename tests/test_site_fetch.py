@@ -172,6 +172,26 @@ def test_a_code_fence_left_open_closes_where_its_post_or_comment_ends(served):
     assert text.index("print(1)") < text.index("\n```", text.index("print(1)")) < text.index("**u/next**")
 
 
+def test_a_page_that_is_only_its_title_writes_nothing(served, tmp_vault):
+    """A subreddit, to a reader with no Reddit session, is a script's shell whose
+    only words are its title: /fetch wrote a note that said "Reddit" and nothing
+    else (2026-11-12)."""
+    from pathlib import Path
+
+    from silica.config import CONFIG
+    from silica.sources import web_research
+
+    table, _ = served
+    table["https://www.reddit.com/r/Python/"] = _resp(
+        text="<html><head><title>Reddit</title></head><body><script>boot()</script></body></html>",
+        ctype="text/html")
+    vault = Path(CONFIG.vault_path)
+    before = sorted(vault.rglob("*"))
+    with pytest.raises(ValueError, match="nothing readable"):
+        web_research.fetch_to_inbox("https://www.reddit.com/r/Python/")
+    assert sorted(vault.rglob("*")) == before
+
+
 def test_a_login_page_instead_of_the_listing_is_refused(served):
     table, _ = served
     table["https://www.reddit.com/"] = _resp(text="<html>log in</html>", ctype="text/html")
