@@ -500,7 +500,10 @@ def ask_plan(points: list[dict], objectives: list[str], relations: int = 0, only
     return out
 
 
-_BOLD_RE = re.compile(r"\*\*([^*\n]{3,60}?)\*\*|==([^=\n]{3,60}?)==")
+# A span opens and closes on a non-space, as Markdown's own emphasis does:
+# without it "**+** menu (**summarize**" read " menu (" as a bold term, the
+# text between two spans, and offered it as a cloze's option (2026-11-12).
+_BOLD_RE = re.compile(r"\*\*(?=\S)([^*\n]{3,60}?)(?<=\S)\*\*|==(?=\S)([^=\n]{3,60}?)(?<=\S)==")
 
 
 def _bold_terms(raw: str) -> list[str]:
@@ -623,9 +626,13 @@ def _cloze_wrong(path: str, text: str) -> tuple[list[str], dict[str, str]]:
                 bold.append(t)
                 why[t] = f"This note names {t} under {heading}, for another point."
         for lk in _WIKILINK_ALIAS_RE.finditer(line):
-            target = lk.group(1).strip()
-            t = (lk.group(2) or target.rsplit("/", 1)[-1]).strip()
-            if lk.group(0).startswith("!") or target.startswith("sources/") or not t or t in why:
+            # the option is the note linked to: "Nucleate#The Sources block" was
+            # offered as an answer (2026-11-12), and "[[#Tipi]]" is this note itself;
+            # an anchored link's alias names a section, not the note
+            target, anchor = (lk.group(1).split("#", 1) + [""])[:2]
+            target = target.strip()
+            t = ((None if anchor else lk.group(2)) or target.rsplit("/", 1)[-1]).strip()
+            if lk.group(0).startswith("!") or not target or target.startswith("sources/") or not t or t in why:
                 continue
             links.append(t)
             why[t] = f"This note links to {t}, another note."
