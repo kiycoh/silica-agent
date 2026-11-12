@@ -2708,9 +2708,10 @@ function lrPrevRow(s, prev, n) {
   const sum = mkEl("summary");
   const v = s.verdicts[prev.i];
   const res = s.results[prev.i];
-  // a reload brings back the results and not the verdicts of recorded answers
-  let mark = res?.correct ? "full" : "open";
-  let say = s.skipped[prev.i] ? "skipped" : res ? (res.correct ? "met" : "missed") : "not recorded";
+  // a reload brings back the results and not the verdicts of recorded answers;
+  // `unassisted` is the server's word, so a right pick or a hint reads with help
+  let mark = res?.correct ? (res.unassisted ? "full" : "half") : "open";
+  let say = s.skipped[prev.i] ? "skipped" : res ? (res.correct ? (res.unassisted ? "met" : "met with help") : "missed") : "not recorded";
   if (!s.skipped[prev.i] && v) { const w = lrVerdictSay(prev, v, s); mark = w.mark; say = w.word.toLowerCase(); }
   sum.append(mkEl("span", "chev"), mkEl("span", "k", `${n} · ${prev.point?.kind || prev.kind}`), lrMark(mark, ""),
     mkEl("span", "v", res ? `${say} · ${res.rating_name}, recorded` : say));
@@ -2788,8 +2789,9 @@ function lrOptions(s, it) {
 function lrPick(n) {
   const s = lrSession, it = lrItem();
   if (!s || s.state !== "input" || !lrAsChoice(s, it) || n >= it.options.length) return;
+  // the pick stays out of the written answer: an option's text
+  // submitted from the writing box was graded as met without help (2026-11-12)
   s.picks[it.i] = n;
-  s.answers[it.i] = it.options[n];
   lrRender();
 }
 
@@ -2916,8 +2918,11 @@ function lrSaidWith(s, it) {
 
 // Checking says what it waits for (ADR-0061 §20).
 function lrGradingParts(sheet, s, it) {
+  // the post lrSubmit sent: a pick is its option, and arms no self-rating to wait for
+  const picked = !s.told && lrAsChoice(s, it) ? it.options[s.picks[it.i]] : undefined;
   const kv = mkEl("dl", "lr-kv");
-  kv.append(mkEl("dt", null, "you wrote"), mkEl("dd", "lr-said", s.told ? "(answer requested)" : s.answers[it.i] || "(no answer)"));
+  kv.append(mkEl("dt", null, picked !== undefined ? "you chose" : "you wrote"),
+    mkEl("dd", "lr-said", s.told ? "(answer requested)" : picked ?? (s.answers[it.i] || "(no answer)")));
   kv.append(mkEl("dt", null, "confidence"), mkEl("dd", null, s.conf !== null ? `${LR_CONF.find((c) => c[1] === s.conf)?.[0]} · ${s.conf}` : "skipped"));
   const used = (s.shown[it.i] || []).length;
   if (used) kv.append(mkEl("dt", null, "hints"), mkEl("dd", null, `${used} used`));
@@ -2933,7 +2938,7 @@ function lrGradingParts(sheet, s, it) {
   fill.style.animationDuration = LR_GRADE_WAIT_MS + "ms";
   fill.style.animationDelay = -Math.min(LR_GRADE_WAIT_MS, Date.now() - (s.gradeStart || Date.now())) + "ms";
   bar.appendChild(fill);
-  g.append(bar, mkEl("p", "lr-help", "After 20 seconds without a verdict, the claim, the source and the criterion appear and you rate it yourself."));
+  if (picked === undefined) g.append(bar, mkEl("p", "lr-help", "After 20 seconds without a verdict, the claim, the source and the criterion appear and you rate it yourself."));
   sheet.appendChild(g);
 }
 
@@ -3070,6 +3075,7 @@ async function lrSubmit(told) {
   clearTimeout(lrGradeTimer);
   if (fallback && s.verdicts[it.i]?.selfRated) return;   // a late verdict never replaces a self-rating already recorded
   s.verdicts[it.i] = v;
+  if (v.pick != null) s.answers[it.i] = v.options?.[v.pick] || "";   // what the reveal and the previous row show, as lrAttach does
   s.state = "reveal";
   lrRender();
 }
@@ -3382,7 +3388,7 @@ function lrEnd() {
   if (!s) return;
   if (lrRoute.view !== "session") lrGo({ view: "session", id: s.id }, { replace: true });
   const it = lrItem();
-  const draft = s.state === "input" && (s.answers[it?.i] || "").trim();
+  const draft = s.state === "input" && ((s.answers[it?.i] || "").trim() || s.picks?.[it?.i] != null);
   const unrecorded = s.state === "reveal" && !s.results[it?.i] && !s.verdicts[it?.i]?.skip;
   if (draft || unrecorded || s.state === "grading") { lrEndAsk = true; lrRender(); return; }
   lrClose();
@@ -3753,7 +3759,8 @@ document.addEventListener("keydown", learnKeys);
 // loses (§5.1); recorded ratings are already in the ledger and the session
 // itself is re-attached on the next load
 window.addEventListener("beforeunload", (e) => {
-  if (lrSession && lrRoute.view === "session" && (lrSession.answers[lrItem()?.i] || lrSession.state === "reveal") && !lrSession.results[lrItem()?.i]) {
+  if (lrSession && lrRoute.view === "session" && (lrSession.answers[lrItem()?.i] || lrSession.picks?.[lrItem()?.i] != null
+      || lrSession.state === "reveal") && !lrSession.results[lrItem()?.i]) {
     e.preventDefault();
     e.returnValue = "";
   }

@@ -181,3 +181,26 @@ def test_a_missed_pick_comes_back_on_the_same_four_in_a_new_order(client, monkey
     assert sorted(added["options"]) == sorted(OPTS) and "key" not in added and added["retest"] is True
     again = live["items"][-1]
     assert again["options"][again["key"]] == RIGHT and again["q"] == first["q"]
+
+
+def test_a_pick_never_becomes_the_written_answer_and_a_reloaded_right_pick_reads_with_help():
+    """Seen in the running app, 2026-11-12: a pick, then "Answer by writing",
+    put the option's text in the box, and submitting it was graded by the model
+    as met without help and Easy. And after a reload the previous row of a
+    right pick read "met" with the full mark."""
+    from tests.webassets import WEB
+
+    js = (WEB / "app-learn.js").read_text(encoding="utf-8")
+    pick = js[js.index("function lrPick("):js.index("function lrConfParts(")]
+    assert "s.answers" not in pick
+    # the pick's text reaches the reveal and the previous row from the verdict, as after a reload
+    submit = js[js.index("async function lrSubmit("):js.index("async function lrSelfGradeFallback(")]
+    assert "s.answers[it.i] = v.options" in submit
+    # a pending pick is still something a reload or End session would lose
+    assert "picks?.[" in js[js.index("function lrEnd("):js.index("async function lrClose(")]
+    assert "picks?.[" in js[js.index('window.addEventListener("beforeunload"'):][:400]
+    prev = js[js.index("function lrPrevRow("):js.index("function lrInputParts(")]
+    assert "res.unassisted" in prev
+    # while a pick is posted the sheet says what was chosen, and promises no 20 s self-rating
+    grading = js[js.index("function lrGradingParts("):js.index("function lrMic(")]
+    assert '"you chose"' in grading and "if (picked === undefined) g.append(bar" in grading
