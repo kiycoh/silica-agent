@@ -914,6 +914,33 @@ def project_result(result: dict, run_id: str | None, files_total: int,
     return projected
 
 
+def written_from_vault(rel: str) -> bool:
+    """A document Silica wrote from the person's own notes (ADR-0158 point 11,
+    the `written_from: vault` stamp the long document's Deliver writes). It is
+    not a new source: nucleated, it would come back as notes repeating the
+    notes it was written from. Unreadable answers False, as the apparatus
+    check does: holding a file back is the claim that needs evidence."""
+    from silica.driver import DRIVER
+    from silica.kernel.base import frontmatter
+
+    try:
+        data, _, _ = frontmatter.split(DRIVER.read_note(rel).content or "")
+    except Exception:
+        return False
+    return isinstance(data, dict) and str(data.get("written_from") or "").strip().lower() == "vault"
+
+
+# Open 10 of ADR-0158, answered here as its proposal: warn and hold the file
+# back, nucleate it only on the person's word (this flag), never refuse it.
+ANYWAY = "--anyway"
+
+
+def hold_written(files: list[str]) -> tuple[list[str], list[str]]:
+    """(the files to nucleate, the ones Silica wrote from the vault)."""
+    held = [f for f in files if f.endswith(".md") and written_from_vault(f)]
+    return [f for f in files if f not in held], held
+
+
 def split_apparatus(files: list[str]) -> tuple[list[str], list[str]]:
     """(content, apparatus): the files worth distilling, and the ones that only
     surround a work. Apparatus is not content, and both ways in filter it: a
@@ -960,6 +987,14 @@ def run_injector(files: list[str], target_dir: str, *, hub: str = "", resume_run
         if not files:
             return {"error": "Conversion produced no markdown to nucleate."}
 
+    # The agent's door holds a Silica-written document back too (ADR-0158 point
+    # 11): the person's word to nucleate it anyway is /nucleate --anyway, which
+    # no turn of the agent can give for them.
+    files, held = hold_written(files)
+    if held and not files:
+        return {"error": f"{', '.join(Path(f).name for f in held)}: written by Silica from the vault, so "
+                         f"nucleating would repeat the notes it came from. The person can run "
+                         f"/nucleate {ANYWAY} on it."}
     kept, apparatus = split_apparatus(files)
     if not kept:
         return {"error": "Only apparatus sections (references, contents, venue "
@@ -1490,7 +1525,7 @@ def _nucleate_result_line(result: dict) -> str:
 
 def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str = "",
              profile: str = "", keep_sources: bool = True, user_input: str = "",
-             console, ask=None) -> str | None:
+             console, ask=None, anyway: bool = False) -> str | None:
     """Ingest sources into vault notes: triage them, then one Coordinator run per unit.
 
     Returns "" when it dispatched, or an agent-directed message when the target
@@ -1506,6 +1541,17 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
 
     enabled = get_active_manifest().sources
     files, run_root = _nucleate_expand_folders(files, enabled, console)
+    if not anyway:
+        from rich.markup import escape
+
+        files, held = hold_written(files)
+        for f in held:
+            console.print(
+                f"  [yellow]{escape(Path(f).name)} was written by Silica from your notes: nucleated, it "
+                f"would come back as notes repeating the ones it was written from. Edit it first, or "
+                f"add {ANYWAY} to nucleate it all the same.[/]")
+        if held and not files:
+            return ""  # a held file is an answer, not a question for the agent
 
     # One CLI journal run per /nucleate invocation for what the planner writes
     # itself (staged code, filed drafts). The FSM opens its own journal run per

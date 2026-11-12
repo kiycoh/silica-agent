@@ -233,3 +233,23 @@ def test_a_long_sub_question_names_its_file_without_a_dangling_comma_or_parenthe
          "delivery system, and excipients)?")
     assert dr._part_name(q) == "What are the core components of mRNA vaccine formulations"
     assert dr._part_name("[04:12] Is it true?") == "Is it true"
+
+
+def test_nucleate_holds_a_document_silica_wrote_from_the_vault_back(tmp_vault):
+    """ADR-0158 point 11: a document written from the vault is not a new source;
+    /nucleate says so and runs on it only with --anyway (Open 10's proposal)."""
+    from silica.sources import ingest
+
+    tmp_vault.note("Documents/Book.md", "---\ntitle: Book\nwritten_from: vault\n---\nChapter one.\n")
+    tmp_vault.note("Inbox/Fresh.md", "---\ntitle: Fresh\n---\nNew material.\n")
+    kept, held = ingest.hold_written(["Documents/Book.md", "Inbox/Fresh.md", "code.py"])
+    assert kept == ["Inbox/Fresh.md", "code.py"] and held == ["Documents/Book.md"]
+    said: list[str] = []
+
+    class _Out:
+        def print(self, text, **kw):
+            said.append(str(text))
+
+    assert ingest.nucleate(["Documents/Book.md"], console=_Out()) == ""
+    assert "written by Silica from your notes" in said[-1] and "--anyway" in said[-1]
+    assert "written by Silica" in ingest.run_injector(["Documents/Book.md"], "Notes")["error"]

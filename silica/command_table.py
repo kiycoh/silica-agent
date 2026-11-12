@@ -189,7 +189,7 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/nucleate",
         group="workflow",
-        usage="<file...> [--target=DIR] [--hub=H] [--profile=P] [--seen=YYYY-MM-DD] [--no-keep-sources]",
+        usage="<file...> [--target=DIR] [--hub=H] [--profile=P] [--seen=YYYY-MM-DD] [--no-keep-sources] [--anyway]",
         summary="bring files in: notes via Injector FSM, code as skeleton stubs",
         examples=(
             "/nucleate Inbox/note.md --target=Concepts/AI",
