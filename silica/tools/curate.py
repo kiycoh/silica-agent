@@ -184,6 +184,13 @@ def silica_curate(
         with_cooccurrence=True,  # autolink candidates
     )
     plan = compose_curation_plan(report)
+    if not apply and not kinds and not targets:
+        # A whole dry run's plan waits in the review queue (ADR-0165), where a
+        # listing reads it instead of recomputing the report.
+        from silica.config import CONFIG
+        from silica.tools.review.curate import offer_plan
+
+        offer_plan(CONFIG.vault_path or "", plan)
     available = plan.counts()                    # pre-filter shape (no_matches honesty)
     # Computed pre-filter: a bare `x.md` target that hit several folders would
     # otherwise apply to notes the caller never named, invisibly.
