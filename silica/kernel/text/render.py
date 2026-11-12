@@ -572,8 +572,10 @@ def _escape_table_aliases(text: str) -> str:
     if "|" not in text:
         return text
 
+    # `\vert{}` and not `\vert `: a formula ending on its bar (`$|x|$`) left a space
+    # before the closing `$`, which dollarmath does not close on, and drew as source.
     def math(m: re.Match) -> str:
-        return "$" + m.group(1).replace("\\|", "\\Vert ").replace("|", "\\vert ") + "$"
+        return "$" + m.group(1).replace("\\|", "\\Vert{}").replace("|", "\\vert{}") + "$"
 
     return "\n".join(_TABLE_MATH.sub(math, _TABLE_ALIAS.sub(r"[[\1\\|\2]]", line))
                      if line.lstrip().startswith("|") else line for line in text.split("\n"))
