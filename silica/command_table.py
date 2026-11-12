@@ -331,6 +331,14 @@ COMMANDS: tuple[Command, ...] = (
         handler="silica.commands.learn:slides", shlex=True,
     ),
     Command(
+        name="/page",
+        group="workflow",
+        usage='"<what>"',
+        summary="a self-contained HTML page, or a small site, built from the notes into Pages/; opens sandboxed in the app",
+        examples=('/page "a timeline of the Roman republic"', '/page "a three-page site on my thesis chapters"'),
+        handler="silica.commands.notes:page", shlex=True, demo_off=True,
+    ),
+    Command(
         name="/memorize",
         group="workflow",
         usage="[plan] [--n=8] [--plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]] [--teach <note>] [--status [plan]]",

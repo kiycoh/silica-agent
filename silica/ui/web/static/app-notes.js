@@ -1328,6 +1328,10 @@ async function openFile(path, state, act) {
 window.openFile = openFile;
 
 const fileUrl = (path, extra = "") => "/file?path=" + encodeURIComponent(path) + extra;
+// A page the chat wrote (ADR-0171), served path-shaped so a site's relative links
+// resolve, on every account: /file is the laptop's only.
+const isPage = (path) => /^Pages\/.+\.html$/i.test(path || "");
+const pageUrl = (path) => "/page/" + path.split("/").map(encodeURIComponent).join("/");
 // What /file opens inline as a picture, so the drawer draws one where the file is one.
 const FILE_PICTURE = extRe(VOCAB.formats.file_pictures);
 
@@ -1335,6 +1339,7 @@ const FILE_PICTURE = extRe(VOCAB.formats.file_pictures);
 // the rail's marks for the same states); an unread file says why, by its kind.
 function fileSays(f, name) {
   const says = VOCAB.files.says;
+  if (isPage(f.path)) return "a page, shown sandboxed: it reaches nothing outside itself";
   if (f.state === "read" || f.state === "unindexed") return says[f.state];
   if (/\.pdf$/i.test(name)) return says.pdf;
   if (FILE_PICTURE.test(name)) return says.picture;
@@ -1351,7 +1356,8 @@ function syncFileView() {
   const line = mkEl("span", "");
   line.append(mkEl("b", "", name), " " + fileSays(f, name));
   head.append(line);
-  const act = f.state === "unread" ? { ocr: "OCR this", convert: "Convert this" }[f.act] : "";
+  const page = isPage(f.path);
+  const act = f.state === "unread" && !page ? { ocr: "OCR this", convert: "Convert this" }[f.act] : "";
   if (act) {
     const b = mkEl("button", "wk-paper-a", act);
     b.type = "button";
@@ -1373,19 +1379,25 @@ function syncFileView() {
     study.addEventListener("click", () => fileStudy(f, study));
     head.append(study);
   }
-  head.append(Object.assign(document.createElement("a"),
-    { className: "wk-paper-a", textContent: "Download", href: fileUrl(f.path, "&download=1") }));
+  head.append(Object.assign(document.createElement("a"), page
+    ? { className: "wk-paper-a", textContent: "Open in a new window", href: pageUrl(f.path), target: "_blank", rel: "noopener" }
+    : { className: "wk-paper-a", textContent: "Download", href: fileUrl(f.path, "&download=1") }));
   const pdf = /\.pdf$/i.test(name), pic = FILE_PICTURE.test(name);
-  const frame = $("#raw-frame"), img = $("#raw-img"), url = fileUrl(f.path);
+  const frame = $("#raw-frame"), img = $("#raw-img"), url = page ? pageUrl(f.path) : fileUrl(f.path);
   const listing = pdf && detailsOn;
   $("#raw-chapters").hidden = !listing;
   if (listing) fillChapters(f.path);
-  frame.hidden = !pdf || listing;
+  frame.hidden = !(pdf || page) || listing;
   img.hidden = !pic;
   // the same address is left alone, or the reader's place in the PDF goes
   // the file is compared without its #page, which a chapter adds: a redraw of
   // the drawer must not take the reader back to the first page
-  if (pdf && (frame.dataset.url || "").split("#")[0] !== url) { frame.dataset.url = url; frame.title = name; frame.src = url; }
+  if ((pdf || page) && (frame.dataset.url || "").split("#")[0] !== url) {
+    // A page runs its own script: the frame sandboxes it before it loads, as its
+    // route's header does (ADR-0171); a PDF viewer does not draw sandboxed.
+    if (page) frame.setAttribute("sandbox", "allow-scripts"); else frame.removeAttribute("sandbox");
+    frame.dataset.url = url; frame.title = name; frame.src = url;
+  }
   if (pic && img.dataset.url !== url) { img.dataset.url = url; img.alt = name; img.src = url; }
 }
 
@@ -1522,6 +1534,7 @@ function syncRawView(on) {
   frame.hidden = false;
   $("#raw-img").hidden = true;
   if (frame.dataset.url !== url) {
+    frame.removeAttribute("sandbox"); // a page shown before it set one (syncFileView)
     frame.dataset.url = url;
     frame.title = `${drawerRaw.name}, the PDF of this note`;
     frame.src = url;
@@ -3173,7 +3186,8 @@ document.addEventListener("click", (e) => {
   // is what actually changed rather than what was claimed — so it opens the
   // diff, which falls back to the note when the session holds no baseline.
   const changed = e.target.closest(".wc-open");
-  if (changed) { e.preventDefault(); openDiff(changed.dataset.path); return; }
+  // A page's change is read as the page (ADR-0171): its diff is HTML source.
+  if (changed) { e.preventDefault(); isPage(changed.dataset.path) ? openFile(changed.dataset.path) : openDiff(changed.dataset.path); return; }
   // A numbered citation in an answer opens at the line it stands on (openCite,
   // app-chat.js); every other link opens the note at its top.
   const link = e.target.closest(".note-link, .cite-mark");

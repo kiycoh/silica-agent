@@ -35,6 +35,8 @@ _MODULES = (
     "silica.tools.tabular",
     "silica.sources.web_fetch",
     "silica.sources.web_research",
+    # Last, so the loader's catalog keeps the order every earlier session cached.
+    "silica.tools.pages",
 )
 
 _loaded = False
