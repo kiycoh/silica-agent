@@ -35,9 +35,9 @@ function decOutcomeForm(card, d) {
     o.value = v;
     status.appendChild(o);
   }
-  const save = mkEl("button", "cx-act", "save");
+  const save = mkEl("button", "ctr-act", "save");
   save.type = "submit";
-  const cancel = mkEl("button", "cx-act", "cancel");
+  const cancel = mkEl("button", "ctr-act", "cancel");
   cancel.type = "button";
   const acts = card.querySelector(".dec-acts");
   cancel.addEventListener("click", () => { form.remove(); acts.hidden = false; });
@@ -92,7 +92,7 @@ function decCard(d) {
     decColumn("Outcomes", outcomes, "none yet"));
   card.appendChild(grid);
   const acts = mkEl("div", "dec-acts");
-  const add = mkEl("button", "cx-act", "add outcome");
+  const add = mkEl("button", "ctr-act", "add outcome");
   add.type = "button";
   add.addEventListener("click", () => decOutcomeForm(card, d));
   acts.appendChild(add);

@@ -28,28 +28,28 @@ function contraAge(r) {
 // with no line opens its note at the top; a source file outside the vault's
 // notes, or a flag, opens nothing and says so by being plain text.
 function contraSide(label, words, open, where) {
-  const side = mkEl(open ? "button" : "div", "cx-side");
+  const side = mkEl(open ? "button" : "div", "ctr-side");
   // The words are clamped to three lines in a narrow drawer: the whole stays on the tooltip.
   side.title = (words || "") + (open ? (where ? "\n\nopen it at this line" : "\n\nopen it") : "");
   if (open) {
     side.type = "button";
     side.addEventListener("click", open);
   }
-  side.append(mkEl("span", "cx-who", label), mkEl("span", "cx-words", words || "(no words on record)"));
-  if (where) side.appendChild(mkEl("span", "cx-at", where));
+  side.append(mkEl("span", "ctr-who", label), mkEl("span", "ctr-words", words || "(no words on record)"));
+  if (where) side.appendChild(mkEl("span", "ctr-at", where));
   return side;
 }
 
 function contraCard(item, proposed) {
-  const card = mkEl("div", "cx-card" + (proposed ? " cx-proposed" : ""));
+  const card = mkEl("div", "ctr-card" + (proposed ? " ctr-proposed" : ""));
   const flag = !proposed && !item.other;
-  const head = mkEl("div", "cx-head");
-  head.appendChild(mkEl("span", "cx-kind", proposed ? "Proposed by a source check" : flag ? "Flagged" : "Contradiction"));
-  if (!proposed) head.appendChild(mkEl("span", "cx-age", contraAge(item) + (item.how ? " · " + item.how : "")));
-  if (!proposed && item.kept?.length) head.appendChild(mkEl("span", "cx-age", "kept open " + item.kept[item.kept.length - 1]));
+  const head = mkEl("div", "ctr-head");
+  head.appendChild(mkEl("span", "ctr-kind", proposed ? "Proposed by a source check" : flag ? "Flagged" : "Contradiction"));
+  if (!proposed) head.appendChild(mkEl("span", "ctr-age", contraAge(item) + (item.how ? " · " + item.how : "")));
+  if (!proposed && item.kept?.length) head.appendChild(mkEl("span", "ctr-age", "kept open " + item.kept[item.kept.length - 1]));
   card.appendChild(head);
 
-  const pair = mkEl("div", "cx-pair");
+  const pair = mkEl("div", "ctr-pair");
   const mineLine = proposed ? item.line : item.mine_line;
   pair.appendChild(contraSide("This note", item.mine || "the note as a whole",
     () => { if (drawerNote.editor) drawerNote.editor.revealLine(mineLine || item.line || 1); },
@@ -64,10 +64,10 @@ function contraCard(item, proposed) {
   }
   card.appendChild(pair);
 
-  const acts = mkEl("div", "cx-acts");
+  const acts = mkEl("div", "ctr-acts");
   const holds = flag ? ["this", "other", "open"] : ["this", "other", "both", "open"];
   for (const h of holds) {
-    const b = mkEl("button", "cx-act", flag && h === "other" ? "the flag holds" : CONTRA_SAY[h]);
+    const b = mkEl("button", "ctr-act", flag && h === "other" ? "the flag holds" : CONTRA_SAY[h]);
     b.type = "button";
     if (h === "both") b.addEventListener("click", () => contraWhen(card, item, proposed));
     else b.addEventListener("click", () => contraSettle(card, item, proposed, h, ""));
@@ -80,14 +80,14 @@ function contraCard(item, proposed) {
 // "Both hold" asks for the condition first: the person writes it, and the
 // same words are appended to both notes.
 function contraWhen(card, item, proposed) {
-  if (card.querySelector(".cx-when")) { card.querySelector(".cx-when input").focus(); return; }
-  const row = mkEl("form", "cx-when");
-  row.appendChild(mkEl("span", "cx-who", "both hold when"));
+  if (card.querySelector(".ctr-when")) { card.querySelector(".ctr-when input").focus(); return; }
+  const row = mkEl("form", "ctr-when");
+  row.appendChild(mkEl("span", "ctr-who", "both hold when"));
   const input = mkEl("input");
   input.type = "text";
   input.placeholder = "the condition, in your words";
   input.setAttribute("aria-label", "both hold when");
-  const ok = mkEl("button", "cx-act", "save");
+  const ok = mkEl("button", "ctr-act", "save");
   ok.type = "submit";
   row.append(input, ok);
   row.addEventListener("submit", (e) => {

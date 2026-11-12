@@ -18,7 +18,7 @@
 }
 #note-panel:has(#note-edit[hidden]) #note-contra { display: none; }
 
-.cx-card {
+.ctr-card {
   display: grid;
   gap: 0.45rem;
   padding: 0.55rem 0.6rem 0.6rem;
@@ -26,13 +26,13 @@
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
 }
-.cx-card.cx-proposed { background: transparent; border-style: dashed; }
+.ctr-card.ctr-proposed { background: transparent; border-style: dashed; }
 
-.cx-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.6rem; font-size: var(--fs-meta); color: var(--ash-dim); }
-.cx-kind { color: var(--frost); font-weight: 600; }
+.ctr-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.6rem; font-size: var(--fs-meta); color: var(--ash-dim); }
+.ctr-kind { color: var(--frost); font-weight: 600; }
 
-.cx-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.45rem; }
-.cx-side {
+.ctr-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.45rem; }
+.ctr-side {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -45,11 +45,11 @@
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
 }
-button.cx-side { cursor: pointer; transition: border-color var(--dur) var(--ease); }
-button.cx-side:hover { border-color: var(--accent); }
-button.cx-side:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
-.cx-who { font-size: var(--fs-meta); color: var(--ash-dim); overflow-wrap: anywhere; }
-.cx-words {
+button.ctr-side { cursor: pointer; transition: border-color var(--dur) var(--ease); }
+button.ctr-side:hover { border-color: var(--accent); }
+button.ctr-side:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.ctr-who { font-size: var(--fs-meta); color: var(--ash-dim); overflow-wrap: anywhere; }
+.ctr-words {
   font-size: 13.5px;
   line-height: 1.5;
   color: var(--frost);
@@ -59,10 +59,10 @@ button.cx-side:focus-visible { outline: 1px solid var(--accent); outline-offset:
   overflow: hidden;
   overflow-wrap: anywhere;
 }
-.cx-at { font-size: var(--fs-meta); color: var(--ash-dim); }
+.ctr-at { font-size: var(--fs-meta); color: var(--ash-dim); }
 
-.cx-acts, .cx-when, .dec-acts, .dec-form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
-.cx-act {
+.ctr-acts, .ctr-when, .dec-acts, .dec-form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.ctr-act {
   font-family: var(--sans);
   font-size: var(--fs-meta);
   color: var(--ash);
@@ -73,11 +73,11 @@ button.cx-side:focus-visible { outline: 1px solid var(--accent); outline-offset:
   cursor: pointer;
   transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.cx-act:hover { color: var(--accent); border-color: var(--accent); }
-.cx-act:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
-.cx-act:disabled { color: var(--ash-dim); border-color: var(--line); cursor: default; }
+.ctr-act:hover { color: var(--accent); border-color: var(--accent); }
+.ctr-act:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.ctr-act:disabled { color: var(--ash-dim); border-color: var(--line); cursor: default; }
 
-.cx-when input, .dec-form input, .dec-form select {
+.ctr-when input, .dec-form input, .dec-form select {
   height: 30px;
   box-sizing: border-box;
   padding: 0 8px;
@@ -89,8 +89,8 @@ button.cx-side:focus-visible { outline: 1px solid var(--accent); outline-offset:
   color: var(--frost);
   color-scheme: inherit;
 }
-.cx-when input, .dec-form input { flex: 1 1 12rem; min-width: 0; }
-.cx-when input:focus-visible, .dec-form :is(input, select):focus-visible { outline: 1px solid var(--accent); outline-offset: 0; }
+.ctr-when input, .dec-form input { flex: 1 1 12rem; min-width: 0; }
+.ctr-when input:focus-visible, .dec-form :is(input, select):focus-visible { outline: 1px solid var(--accent); outline-offset: 0; }
 
 /* --- the vault menu ------------------------------------------------------ */
 #vault-contra { padding: 0.25rem 0 0.4rem; }
