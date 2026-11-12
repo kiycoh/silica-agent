@@ -125,11 +125,58 @@ def test_only_a_part_written_with_quote_ids_carries_the_stamp(tmp_vault):
     part = wr.build_note("Q", "Body [Q1].", [("https://a.example", "A")], cites_quotes=True)
 
     assert "citations:" not in plain and not forms.cites_quotes(plain)
-    assert "\ncitations: quotes\n" in part and forms.cites_quotes(part)
-    # A stamp of its own, not a form: the lens, the lane and the census stay
-    # what an unstamped findings note gets.
-    assert forms.stamped_form(part) == ""
-    assert forms.resolve(part, allow_sniff=False) == forms.resolve(plain, allow_sniff=False)
+    assert "form:" not in plain and forms.stamped_form(plain) == ""
+    assert "\nform: study\ncitations: quotes\n" in part and forms.cites_quotes(part)
+    # The part's form is stamped, so its lens and lane are the stamp's.
+    assert forms.resolve(part) == forms.Form("study", "default", "stamp")
+
+
+def _dispatch(files: list[str], vote: str) -> tuple[dict, list[str]]:
+    """/nucleate's dispatch seam (ingest.file_drafts) on a folder whose sniff
+    says `vote` for every unstamped file: each file's verdict as printed, and
+    the files left to distill."""
+    import types
+
+    from silica.sources import ingest
+
+    printed: list[str] = []
+    kept = ingest.file_drafts(files, "Research", None, types.SimpleNamespace(print=printed.append))
+    verdicts = {f: line.split("(")[-1].rstrip(")") for line in printed for f in files if f"{f}:" in line}
+    return verdicts, kept
+
+
+@pytest.mark.parametrize("vote", ["clip", "draft"])
+def test_a_part_resolves_by_its_stamp_whatever_the_folder_votes(tmp_vault, monkeypatch, vote):
+    """Live, 2026-11-12: the folder vote gave two parts the clip lens. The lane
+    stayed the outline (a sniff never picks it), but the lens was the sniff's,
+    and a draft vote files a part intact, never distilled. Stamped, a part is
+    study whatever the vote; an unstamped sibling follows the vote as today."""
+    monkeypatch.setattr(forms, "sniff_form", lambda text: vote)
+    one = _write("Part one", "## A\n\nOne claim [Q1].\n", BANK, TRACE, quote_ids=True, folder="topic")
+    two = _write("Part two", "## B\n\nTwo claim [Q2].\n", BANK, TRACE, quote_ids=True, folder="topic")
+    tmp_vault.note("Inbox/topic/Loose notes.md", "# Loose\n\nSomething the person saved.\n")
+    sibling = "Inbox/topic/Loose notes.md"
+
+    verdicts, kept = _dispatch([one, two, sibling], vote)
+
+    assert verdicts[one] == verdicts[two] == "stamp"
+    assert one in kept and two in kept
+    if vote == "clip":
+        assert verdicts[sibling] == "folder vote" and sibling in kept
+    else:
+        assert sibling not in kept  # filed as the person's draft, as before
+
+
+def test_a_part_under_a_clip_vote_gets_the_outline_lane_and_the_instruction(tmp_vault, monkeypatch):
+    rel = _write("What do mitochondria do?", BODY, BANK, TRACE, quote_ids=True, folder="mito")
+    forms.pin_sniff(forms.read_source_text(rel), "clip")  # what the folder vote leaves behind
+    monkeypatch.setattr(forms, "sniff_form", lambda text: "clip")
+    seen: list = []
+    fsm = _nucleate(monkeypatch, [rel], _ask(seen, ("A claim [Q1].", "Another [Q2].")))
+
+    pins = fsm.run_state.file(0)
+    assert (pins.form, pins.form_origin, pins.profile, pins.lane) == ("study", "stamp", "default", "outline")
+    assert seen[0][0].endswith(ol.QUOTE_IDS_CLAIM)
 
 
 def test_a_bare_marker_in_a_note_an_unstamped_source_fed_is_left_alone(tmp_vault):

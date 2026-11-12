@@ -1649,10 +1649,16 @@ def build_note(
     # `form:` is the ingress stamp of docs/specs/nucleation-forms.md: clipped
     # external content declares itself so nucleation picks the clip lens
     # without sniffing.
-    form_line = f"form: {form}\n" if form else ""
     # A deep research's part keeps its markers as quote ids (ADR-0158 point 9)
     # and says so, so /nucleate keeps them on the lines it writes and CLEANUP
-    # resolves them against the leaf. Read by forms.cites_quotes, nowhere else.
+    # resolves them against the leaf. It is study material by construction,
+    # stamped as such: unstamped, the sniff and the folder vote gave two parts
+    # of one live run the clip lens (2026-11-12), and a `draft` vote would
+    # have filed them intact, never distilled. A /web-search note stays
+    # unstamped and sniffed, as point 12's arm A was measured.
+    if cites_quotes:
+        form = form or "study"
+    form_line = f"form: {form}\n" if form else ""
     if cites_quotes:
         from silica.kernel.forms import CITATIONS_KEY, QUOTE_CITATIONS
 
