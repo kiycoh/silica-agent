@@ -57,7 +57,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 **Bring documents in.** Slides, case files, papers and mail become notes in the source's own words, not a summary of them.
 
 - `/nucleate Inbox/` takes a folder, a glob or one file (PDF, DOCX, EPUB, PPTX, notebooks). Each file is one transaction, checked against what you already have. Stop it whenever; it resumes.
-- The vault's `+` imports files or a whole folder at the top of the vault, as they are, and a link into `Inbox/`, with no chat turn; move a folder into `Inbox/` and `/nucleate` it when you want it rewritten as notes. A YouTube link gives the video's transcript, and `/fetch <url>` does the same from the chat. A file dropped on the chat stays that chat's until you press "add to vault".
+- The vault's `+` imports files or a whole folder at the top of the vault, as they are, and a link into `Inbox/`, with no chat turn; move a folder into `Inbox/` and `/nucleate` it when you want it rewritten as notes. A YouTube link gives the video's transcript, a Reddit link the post and its top comments, and a GitHub link the repository's README, the file, or the issue or pull request with its comments (set `GITHUB_TOKEN` past GitHub's 60 reads an hour); `/fetch <url>` does the same from the chat. A file dropped on the chat stays that chat's until you press "add to vault".
 - A long document is split at its headings into parts of at most 40,000 characters. A PDF page with no text, or with formulas its text layer loses, is read from its image by the model, up to 60 pages a file.
 - A note keeps its source's DOI, arXiv id, authors and title, so it can be cited without reopening the document. With Zotero linked, a paper's note opens under its byline, with links to Zotero, the PDF and the DOI.
 - `/mail import` keeps only the threads you took part in, from a mail client's export or Google Takeout, and writes nothing until `--apply`.
@@ -202,7 +202,7 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/convert <file...> [--target=DIR]` | transcode a non-.md file (PDF) into a markdown note in the inbox |
 | `/web-search "<concept>" [--max-searches=N]` | research a concept on the web -> cited findings note in the Inbox (then /nucleate) |
 | `/keep` | save the last /web answer as a cited note in the Inbox (then /nucleate) |
-| `/fetch <url>` | read one URL (YouTube gives its transcript) -> verbatim note in the Inbox |
+| `/fetch <url>` | read one URL (YouTube gives its transcript, Reddit its thread, GitHub its README, file or issue) -> verbatim note in the Inbox |
 | `/status [run_id]` | progress digest of the last run |
 | `/embed [folder] [--force]` | build/update embedding index |
 | `/cooccur [folder] [--force]` | build/update co-occurrence index (without embedder) |

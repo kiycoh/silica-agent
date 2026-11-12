@@ -317,6 +317,8 @@ LIVE: dict[str, Setting] = {row.key: row for row in (
     Setting("SILICA_MEDIA_MAX_MINUTES", type=str.strip, doc=True, hosted=True),
     Setting("SILICA_MEDIA_MINUTES_MONTHLY", type=str.strip, doc=True, hosted=True),
     Setting("SILICA_YOUTUBE_COOKIES", type=str.strip, hosted=True),
+    # /fetch on GitHub (ADR-0162): a laptop's own token, never sent on the server.
+    Setting("GITHUB_TOKEN", type=str.strip, doc=True),
 )}
 
 
