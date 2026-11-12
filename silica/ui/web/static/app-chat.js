@@ -1780,8 +1780,11 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         seg.el.innerHTML = ev.html || escapeHtml(ev.answer || "");
       } else if (segments === 1 && curText && (ev.html || ev.answer)) {
         curText.el.innerHTML = ev.html || escapeHtml(ev.answer || "");
+        // Copy takes what is drawn: the server may have held a block back (ADR-0169).
+        if (ev.answer) curText.raw = ev.answer;
       } else if (tail && ev.html && (ev.answer || "").startsWith(tail)) {
         curText.el.innerHTML = ev.html;
+        curText.raw = ev.answer;
       }
       close(""); // collapse any open thinking, end all segments
       drawDiagrams(body);

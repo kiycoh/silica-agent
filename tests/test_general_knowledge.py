@@ -143,6 +143,20 @@ def test_a_block_with_no_search_before_it_is_held_back_and_never_stored(client, 
     assert not any(n["kind"] == "general" for n in done.get("notes", []))
 
 
+def test_the_copy_button_copies_what_the_server_drew_not_what_streamed():
+    """A held-back block streams before the server takes it out: the drawn answer
+    was the held-back line while copy still gave the block (2026-11-13, a stream
+    replayed through runTurn and a real click). Both branches that swap in the
+    server's render must take its text too."""
+    import re
+
+    from silica.ui.web.server import STATIC_DIR
+
+    js = (STATIC_DIR / "app-chat.js").read_text(encoding="utf-8")
+    swaps = re.findall(r"\} else if \((?:segments === 1 && curText|tail && ev\.html)[^{]*\{\n(.*?)(?=\n      \})", js, re.S)
+    assert len(swaps) == 2 and all("curText.raw = ev.answer" in s for s in swaps)
+
+
 def test_the_terminal_holds_the_block_back_too():
     from silica import cli
     from silica.session import turn as session_turn
