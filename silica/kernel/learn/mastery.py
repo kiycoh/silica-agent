@@ -19,6 +19,7 @@ from typing import Any
 
 from silica.kernel.base.notekey import ledger_key
 from silica.kernel.learn.quiz import BANDS
+from silica.kernel.learn.reasons import outcome
 from silica.kernel.learn.schedule import DUE_R
 
 DEPTH_LABEL = {1: "Facts", 2: "Parts", 3: "Mechanisms", 4: "New contexts"}
@@ -36,8 +37,9 @@ def _ts(e: dict) -> float:
 
 
 def unassisted(e: dict) -> bool:
-    """The depth criterion: the rubric met with no hint and not told."""
-    return bool(e.get("correct")) and not int(e.get("hints") or 0) and not e.get("told")
+    """The depth criterion: the rubric met with no hint, not told, not chosen
+    among four (reasons.outcome, the one rule)."""
+    return outcome(e) == "met"
 
 
 def _level(e: dict) -> int | None:
