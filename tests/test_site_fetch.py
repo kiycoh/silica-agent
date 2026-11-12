@@ -286,7 +286,33 @@ def test_a_missing_issue_is_named_and_a_missing_repo_falls_back_to_the_page(serv
     table["https://api.github.com/"] = httpx.HTTPStatusError("404", request=resp.request, response=resp)
     with pytest.raises(wf.SiteRefused, match="no issue or pull request there"):
         sf.page("https://github.com/o/r/issues/1")
-    assert sf.page("https://github.com/features/copilot") is None
+    table["https://github.com/features/copilot"] = _resp(
+        text="<html><head><title>Copilot</title></head><body><p>Your pair programmer.</p></body></html>",
+        ctype="text/html")
+    page = sf.page("https://github.com/features/copilot")
+    assert page.title == "Copilot" and "Your pair programmer." in page.text
+
+
+def test_a_repository_github_does_not_know_is_named_and_nothing_is_written(served, tmp_vault):
+    """The API's 404 sends a repository root to GitHub's page, which is
+    /features/copilot's; when the page is a 404 too there is no repository the
+    person can read, and they were shown httpx's words with an IP in them
+    (2026-11-12)."""
+    from pathlib import Path
+
+    from silica.config import CONFIG
+    from silica.sources import web_research
+
+    table, _ = served
+    api = _resp({"message": "Not Found"}, status=404)
+    table["https://api.github.com/"] = httpx.HTTPStatusError("404", request=api.request, response=api)
+    html = _resp(text="<title>Page not found</title>", status=404, ctype="text/html")
+    table["https://github.com/"] = httpx.HTTPStatusError("404", request=html.request, response=html)
+    vault = Path(CONFIG.vault_path)
+    before = sorted(vault.rglob("*"))
+    with pytest.raises(wf.SiteRefused, match="no repository there, or it is private: a private one needs GITHUB_TOKEN"):
+        web_research.fetch_to_inbox("https://github.com/nobody-4821/nothing")
+    assert sorted(vault.rglob("*")) == before
 
 
 def test_the_token_goes_only_with_the_persons_own_fetch_on_a_laptop(served, monkeypatch, tmp_vault):

@@ -775,7 +775,7 @@ def fetch_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
     # which takes the HTML path below.
     from silica.sources import site_fetch
 
-    if (site := site_fetch.page(url)) is not None:
+    if (site := site_fetch.page(url, headers)) is not None:
         return site
     if host_matches(url, *_WP_DOMAINS):
         # Cites the requested URL, not the redirect target: it is what resolves
@@ -784,6 +784,12 @@ def fetch_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
         if article:
             extract, title = article
             return Page(_render(url, truncate(extract)), title)
+    return html_page(url, headers)
+
+
+def html_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
+    """The page at `url` read as a page: HTML as its text, plain text and JSON
+    as they are. Also `site_fetch`'s, for a GitHub address the API does not know."""
     resp, final_url = fetch(url, headers)
     # the type gate already ran in fetch, on the headers, before the body
     ctype = content_type(resp)

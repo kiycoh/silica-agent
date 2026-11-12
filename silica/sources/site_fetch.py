@@ -61,10 +61,11 @@ PERSON_ASKED: ContextVar[bool] = ContextVar("site_fetch_person_asked", default=F
 _MARKDOWN = (".md", ".markdown", ".mdown", ".mkd")
 
 
-def page(url: str) -> wf.Page | None:
+def page(url: str, headers: dict[str, str] = wf.HEADERS) -> wf.Page | None:
     """The thread or the GitHub page at `url`, or None for any other address,
     which `fetch_page` reads as HTML. Exact hosts: i.redd.it, gist.github.com
-    and docs.github.com are other sites."""
+    and docs.github.com are other sites. `headers` are `fetch_page`'s, for the
+    one HTML page read here."""
     try:
         parts = urlsplit(url)
     except ValueError:
@@ -77,7 +78,7 @@ def page(url: str) -> wf.Page | None:
     if host == "redd.it" and (m := _REDDIT_SHORT.fullmatch(parts.path)):
         return _reddit(url, f"/comments/{m[1]}")
     if host in GITHUB_HOSTS:
-        return _github(url, parts.path)
+        return _github(url, parts.path, headers)
     return None
 
 
@@ -215,20 +216,24 @@ def _gh_fetch(url: str) -> httpx.Response | None:
         raise
 
 
+def _not_there(what: str) -> wf.SiteRefused:
+    return wf.SiteRefused(f"GitHub has no {what} there, or it is private"
+                          + _token_hint(": a private one needs GITHUB_TOKEN") + ". Nothing was written.")
+
+
 def _gh_found(url: str, what: str) -> httpx.Response:
     if (resp := _gh_fetch(url)) is None:
-        raise wf.SiteRefused(f"GitHub has no {what} there, or it is private"
-                             + _token_hint(": a private one needs GITHUB_TOKEN") + ". Nothing was written.")
+        raise _not_there(what)
     return resp
 
 
-def _github(url: str, path: str) -> wf.Page | None:
+def _github(url: str, path: str, headers: dict[str, str]) -> wf.Page | None:
     if m := _GH_ISSUE.fullmatch(path):
         return _gh_issue(url, m[1], m[2], m[3])
     if m := _GH_BLOB.fullmatch(path):
         return _gh_blob(url, m[1], m[2], m[3])
     if m := _GH_REPO.fullmatch(path):
-        return _gh_repo(url, m[1], m[2])
+        return _gh_repo(url, m[1], m[2], headers)
     return None
 
 
@@ -246,12 +251,19 @@ def _verbatim(name: str, text: str, room: int) -> str:
     return f"{out}\n\n[truncated at {room} characters]" if cut else out
 
 
-def _gh_repo(url: str, owner: str, repo: str) -> wf.Page | None:
-    """Description, topics and the README. None on a 404: /features/copilot is
-    a page of GitHub's, not a repository, and its HTML is what was asked for."""
+def _gh_repo(url: str, owner: str, repo: str, headers: dict[str, str]) -> wf.Page:
+    """Description, topics and the README. On the API's 404 the page itself:
+    /features/copilot is a page of GitHub's, not a repository, and its HTML is
+    what was asked for; a page that is a 404 too is a repository that does not
+    exist or that this reader may not see."""
     resp = _gh_fetch(f"{_GH_API}/repos/{owner}/{repo}")
     if resp is None:
-        return None
+        try:
+            return wf.html_page(url, headers)
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                raise _not_there("repository") from None
+            raise
     info = resp.json()
     name = str(info.get("full_name") or f"{owner}/{repo}")
     lines = [str(info.get("description") or "").strip()]
