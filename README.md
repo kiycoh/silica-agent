@@ -125,6 +125,12 @@ Silica is single-user: one person, one vault. There are no per-person permission
 - A request you make in 3 separate chats, never undone, becomes a proposed skill drafted from your own words. It runs only once you install it from Settings › Skills.
 - `/curate` plans links, orphans and duplicates, and `/aliases` proposes other names for note titles; both write only with `--apply`.
 
+**Write science notes by hand.** The editor needs no model for any of this.
+
+- Formulas are LaTeX, and `$\ce{H2SO4}$` or `$\ce{2H2 + O2 -> 2H2O}$` writes chemistry as mhchem does; a ```` ```smiles ```` block draws the molecule, as Obsidian's Chem plugin reads it. Type a name in English or Italian inside a formula or a smiles block ("acido solforico", "pythagoras") and pick the formula or the molecule from the list.
+- A table is a grid: click a cell to edit it, Tab and Enter move on, and a bar adds or removes rows and columns. "Edit as text" shows the Markdown.
+- A pasted web address becomes a link named after its page. Pointing at a `[[link]]` shows the note it leads to.
+
 ## How a write is checked
 
 <p align="center">
