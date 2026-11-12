@@ -549,8 +549,42 @@ COMMANDS: tuple[Command, ...] = (
         name="/contested",
         group="direct",
         usage="",
-        summary="list notes flagged contested: true with their unresolved contradictions",
+        summary="list the open contradictions, each with its age and both sides; the app's note drawer settles them",
         handler="silica.commands.reading:contested",
+    ),
+    Command(
+        name="/contradictions",
+        group="direct",
+        usage="[folder] [--check]",
+        summary="contradictions the source checks found between notes, proposed and never written; "
+                "--check first checks the notes never checked",
+        examples=("/contradictions Projects", "/contradictions Projects --check"),
+        handler="silica.commands.contradictions:contradictions", demo_off=True,
+    ),
+    Command(
+        name="/decide",
+        group="direct",
+        usage="<decision> [--why ...] [--expect ...] [--review YYYY-MM-DD] [--target DIR]",
+        summary="write a decision as a note in Decisions/, as typed, no model involved",
+        examples=('/decide Move the backups to the NAS --why [[Backup costs]] --expect restores under an hour '
+                  '--review 2026-12-15',),
+        handler="silica.commands.decisions:decide",
+    ),
+    Command(
+        name="/outcome",
+        group="direct",
+        usage="<note> <what happened> [--status kept|changed|reversed]",
+        summary="add a dated outcome to a decision note",
+        examples=('/outcome "Move the backups to the NAS" first restore took 40 minutes --status kept',),
+        handler="silica.commands.decisions:outcome",
+    ),
+    Command(
+        name="/decisions",
+        group="direct",
+        usage="[open|due|all]",
+        summary="list decision notes, those due for review first, with what was expected and the last outcome",
+        examples=("/decisions", "/decisions due"),
+        handler="silica.commands.decisions:listing",
     ),
     Command(
         name="/verify",
