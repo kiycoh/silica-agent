@@ -78,10 +78,12 @@ class _Panel(HTMLParser):
             # A view the account does not get is not in its panel (ADR-0140),
             # so the chat does not offer it either; nor a control whose route
             # the process refuses (a demo's, ADR-0139 point 6); nor, on a
-            # laptop, the server's downloads (ADR-0142).
+            # laptop, the server's downloads (ADR-0142); nor, on the server,
+            # /council and the setup card, which only a laptop has (ADR-0172).
             self.skip = (a.get("data-view", "chat") not in self.served
                          or a.get("data-route") in self.gone
-                         or ("hp-hosted" in cls and not self.hosted))
+                         or ("hp-hosted" in cls and not self.hosted)
+                         or ("hp-local" in cls and self.hosted))
         elif self.row is not None and self.depth == self.row_depth + 1:
             self.row.append([])
 

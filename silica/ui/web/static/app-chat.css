@@ -215,6 +215,11 @@
   font-size: 12px;
 }
 
+/* "partly from general knowledge" (ADR-0169) wears the block's caution ink */
+.turn-note.general {
+  color: var(--warn);
+}
+
 /* Flagging an answer (ADR-0100 point 6). The control stays as quiet as the
    hint above it, because most answers never need it; it brightens on hover
    like the copy button and never takes the accent, which stays for the one
@@ -698,6 +703,24 @@
   color: var(--accent);
 }
 
+/* The part of an answer the notes did not give (ADR-0169): its own words say so
+   in the head, and a caution edge sets it apart, never teal, which is for what
+   can be pressed. Upright where a quote is italic: it is the answer's own prose.
+   --warn on the brightest plane it may touch, measured 2026-11-12: 5.99:1 on
+   --bubble (graphite), 4.98:1 on --bubble (paper). */
+:is(.msg, #peek-body) blockquote.callout-general {
+  border-left-color: var(--warn);
+  font-style: normal;
+  color: var(--text);
+}
+
+:is(.msg, #peek-body) .callout-general > .callout-title {
+  color: var(--warn);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  margin-bottom: 0.3em;
+}
+
 :is(.msg, #peek-body, #note-edit, #nv-edit) li.task {
   list-style: none;
 }
@@ -716,6 +739,30 @@
 
 :is(.msg, #peek-body, #note-edit, #nv-edit) pre.mermaid svg {
   max-width: 100%;
+}
+
+/* A molecule (ADR-0159) sits on the reading surface as a drawn diagram does. The
+   two label classes are smiles-drawer's, at the sizes drawSmiles measured them in
+   (SMILES_FONT); its own sheet named them bare and is dropped. */
+:is(.msg, #peek-body, #note-edit, #nv-edit, .hv-pop) pre.smiles:has(> svg) {
+  background: none;
+  border: 0;
+  padding: 0.5rem 0;
+  text-align: center;
+  contain: inline-size;
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .hv-pop) pre.smiles svg {
+  max-width: 100%;
+  height: auto;
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .hv-pop) pre.smiles svg .element {
+  font: 8pt Archivo, ui-sans-serif, system-ui, sans-serif;
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .hv-pop) pre.smiles svg .sub {
+  font: 5pt Archivo, ui-sans-serif, system-ui, sans-serif;
 }
 
 /* A fence mermaid could not parse (ADR-0082): one quiet line in the answer or
@@ -2890,4 +2937,171 @@ body.demo-card :is(#dock-composer, #vh-ideas) {
 .demo-seat .addr {
   color: var(--frost);
   white-space: nowrap;
+}
+
+/* --- the first run without a terminal (ADR-0172 point 1) -------------------
+   The setup card stands over the box on the composer's measure and inset, in
+   the box's own border and the app's tokens: teal only on what can be pressed.
+   While it shows, the greeting and the ways to start go, since each is a
+   question nothing can answer yet. Important for the :has() rules of three
+   ids' weight that show them on an empty chat. */
+#view-chat:has(#setup-card:not([hidden])) :is(#vault-hero, #vh-ideas) {
+  display: none !important;
+}
+
+#setup-card {
+  box-sizing: border-box;
+  width: calc(100% - 4rem);
+  max-width: var(--measure);
+  margin: 0 auto 0.6rem;
+  padding: 1rem 1.1rem 1.05rem;
+  background: var(--glass);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+#setup-card h2 {
+  margin: 0 0 0.25rem;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--frost);
+}
+
+#setup-card h3 {
+  margin: 0 0 0.3rem;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+#setup-card p {
+  margin: 0 0 0.6rem;
+}
+
+#setup-card a {
+  color: var(--frost);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+.setup-lead {
+  color: var(--ash);
+}
+
+/* two columns while each keeps 18rem, one above the other under that */
+.setup-opts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+}
+
+.setup-opts[hidden] {
+  display: none;
+}
+
+.setup-opt {
+  min-width: 0;
+  padding: 0.75rem 0.85rem 0.8rem;
+  background: var(--slate-2);
+  border-radius: var(--r-sm);
+}
+
+.setup-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+#setup-key {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  background: var(--sheet);
+  color: var(--frost);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.45rem 0.55rem;
+}
+
+#setup-key:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.setup-rt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.6rem;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.setup-rt p {
+  flex: 1 1 14rem;
+  min-width: 0;
+  margin: 0 !important;
+}
+
+.setup-rt b {
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.setup-dim {
+  color: var(--ash-dim);
+}
+
+#setup-again {
+  margin-top: 0.35rem;
+  font-size: var(--fs-meta);
+}
+
+#setup-done p {
+  color: var(--frost);
+}
+
+#setup-said {
+  margin: 0.7rem 0 0 !important;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+#setup-said.failed {
+  color: var(--warn);
+}
+
+.setup-detail summary {
+  cursor: pointer;
+  color: var(--ash-dim);
+}
+
+.setup-detail pre {
+  margin: 0.3rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: var(--ash);
+}
+
+/* Explore on an empty vault (ADR-0172 point 3): the loading overlay's frame,
+   holding a sentence and the one first step instead of a wait */
+#graph-empty p {
+  max-width: 28rem;
+  margin: 0;
+  padding: 0 1.5rem;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1.55;
+  letter-spacing: normal;
+  color: var(--text);
 }

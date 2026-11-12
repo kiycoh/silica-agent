@@ -30,8 +30,9 @@ PARALLEL = {"silica_search_context", "silica_read", "silica_read_note", "silica_
             "silica_links", "silica_backlinks", "silica_props", "silica_file_links",
             "silica_unresolved", "silica_orphans", "silica_graph_path", "silica_vaults"}
 MUTATES = {"silica_write_note": "written", "silica_patch_note": "written",
-           "silica_flag_note": "written", "silica_require": "written",
-           "silica_delete": "deleted", "silica_move": "moved"}
+           "silica_flag_note": "written", "silica_require": "written", "silica_decide": "written",
+           "silica_delete": "deleted", "silica_move": "moved",
+           "silica_write_page": "written"}  # ADR-0171, 2026-11-12: a page's write card
 FOUND_NOTHING = {"silica_recall": "notes", "silica_semantic_search": "results",
                  "silica_search_context": "notes_matched", "silica_search": "paths"}
 FOUND = {"silica_recall": "notes", "silica_search_context": "hits", "silica_search": "paths"}

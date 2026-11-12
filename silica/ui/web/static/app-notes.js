@@ -335,7 +335,7 @@ const vaultImportBox = $("#vault-import");
 // write. A saved note's build is a second, so the line waits that long before it
 // shows: a line at every save would be a flicker. A failure shows at once.
 const vectorsLine = $("#vectors-line");
-const VECTORS_SAY = { waiting: "Waiting for the embedder", index: "Reading the vault", vectors: "Reading for meaning" };
+const VECTORS_SAY = { waiting: "Waiting for the search model", index: "Reading the vault", vectors: "Reading for meaning" };
 let vectorsLast = { state: "idle" };
 let vectorsSoon = 0;
 
@@ -663,8 +663,8 @@ function renderVaultImport({ progress = "", step = 0, of = 0, rows = [], skipped
     const go = document.createElement("button");
     go.type = "button";
     go.className = "linklike";
-    go.textContent = "nucleate them";
-    go.title = "prefill /nucleate in the chat with what was imported";
+    go.textContent = "turn them into notes";
+    go.title = "write /nucleate in the chat with what was imported, to send when you are ready";
     go.addEventListener("click", () => {
       const target = folder ? where : done.flatMap((r) => r.notes || []).join(" ");
       showTab("chat");
@@ -931,7 +931,57 @@ function loadMermaid() {
   }));
 }
 
+// A ```smiles fence (ADR-0159) draws as a skeletal formula with smiles-drawer, a
+// 197 KB file read at the first molecule, as mermaid is. Every atom is the theme's
+// frost: the CPK colours would be a second palette on the reading plane, and teal is
+// what can be pressed. A string it cannot parse stays its source, as code.
+let smilesLoad = null;
+function loadSmiles() {
+  return (smilesLoad ||= new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "/static/smiles-drawer.min.js";
+    s.onload = resolve;
+    s.onerror = () => { smilesLoad = null; reject(new Error("smiles-drawer did not load")); };
+    document.head.appendChild(s);
+  }));
+}
+// The sizes app-chat.css sets on `.element` and `.sub`: smiles-drawer measures its
+// labels on a canvas in this font, and draws them by those two classes.
+const SMILES_FONT = { fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif", fontSizeLarge: 8, fontSizeSmall: 5 };
+function drawSmiles(b) {
+  const src = b.dataset.smiles.trim(), ink = getComputedStyle(document.documentElement).getPropertyValue("--frost").trim();
+  // Unknown elements take C's colour, so one entry inks them all.
+  const drawer = new SmilesDrawer.SvgDrawer({ scale: 1, bondLength: 24, padding: 6, ...SMILES_FONT, themes: { ink: { C: ink, BACKGROUND: "transparent" } } });
+  SmilesDrawer.parse(src, (tree) => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    drawer.draw(tree, svg, "ink");
+    // Its <style> names `.element` and `.sub` bare, and an inline SVG's sheet is the
+    // whole page's: the chart's `.num.sub` took a molecule's 5pt. Scoped in CSS instead.
+    svg.querySelectorAll("style").forEach((st) => st.remove());
+    const w = parseFloat(svg.style.width), h = parseFloat(svg.style.height);
+    svg.removeAttribute("style");
+    svg.setAttribute("width", String(Math.round(w)));
+    svg.setAttribute("height", String(Math.round(h)));
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `molecule ${src}`);
+    b.replaceChildren(svg);
+    b.classList.remove("smiles-failed");
+  }, () => { b.textContent = b.dataset.smiles; b.classList.add("smiles-failed"); });
+}
+function renderSmiles(root) {
+  const blocks = [...root.querySelectorAll("pre.smiles:not([data-smiles])")];
+  if (!blocks.length) return Promise.resolve();
+  // Marked before the load, so a second pass while the file arrives takes none twice;
+  // and the source is kept, since drawing replaces it, for the theme's repaint.
+  blocks.forEach((b) => { b.dataset.smiles = b.textContent; });
+  return loadSmiles().then(() => blocks.forEach(drawSmiles), () => {}); // not loaded: the source stays, as code
+}
+function repaintSmiles() {
+  if (smilesLoad) smilesLoad.then(() => document.querySelectorAll("pre.smiles[data-smiles]").forEach(drawSmiles), () => {});
+}
+
 function renderMermaid(root) {
+  renderSmiles(root); // every surface that draws a diagram draws a molecule
   const blocks = root.querySelectorAll("pre.mermaid");
   if (!blocks.length) return Promise.resolve();
   // Keep the source: mermaid.run() replaces the fence's text with an <svg>, so
@@ -1215,7 +1265,7 @@ async function openNote(path, line, facts) {
   if (rawFor !== data.path) rawFor = null;
   const top = noteTopEl(data);
   rawTop = data.raw && !data.paper && !data.saved ? top : null;
-  ed.load(data.text, { top, missing: data.broken || [] });
+  ed.load(data.text, { top, foot: similarFoot(data.path, ed), missing: data.broken || [] });
   paintFoot(drawerNote);
   focusGraphNode(data.path);
   showDrawer(data.title || data.path);
@@ -1318,6 +1368,9 @@ async function openFile(path, state, act) {
   if (!(await releaseNote())) return false; // what was typed into the note reaches the disk first
   if (detailsLent) { detailsLent = false; detailsOn = false; }
   drawerFile = { path, state: state || "unread", act: act || "" };
+  // A page opened again may be a revision under the same address (ADR-0171):
+  // asked for, it loads afresh, where a redraw of the drawer keeps its place.
+  if (isPage(path)) $("#raw-frame").dataset.url = "";
   drawerMode = "file";
   lastNotePath = null;
   lastViewedPath = path;
@@ -1328,6 +1381,10 @@ async function openFile(path, state, act) {
 window.openFile = openFile;
 
 const fileUrl = (path, extra = "") => "/file?path=" + encodeURIComponent(path) + extra;
+// A page the chat wrote (ADR-0171), served path-shaped so a site's relative links
+// resolve, on every account: /file is the laptop's only.
+const isPage = (path) => /^Pages\/.+\.html$/i.test(path || "");
+const pageUrl = (path) => "/page/" + path.split("/").map(encodeURIComponent).join("/");
 // What /file opens inline as a picture, so the drawer draws one where the file is one.
 const FILE_PICTURE = extRe(VOCAB.formats.file_pictures);
 
@@ -1335,23 +1392,53 @@ const FILE_PICTURE = extRe(VOCAB.formats.file_pictures);
 // the rail's marks for the same states); an unread file says why, by its kind.
 function fileSays(f, name) {
   const says = VOCAB.files.says;
+  if (isPage(f.path)) return "a page, shown sandboxed: it reaches nothing outside itself";
   if (f.state === "read" || f.state === "unindexed") return says[f.state];
   if (/\.pdf$/i.test(name)) return says.pdf;
   if (FILE_PICTURE.test(name)) return says.picture;
   return says.unread;
 }
 
+// A source's cover (ADR-0163): a PDF's first page or a book's own picture, in
+// a box of fixed size, so a strip over the editor keeps its height whether the
+// picture comes, fails or was never asked for; without one the box is the
+// title set as type. `src` is "" for a file no picture is drawn of.
+const COVER_FILE = extRe(VOCAB.formats.covers);
+function coverEl(src, name, big) {
+  const box = mkEl("span", big ? "src-cover big" : "src-cover");
+  box.setAttribute("aria-hidden", "true"); // the strip names the file beside it
+  const tile = () => box.replaceChildren(mkEl("span", "src-cover-t", name.replace(/\.[^.]+$/, "")));
+  if (!src) { tile(); return box; }
+  const img = mkEl("img", "");
+  Object.assign(img, { alt: "", loading: "lazy", decoding: "async", src });
+  img.addEventListener("error", tile);
+  box.append(img);
+  return box;
+}
+
+// A rail row's cover comes in the server's HTML (rail.py), and a failed <img>
+// draws a broken box even with alt="": caught on the way down, since `error`
+// does not bubble, and removed, so the row keeps its glyph.
+document.addEventListener("error", (e) => {
+  if (e.target instanceof HTMLImageElement && e.target.parentElement?.classList.contains("tree-cover")) e.target.remove();
+}, true);
+
 // A PDF in the browser's viewer and a picture as itself, both from /file
-// under /asset's sandbox; anything else is the strip and its Download.
+// under /asset's sandbox; anything else is the strip and its Download, under
+// the file's cover drawn large, since nothing else stands for it there.
 function syncFileView() {
   const f = drawerFile, name = f.path.split("/").pop();
+  const pdf = /\.pdf$/i.test(name), pic = FILE_PICTURE.test(name), page = isPage(f.path);
   const head = $("#raw-head");
   head.className = "note-paper raw-strip";
   head.replaceChildren();
+  const text = mkEl("span", "raw-strip-text");
+  if (!pic && !page) head.append(coverEl(COVER_FILE.test(name) ? "/file/cover?path=" + encodeURIComponent(f.path) : "", name, !pdf));
+  head.append(text);
   const line = mkEl("span", "");
   line.append(mkEl("b", "", name), " " + fileSays(f, name));
-  head.append(line);
-  const act = f.state === "unread" ? { ocr: "OCR this", convert: "Convert this" }[f.act] : "";
+  text.append(line);
+  const act = f.state === "unread" && !page ? { ocr: "Read the pages", convert: "Convert this" }[f.act] : "";
   if (act) {
     const b = mkEl("button", "wk-paper-a", act);
     b.type = "button";
@@ -1360,7 +1447,7 @@ function syncFileView() {
     // page is one call to the vision model, 1,795 for one Bible here.
     armThenRun(b, act, f.act === "ocr" ? "click again: every page goes to a model" : "click again to convert",
                () => fileOcr(f, b));
-    head.append(b);
+    text.append(b);
   }
   // A PDF with a text layer can be studied (ADR-0156 point 7): its chapters
   // become notes beside it, and Memorize opens a plan over them. Not indexed
@@ -1371,21 +1458,33 @@ function syncFileView() {
     study.type = "button";
     study.title = "write its chapters beside it as notes, from its own text, and plan over them in Memorize";
     study.addEventListener("click", () => fileStudy(f, study));
-    head.append(study);
+    text.append(study);
   }
-  head.append(Object.assign(document.createElement("a"),
+  if (page) {
+    // Full window is this frame, in the app's page, whose policy keeps the page
+    // on this origin (security.APP_FRAMES): a tab of its own has no such holder.
+    const full = mkEl("button", "wk-paper-a", "Full window");
+    full.type = "button";
+    full.addEventListener("click", () => $("#raw-frame").requestFullscreen()
+      .catch(() => notify("the browser did not open the page full window")));
+    text.append(full);
+  } else text.append(Object.assign(document.createElement("a"),
     { className: "wk-paper-a", textContent: "Download", href: fileUrl(f.path, "&download=1") }));
-  const pdf = /\.pdf$/i.test(name), pic = FILE_PICTURE.test(name);
-  const frame = $("#raw-frame"), img = $("#raw-img"), url = fileUrl(f.path);
+  const frame = $("#raw-frame"), img = $("#raw-img"), url = page ? pageUrl(f.path) : fileUrl(f.path);
   const listing = pdf && detailsOn;
   $("#raw-chapters").hidden = !listing;
   if (listing) fillChapters(f.path);
-  frame.hidden = !pdf || listing;
+  frame.hidden = !(pdf || page) || listing;
   img.hidden = !pic;
   // the same address is left alone, or the reader's place in the PDF goes
   // the file is compared without its #page, which a chapter adds: a redraw of
   // the drawer must not take the reader back to the first page
-  if (pdf && (frame.dataset.url || "").split("#")[0] !== url) { frame.dataset.url = url; frame.title = name; frame.src = url; }
+  if ((pdf || page) && (frame.dataset.url || "").split("#")[0] !== url) {
+    // A page runs its own script: the frame sandboxes it before it loads, as its
+    // route's header does (ADR-0171); a PDF viewer does not draw sandboxed.
+    if (page) frame.setAttribute("sandbox", "allow-scripts"); else frame.removeAttribute("sandbox");
+    frame.dataset.url = url; frame.title = name; frame.src = url;
+  }
   if (pic && img.dataset.url !== url) { img.dataset.url = url; img.alt = name; img.src = url; }
 }
 
@@ -1494,14 +1593,18 @@ function fillRawStrip(el, raw, path, inRaw) {
     }
     return el;
   }
-  el.append(line);
+  // A note made from a book or a PDF wears its cover, asked through the note
+  // as /raw is, so the server draws it too (ADR-0163).
+  const text = COVER_FILE.test(raw.name) ? mkEl("span", "raw-strip-text") : el;
+  if (text !== el) el.append(coverEl("/raw/cover?path=" + encodeURIComponent(path), raw.name), text);
+  text.append(line);
   if (raw.open) {
     const b = mkEl("button", "wk-paper-a", inRaw ? "Text" : "PDF");
     b.type = "button";
     b.addEventListener("click", () => setRaw(!inRaw));
-    el.append(b);
+    text.append(b);
   }
-  el.append(Object.assign(document.createElement("a"),
+  text.append(Object.assign(document.createElement("a"),
     { className: "wk-paper-a", textContent: "Download", href: rawUrl(path, "&download=1") }));
   return el;
 }
@@ -1522,6 +1625,7 @@ function syncRawView(on) {
   frame.hidden = false;
   $("#raw-img").hidden = true;
   if (frame.dataset.url !== url) {
+    frame.removeAttribute("sandbox"); // a page shown before it set one (syncFileView)
     frame.dataset.url = url;
     frame.title = `${drawerRaw.name}, the PDF of this note`;
     frame.src = url;
@@ -1560,6 +1664,35 @@ function noteTopEl(data) {
   return data.paper ? paperStripEl(data.paper)
     : data.saved && typeof savedStripEl === "function" ? savedStripEl(data.saved)
     : data.raw ? fillRawStrip(mkEl("div", ""), data.raw, data.path, false) : null;
+}
+
+// The notes nearest this one by what they say, after its last line (ADR-0164
+// point 2), each with its cosine as a percentage. Handed to the editor empty and
+// hidden, filled when /note/similar answers: hidden it stays when the vault has
+// no vectors or no note clears the embedder's floor.
+function similarFoot(path, ed) {
+  const box = mkEl("nav", "note-similar");
+  box.hidden = true;
+  box.setAttribute("aria-label", "similar notes");
+  fetch("/note/similar?path=" + encodeURIComponent(path))
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      if (!d || !d.notes || !d.notes.length) return;
+      box.appendChild(mkEl("div", "note-similar-h", "Similar notes"));
+      for (const n of d.notes) {
+        const b = mkEl("button", "note-similar-row");
+        b.type = "button";
+        b.append(mkEl("span", "note-similar-p", n.similarity + "%"), mkEl("span", "note-similar-t", n.name));
+        b.addEventListener("click", () => openNote(n.path));
+        box.appendChild(b);
+      }
+      box.hidden = false;
+      ed.view.requestMeasure(); // the block grew under a measured document
+    })
+    // The list is a courtesy under the text: a failed read leaves it hidden,
+    // which is how a vault without vectors already looks.
+    .catch(() => {});
+  return box;
 }
 
 // A paper's byline and its doors to Zotero, the PDF and the DOI, over the
@@ -3172,8 +3305,9 @@ document.addEventListener("click", (e) => {
   // `.wc-open` is the path on a write card, where the only thing worth reading
   // is what actually changed rather than what was claimed — so it opens the
   // diff, which falls back to the note when the session holds no baseline.
+  // A page's change is read as the page (ADR-0171): its diff is HTML source.
   const changed = e.target.closest(".wc-open");
-  if (changed) { e.preventDefault(); openDiff(changed.dataset.path); return; }
+  if (changed) { e.preventDefault(); isPage(changed.dataset.path) ? openFile(changed.dataset.path) : openDiff(changed.dataset.path); return; }
   // A numbered citation in an answer opens at the line it stands on (openCite,
   // app-chat.js); every other link opens the note at its top.
   const link = e.target.closest(".note-link, .cite-mark");
@@ -3220,7 +3354,8 @@ document.addEventListener("click", (e) => {
       // pointer that had just reached for it.
       // And the note at the centre: the drawer is the source beside it (ADR-0155
       // point 3), and a click in the text must not take the source away.
-      !e.target.closest("#dock, #composer, #graph-side, #view-note")) closeNote();
+      // A linked note's preview box (ADR-0161) floats over whatever it was pointed from.
+      !e.target.closest("#dock, #composer, #graph-side, #view-note, .hv-pop")) closeNote();
 });
 $("#note-close").addEventListener("click", () => closeNote()); // not as the handler: the click would pass as `force`
 // (Escape is handled once, at the bottom of this file, in priority order.)

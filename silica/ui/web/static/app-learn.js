@@ -53,6 +53,20 @@ const LR_MIC_MAX_MS = VOCAB.mic.explain_max_ms;
 const LR_READ_KEY = "silica.learn.readAloud";
 let lrReadAloud = (() => { try { return localStorage.getItem(LR_READ_KEY) === "1"; } catch { return false; } })();
 let lrSpoken = new Set();     // what was already read aloud, so a re-render never repeats it
+// Answer by writing or Choose (ADR-0168): kept in this browser for the plan the
+// session belongs to, else for the session itself until it closes
+const LR_FORMAT_KEY = "silica.learn.format";
+const lrFormatKey = (s) => s.plan || "session:" + s.id;
+function lrFormats() { try { return JSON.parse(localStorage.getItem(LR_FORMAT_KEY) || "{}") || {}; } catch { return {}; } }
+function lrSetFormat(s, choosing) {
+  s.choosing = choosing;
+  const m = lrFormats();
+  if (choosing) m[lrFormatKey(s)] = "choice"; else delete m[lrFormatKey(s)];
+  try { localStorage.setItem(LR_FORMAT_KEY, JSON.stringify(m)); } catch { /* a private window keeps it for this session in memory */ }
+}
+// a placement asks for "met without help", which a pick never is (reasons.outcome)
+const lrAsChoice = (s, it) => !!(s.choosing && it.options?.length && !it.placement && s.mode !== "teach");
+const lrFocusAnswer = () => ($("#lr-answer") || $(".lr-choice.on") || $(".lr-choice"))?.focus();
 
 const lrDays = (s) => (typeof s === "number" ? `~${Math.round(s)} d` : "new");
 const lrDate = (iso) => {
@@ -297,7 +311,11 @@ async function lrAttach(id) {
     for (const i of s.skipped || []) skipped[i] = true;
     const teachT = {};
     for (const [i, t] of Object.entries(s.teach || {})) teachT[Number(i)] = { turn: t.turn, transcript: t.transcript || [] };
-    lrSession = { ...s, cur: cur < 0 ? s.items.length - 1 : cur, answers: {}, verdicts, results, skipped, hintsUsed: {}, shown: {}, conf: null, told: false, state: "input", teachT };
+    // a pick's text is the answer the previous row and the reveal show
+    const picks = {}, answers = {};
+    for (const [i, v] of Object.entries(verdicts)) if (v.pick != null) { picks[i] = v.pick; answers[i] = v.options?.[v.pick] || ""; }
+    lrSession = { ...s, cur: cur < 0 ? s.items.length - 1 : cur, answers, picks, verdicts, results, skipped, hintsUsed: {}, shown: {}, conf: null, told: false, state: "input", teachT };
+    lrSession.choosing = lrFormats()[lrFormatKey(lrSession)] === "choice";
     const it = lrSession.items[lrSession.cur];
     if (it && verdicts[it.i]) { lrSession.state = "reveal"; lrSession.conf = verdicts[it.i].conf ?? null; lrSession.told = !!verdicts[it.i].told; }
   } catch { /* the session is gone: the home view reads as usual */ }
@@ -587,7 +605,8 @@ function lrSessionList(d) {
   const sec = mkEl("section", "lr-hsec lr-next");
   const all = d.session_rows || [];
   if (!all.length) {
-    sec.appendChild(mkEl("p", "lr-help", d.total ? "Nothing waiting from earlier sessions: a note needs a footnoted claim or a Relations bullet to be asked about."
+    sec.appendChild(mkEl("p", "lr-help", d.total ? "Nothing waiting from earlier sessions. Name a note above to test yourself on it."
+      : vaultEmpty ? "Memorize asks you questions on your notes, and what you miss comes back later. Add your first files, then name one above."
       : "Nothing tested yet. Name a note above and test yourself on it; this list grows from there."));
     return sec;
   }
@@ -2575,7 +2594,8 @@ async function learnStartSession(opts = {}) {
     return;
   }
   lrGateCount(opts.from || "other");
-  lrSession = { ...s, cur: 0, state: "input", answers: {}, verdicts: {}, results: {}, skipped: {}, hintsUsed: {}, shown: {}, conf: null, told: false, teachT: {} };
+  lrSession = { ...s, cur: 0, state: "input", answers: {}, picks: {}, verdicts: {}, results: {}, skipped: {}, hintsUsed: {}, shown: {}, conf: null, told: false, teachT: {} };
+  lrSession.choosing = lrFormats()[lrFormatKey(lrSession)] === "choice";
   if (activeTab !== "learn") showTab("learn");
   lrGo({ view: "session", id: s.id });
 }
@@ -2608,6 +2628,8 @@ function lrVerdictSay(it, v, s) {
   if (v.skip) return { mark: "warn", word: "Source mismatch", sub: "not scored" };
   if (v.needs_self_grade || v.grader === "self") return { mark: "open", word: "Rate it yourself", sub: "" };
   if (v.told) return { mark: "open", word: "Told", sub: "the point stays open" };
+  if (v.grader === "choice") return v.correct ? { mark: "half", word: "Right choice", sub: "recognised among four, not counted as met without help" }
+    : { mark: "open", word: "Wrong choice", sub: "the point stays open" };
   const used = (s.shown[it.i] || []).length;
   if (v.grade === "recalled") return used ? { mark: "half", word: "Met with help", sub: "not counted as without help" } : { mark: "full", word: "Met", sub: "without help" };
   if (it.kind === "predict") return { mark: "open", word: "First attempt", sub: "graded as such" };
@@ -2674,7 +2696,7 @@ function lrRenderSession(body) {
   else if (s.state === "reveal") lrReveal(sheet, it, s.verdicts[it.i]);
   wrap.appendChild(sheet);
   body.appendChild(wrap);
-  if (s.state === "input") setTimeout(() => $("#lr-answer")?.focus(), 0);
+  if (s.state === "input") setTimeout(lrFocusAnswer, 0);
   if (s.state === "reveal") setTimeout(() => $("#lr-verdict")?.focus(), 0);
   lrSpeakCurrent(s, it);
 }
@@ -2703,8 +2725,15 @@ function lrPrevRow(s, prev, n) {
 }
 
 function lrInputParts(sheet, s, it) {
+  if (s.mode !== "teach" && s.items.some((x) => x.options?.length && !x.placement)) sheet.appendChild(lrFormatSwitch(s, it));
   const shown = s.shown[it.i] || [];
   shown.forEach((h, i) => { const d = mkEl("div", "lr-hint"); d.appendChild(mkEl("b", null, `hint ${i + 1} of 2`)); d.append(h); sheet.appendChild(d); });
+  if (lrAsChoice(s, it)) sheet.appendChild(lrOptions(s, it));
+  else sheet.appendChild(lrWriteBox(s, it));
+  lrConfParts(sheet, s, it);
+}
+
+function lrWriteBox(s, it) {
   const lab = mkEl("label", "lr-answer");
   lab.appendChild(mkEl("span", "lr-help", "Your answer"));
   const ta = mkEl("textarea", "lr-input" + (it.kind === "cloze" ? " short" : ""));
@@ -2716,7 +2745,56 @@ function lrInputParts(sheet, s, it) {
   inwrap.appendChild(ta);
   if (typeof attachMic === "function") inwrap.appendChild(lrMic(s, it, ta));
   lab.appendChild(inwrap);
-  sheet.appendChild(lab);
+  return lab;
+}
+
+// The format switch (ADR-0168), shown once a question of the session has four
+// options. Under Choose a question without them is asked in writing, and says so.
+function lrFormatSwitch(s, it) {
+  const row = mkEl("div", "lr-format");
+  const seg = mkEl("div", "lr-seg");
+  seg.setAttribute("role", "radiogroup"); seg.setAttribute("aria-label", "answer format");
+  for (const [choosing, label] of [[false, "Answer by writing"], [true, "Choose"]]) {
+    const on = !!s.choosing === choosing;
+    const b = lrBtn(on ? "on" : null, label, () => { lrSetFormat(s, choosing); lrRender(); });
+    b.setAttribute("role", "radio"); b.setAttribute("aria-checked", on ? "true" : "false");
+    seg.appendChild(b);
+  }
+  row.appendChild(seg);
+  if (s.choosing) row.appendChild(mkEl("span", "lr-help", lrAsChoice(s, it)
+    ? "A right pick is Good at most and is not counted as met without help."
+    : "No four options for this question: answer it in writing."));
+  return row;
+}
+
+function lrOptions(s, it) {
+  const box = mkEl("div", "lr-choices");
+  box.setAttribute("role", "radiogroup"); box.setAttribute("aria-label", "options");
+  it.options.forEach((text, n) => {
+    const on = s.picks[it.i] === n;
+    const b = mkEl("button", "lr-choice" + (on ? " on" : ""));
+    b.type = "button";
+    b.setAttribute("role", "radio"); b.setAttribute("aria-checked", on ? "true" : "false");
+    b.setAttribute("aria-keyshortcuts", String(n + 1));
+    const k = mkEl("kbd", "lr-k", String(n + 1));
+    k.setAttribute("aria-hidden", "true");
+    b.append(k, lrMd(mkEl("span", "t"), text));
+    b.addEventListener("click", () => lrPick(n));
+    box.appendChild(b);
+  });
+  return box;
+}
+
+function lrPick(n) {
+  const s = lrSession, it = lrItem();
+  if (!s || s.state !== "input" || !lrAsChoice(s, it) || n >= it.options.length) return;
+  s.picks[it.i] = n;
+  s.answers[it.i] = it.options[n];
+  lrRender();
+}
+
+function lrConfParts(sheet, s, it) {
+  const shown = s.shown[it.i] || [];
   // confidence is one segment, guessing to certain, the number only on the chosen one (ADR-0061 §19)
   const conf = mkEl("div", "lr-conf");
   conf.appendChild(mkEl("span", "lr-help", "How likely is this answer to meet the criteria?"));
@@ -2724,14 +2802,14 @@ function lrInputParts(sheet, s, it) {
   seg.setAttribute("role", "radiogroup"); seg.setAttribute("aria-label", "confidence");
   for (const [lbl, v] of [...LR_CONF].reverse()) {
     const on = s.conf === v;
-    const b = lrBtn(on ? "on" : null, lbl, () => { s.conf = v; s.confSkipped = false; lrRender(); $("#lr-answer")?.focus(); });
+    const b = lrBtn(on ? "on" : null, lbl, () => { s.conf = v; s.confSkipped = false; lrRender(); lrFocusAnswer(); });
     b.setAttribute("role", "radio"); b.setAttribute("aria-checked", on ? "true" : "false");
     b.title = String(v);
     if (on) b.appendChild(mkEl("span", "num", " " + v));
     seg.appendChild(b);
   }
   conf.appendChild(seg);
-  const skipc = lrBtn("lr-q" + (s.confSkipped ? " on" : ""), "skip", () => { s.conf = null; s.confSkipped = true; lrRender(); $("#lr-answer")?.focus(); });
+  const skipc = lrBtn("lr-q" + (s.confSkipped ? " on" : ""), "skip", () => { s.conf = null; s.confSkipped = true; lrRender(); lrFocusAnswer(); });
   skipc.setAttribute("aria-label", "skip confidence");
   skipc.setAttribute("aria-pressed", s.confSkipped ? "true" : "false");
   conf.appendChild(skipc);
@@ -2743,9 +2821,10 @@ function lrInputParts(sheet, s, it) {
   hint.disabled = left <= 0 || !(it.hints || []).length;
   const skip = lrBtn("lr-q", "Skip question", lrSkip);
   skip.title = "not a wrong answer: the point stays open and nothing is recorded";
-  const ready = s.conf !== null || s.confSkipped;
+  const picking = lrAsChoice(s, it) && s.picks[it.i] == null;
+  const ready = (s.conf !== null || s.confSkipped) && !picking;
   actions.append(hint, lrBtn("lr-q", "Just tell me", () => lrSubmit(true)), skip, mkEl("span", "sp"));
-  if (!ready) actions.appendChild(mkEl("span", "lr-help", "pick a confidence, or skip it, to submit"));
+  if (!ready) actions.appendChild(mkEl("span", "lr-help", picking ? "pick an option and a confidence to submit" : "pick a confidence, or skip it, to submit"));
   const submit = lrKey(lrBtn("lr-send" + (ready ? "" : " off"), "Submit", () => lrSubmit(false)), "⏎", "Enter");
   submit.id = "lr-submit";
   submit.setAttribute("aria-disabled", ready ? "false" : "true");
@@ -2962,6 +3041,8 @@ async function lrSubmit(told) {
   const s = lrSession, it = lrItem();
   if (!s || s.state !== "input") return;
   if (!told && s.conf === null && !s.confSkipped) { notify("pick a confidence, or skip it", "warn"); return; }
+  const pick = !told && lrAsChoice(s, it) ? s.picks[it.i] : undefined;
+  if (!told && lrAsChoice(s, it) && pick == null) { notify("pick an option", "warn"); return; }
   // Submitting mid-take would grade the answer without the words still being
   // transcribed, and they would then land on a question already graded.
   if (!told && typeof micBusy === "function" && micBusy("lr-answer")) { notify("the dictation is still running; stop it, then submit", "warn"); return; }
@@ -2973,10 +3054,10 @@ async function lrSubmit(told) {
   lrRender();
   clearTimeout(lrGradeTimer);
   let fallback = false;
-  lrGradeTimer = setTimeout(() => { fallback = true; lrSelfGradeFallback(it); }, LR_GRADE_WAIT_MS);
+  if (pick == null) lrGradeTimer = setTimeout(() => { fallback = true; lrSelfGradeFallback(it); }, LR_GRADE_WAIT_MS);
   let v;
   try {
-    v = await apiPost("/learn/answer", { id: s.id, i: it.i, production, conf: s.conf, hints: s.hintsUsed[it.i] || 0, told, modality });
+    v = await apiPost("/learn/answer", { id: s.id, i: it.i, production, conf: s.conf, hints: s.hintsUsed[it.i] || 0, told, modality, pick });
   } catch (e) {
     clearTimeout(lrGradeTimer);
     if (fallback) return;
@@ -3008,11 +3089,31 @@ async function lrSelfGradeFallback(it) {
   } catch { /* the pending sheet stays; the verdict may still land */ }
 }
 
+// The four after a pick: the right one and the one picked, said in words
+// beside their mark, never in colour alone.
+function lrChoiceKey(v) {
+  const box = mkEl("div", "lr-choices done");
+  (v.options || []).forEach((text, n) => {
+    const right = n === v.key, picked = n === v.pick;
+    const row = mkEl("div", "lr-choice" + (right ? " right" : picked ? " picked" : ""));
+    const k = mkEl("kbd", "lr-k", String(n + 1));
+    k.setAttribute("aria-hidden", "true");
+    row.append(k, lrMd(mkEl("span", "t"), text));
+    if (right || picked) {
+      const say = mkEl("span", "say");
+      say.append(lrMark(right ? "full" : "open", ""), right ? (picked ? "right, your pick" : "right") : "your pick");
+      row.appendChild(say);
+    }
+    box.appendChild(row);
+  });
+  return box;
+}
+
 // Your words beside the note's line, the reference answer marked in it.
 function lrCompare(it, v, s, { criterion = false } = {}) {
   const box = mkEl("div", "lr-cmp");
   const you = mkEl("div", "you");
-  you.append(mkEl("span", "lab", ["you wrote", ...lrSaidWith(s, it)].join(" · ")),
+  you.append(mkEl("span", "lab", [v.grader === "choice" ? "you chose" : "you wrote", ...lrSaidWith(s, it)].join(" · ")),
     mkEl("p", "txt", s.told ? "(answer requested)" : s.answers[it.i] || v.production || "(no answer)"));
   const note = mkEl("div", "note");
   const lab = mkEl("span", "lab");
@@ -3079,6 +3180,7 @@ function lrReveal(sheet, it, v) {
     sheet.appendChild(row);
     return;
   }
+  if (v.grader === "choice") sheet.appendChild(lrChoiceKey(v));
   sheet.appendChild(lrCompare(it, v, s, { criterion: self }));
   // the criterion and the grader's notes, on request (ADR-0061 §21)
   if (!self && (v.criteria || v.rubric_notes || v.misconception || (v.span?.leaf && !v.span.self))) {
@@ -3111,7 +3213,12 @@ function lrReveal(sheet, it, v) {
     }
     return g;
   };
-  if (proposed && !self) {
+  if (v.grader === "choice") {
+    // the key's rating, not changed here: the server records it whatever is sent (ADR-0168)
+    rate.append(mkEl("span", "lr-help", "rating"), mkEl("b", null, lrCap(LR_RATING[proposed])),
+      mkEl("span", "lr-help", !v.correct ? "from the key" : proposed < 3 ? "from the key: Hard, since you were guessing or took a hint"
+        : "from the key: a pick is Good at most"));
+  } else if (proposed && !self) {
     // a proposal with change (review §10), the four only on request
     rate.appendChild(mkEl("span", "lr-help", "rating"));
     if (s.changing && !s.results[it.i]) {
@@ -3287,6 +3394,7 @@ async function lrClose() {
   clearTimeout(lrGradeTimer);
   let rc;
   try { rc = await apiPost("/learn/close", { id: s.id }); } catch (e) { if (!lrGone(e)) notify("couldn't end the session: " + e.message); return; }
+  if (!s.plan && s.choosing) lrSetFormat(s, false);
   lrSession = null;
   lrEndAsk = false;
   lrData = null; lrPlan = null; lrNote = null; lrMap = null;
@@ -3327,7 +3435,7 @@ function lrMissedList(wrap, r) {
   const pts = byPoint ? r.points.filter((p) => p.status !== "met") : [];
   // a retest is told on its missed question's row, never a row of its own (ADR-0135 point 4)
   // one the session ended before was never asked: it read "asked again, missed"
-  const again = new Map(r.items.filter((x) => x.retest && x.status !== "open").map((x) => [x.path, x.status === "met" ? "met" : "missed"]));
+  const again = new Map(r.items.filter((x) => x.retest && x.status !== "open").map((x) => [x.path, ["met", "assisted"].includes(x.status) ? x.status : "missed"]));
   const items = byPoint ? [] : r.items.filter((x) => !x.retest && ["missed", "assisted", "skipped"].includes(x.status));
   const n = pts.length + items.length;
   // a skip is not a miss (ADR-0061), nor is a point the session ended before: both
@@ -3345,7 +3453,8 @@ function lrMissedList(wrap, r) {
   const sub = [t3 ? `${t3.met} of ${t3.points} met without help` : "", t3?.assisted ? `${t3.assisted} more with help, not counted` : "",
     skippedN ? `${skippedN} skipped, not counted as wrong` : ""].filter(Boolean).join(" · ");
   if (sub) sec.appendChild(mkEl("p", "lr-help", sub));
-  if (again.size) sec.appendChild(mkEl("p", "lr-help", `Asked again before the end: ${[...again.values()].filter((v) => v === "met").length} of ${again.size} met`));
+  const helped = [...again.values()].filter((v) => v === "assisted").length;
+  if (again.size) sec.appendChild(mkEl("p", "lr-help", `Asked again before the end: ${[...again.values()].filter((v) => v === "met").length} of ${again.size} met${helped ? `, ${helped} with help` : ""}`));
   for (const p of pts) {
     const it = r.items.find((x) => x.point?.i === p.i && x.span?.line) || r.items.find((x) => x.point?.i === p.i);
     sec.appendChild(lrMissedRow(p.status, p.heading ? `${p.kind}, under ${p.heading}` : p.kind, r.note, it?.span, noteStem(r.note)));
@@ -3372,6 +3481,7 @@ function lrMissedRow(status, what, path, span, title, again) {
   const read = lrBtn("lr-link", inSource ? "Read it in the source" : "Read it in the note", () => openNote(file, span?.line));
   read.setAttribute("aria-label", `Read ${inSource ? noteStem(file) : title}${span?.line ? ` at line ${span.line}` : ""}`);
   const back = again === "met" ? ["asked again, met", "comes back when it falls due"]
+    : again === "assisted" ? ["asked again, met with help", LR_COMES_BACK[status]]
     : again === "missed" ? ["asked again, missed", LR_COMES_BACK[status]] : [LR_COMES_BACK[status]];
   acts.append(read, mkEl("span", "lr-help", [LR_STATUS_WORD[status], ...back].filter(Boolean).join(" · ")));
   row.appendChild(acts);
@@ -3577,7 +3687,7 @@ function lrRenderReceipt(body) {
     if (r.points?.length) box.appendChild(mkEl("p", null, "A point counts for an objective when its criteria were met without help; an assisted answer stays recorded but does not count. It does not complete the note, and an answer right after feedback does not prove recall at a distance."));
     if (moved.length) box.appendChild(mkEl("p", null, "What moved comes from the recorded answers only; no model call, no claim about you beyond them."));
     box.appendChild(mkEl("p", null, "Result: whether the rubric was met, before help or confidence enter. Rating: what the schedule received; a hint or \"just tell me\" caps it at Hard, an answer at 25 caps it at Good. A skipped question writes nothing."));
-    if (r.revisit?.length) box.appendChild(mkEl("p", null, r.plan ? "Queueing writes a revisit line on the plan through the gate; the plan's next session takes those first. Nothing is queued on its own." : "A free session belongs to no plan, so nothing can be queued; a plan's session can."));
+    if (r.revisit?.length) box.appendChild(mkEl("p", null, r.plan ? "Queueing adds a line to the plan to go over these again; its next session takes them first. Nothing is queued on its own." : "A free session belongs to no plan, so nothing can be queued; a plan's session can."));
   });
   wrap.appendChild(discs);
   wrap.appendChild(mkEl("p", "lr-help", r.recorded
@@ -3627,13 +3737,14 @@ function learnKeys(e) {
   if (s.state === "input") {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); s.mode === "teach" ? lrTeachSend() : lrSubmit(false); return; }
     if (e.key === "h" && !typing && s.mode !== "teach") { e.preventDefault(); lrHint(); }
+    if (["1", "2", "3", "4"].includes(e.key) && !typing && lrAsChoice(s, lrItem())) { e.preventDefault(); lrPick(Number(e.key) - 1); }
     return;
   }
   if (s.state === "reveal") {
     if (typing) return;
     if (e.key === "Enter") { e.preventDefault(); $("#lr-confirm") ? lrConfirm() : lrNext(); return; }
     if (e.key === "n") { e.preventDefault(); lrItem() && (s.results[lrItem().i] || s.verdicts[lrItem().i]?.skip) ? lrNext() : notify("confirm the rating first", "warn"); return; }
-    if (["1", "2", "3", "4"].includes(e.key)) { e.preventDefault(); s.changing = true; lrChoose(Number(e.key)); }
+    if (["1", "2", "3", "4"].includes(e.key) && s.verdicts[lrItem().i]?.grader !== "choice") { e.preventDefault(); s.changing = true; lrChoose(Number(e.key)); }
   }
 }
 document.addEventListener("keydown", learnKeys);

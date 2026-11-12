@@ -405,7 +405,8 @@ def follow_superseded(path: str, *, max_hops: int = 5) -> str:
 
 
 def resolve_contested(
-    content: str, *, resolved_by: str, valid_to: str, source_ref: str | None = None
+    content: str, *, resolved_by: str, valid_to: str, source_ref: str | None = None,
+    said: str = "",
 ) -> str:
     """Resolve a note's contradictions without erasing the record.
 
@@ -424,6 +425,10 @@ def resolve_contested(
     Clearing the flag alone would be wrong: leaving a body callout that still
     reads "Unresolved" makes the note lie about its own state, and drops every
     record of what was contested.
+
+    `said` is the resolution in words, "this note holds" (ADR-0166 point 3):
+    the filed callout then reads "Resolved <date>: this note holds.", so the
+    file says who won and not only that the contest ended.
     """
     from silica.kernel.write.moc import merge_moc_section
 
@@ -457,7 +462,7 @@ def resolve_contested(
         block: list[str] = []
         for callout in callouts:
             block.append(stamp(valid_to=valid_to, resolved_by=resolved_by))
-            block.append(callout.replace(_UNRESOLVED_TAIL, f"Resolved {valid_to}."))
+            block.append(callout.replace(_UNRESOLVED_TAIL, f"Resolved {valid_to}{': ' + said if said else ''}."))
             block.append("")
         new_body = merge_moc_section(new_body, SUPERSEDED_MARKER, block)
 
@@ -466,4 +471,6 @@ def resolve_contested(
     else:
         data.pop(CONTESTED_KEY, None)
         data.pop(CONTRADICTIONS_KEY, None)
-    return frontmatter.dump(data, new_body)
+    # A note whose only properties were the contest keeps no block: dumped
+    # empty it read `{}`, a block no YAML reader takes for properties.
+    return frontmatter.dump(data, new_body) if data else new_body.lstrip("\n")

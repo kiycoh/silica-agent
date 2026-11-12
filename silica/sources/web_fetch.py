@@ -92,6 +92,25 @@ class YoutubeBlocked(ValueError):
     """YouTube asked for a sign-in this session does not have."""
 
 
+class Refused(ValueError):
+    """A 401, 403 or 429: the site said no. `status` and `headers` are for a
+    caller that names the site (site_fetch), which the message alone hid."""
+
+    def __init__(self, status: int, message: str, headers: httpx.Headers | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.headers = headers if headers is not None else httpx.Headers()
+
+
+class SiteRefused(ValueError):
+    """A site adapter's refusal (ADR-0162), in words written for the person:
+    the vault's + shows `said` as the row's reason, as it does YouTube's wall."""
+
+    def __init__(self, said: str) -> None:
+        super().__init__(said)
+        self.said = said
+
+
 def youtube_cookies() -> Path | None:
     """The account cookies yt-dlp signs in with (ADR-0120 amendment), when the
     operator set SILICA_YOUTUBE_COOKIES to a readable file; None otherwise."""
@@ -522,13 +541,15 @@ def _raise_for_status(resp: httpx.Response, url: str) -> None:
     they mean different things to the caller. Distinct messages, not one
     generic HTTPStatusError."""
     if resp.status_code in (401, 403):
-        raise ValueError(
+        raise Refused(
+            resp.status_code,
             f"{resp.status_code} at {url}: the site refuses unauthenticated "
-            "reads (bot wall or paywall). Try a different source."
+            "reads (bot wall or paywall). Try a different source.",
+            resp.headers,
         )
     if resp.status_code == 429:
-        raise ValueError(
-            f"429 at {url}: rate limited. Back off, or use a different source."
+        raise Refused(
+            429, f"429 at {url}: rate limited. Back off, or use a different source.", resp.headers
         )
     resp.raise_for_status()
 
@@ -618,7 +639,12 @@ def fetch(url: str, headers: dict[str, str] = HEADERS, *, types: tuple[str, ...]
             if resp.is_redirect and location:
                 # Against the URL as named, never the pinned one: a relative
                 # Location resolved on the IP would send the next hop there.
-                url = urljoin(url, location)
+                hop = urljoin(url, location)
+                if urlsplit(hop).hostname != urlsplit(url).hostname:
+                    # A token is for the host it was sent to (GitHub's, ADR-0162):
+                    # a hop to another host goes without it.
+                    headers = {k: v for k, v in headers.items() if k.lower() != "authorization"}
+                url = hop
                 continue
             _raise_for_status(resp, url)
             _refuse_binary(resp, url, types)
@@ -731,6 +757,13 @@ def fetch_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
     """
     if host_matches(url, *YT_DOMAINS):
         return _youtube_transcript(url)
+    # A Reddit thread or a GitHub repository, file, issue or pull request, read
+    # from the site's JSON (ADR-0162); None for any other page of those sites,
+    # which takes the HTML path below.
+    from silica.sources import site_fetch
+
+    if (site := site_fetch.page(url)) is not None:
+        return site
     if host_matches(url, *_WP_DOMAINS):
         # Cites the requested URL, not the redirect target: it is what resolves
         # in a browser, and the anchor in /wiki/PageRank#History survives it.
@@ -748,6 +781,19 @@ def fetch_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
     # plain text and JSON carry no title element; "" says so rather than
     # promoting their first line to one
     return Page(_render(final_url, truncate(text)), page_title(body) if is_html else "")
+
+
+def link_title(url: str) -> str:
+    """The title a pasted address takes as its link's words (ADR-0161), through `fetch`'s
+    guards, ceiling and clocks; "" when it names none or is not a page. A YouTube video asks
+    the site's oEmbed, a few hundred bytes: `_youtube_transcript` runs yt-dlp for a minute,
+    and a server's watch page can be the consent wall, whose title is the wall's."""
+    if host_matches(url, *YT_DOMAINS):
+        resp, _ = fetch(f"https://www.youtube.com/oembed?{urlencode({'url': url, 'format': 'json'})}")
+        return " ".join(str(resp.json().get("title") or "").split())[:_MAX_TITLE]
+    resp, _ = fetch(url)
+    ctype = content_type(resp)
+    return page_title(resp.text) if "html" in ctype or not ctype else ""
 
 
 # ingress: /web, a page's text.

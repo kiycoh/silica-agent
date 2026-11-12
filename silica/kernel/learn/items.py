@@ -19,6 +19,7 @@ across the scope is not traded for depth on the first note picked.
 from __future__ import annotations
 
 import logging
+import random
 import re
 from collections import Counter
 from pathlib import Path
@@ -46,6 +47,10 @@ AXIS = {"recall": "memory", "cloze": "memory", "predict": "memory",
         "apply": "application", "transfer": "application"}
 LEVEL_OF = {"cloze": 1, "recall": 1, "predict": 1, "structure": 3, "explain": 3, "teach": 3,
             "contrast": 3, "apply": 3, "transfer": 4, "contradiction": 4}
+# The kinds that can also be asked as a choice among four (ADR-0168): their
+# answer is one fact, term or difference, so three wrong ones can stand beside
+# it. A why, a case or a relation has no single option that is the answer.
+CHOICE_KINDS = ("recall", "cloze", "contrast", "predict")
 
 _FOOTNOTE_RE = re.compile(r"\[\^([A-Za-z0-9_-]+)\]")
 _FOOTDEF_RE = re.compile(r"^\[\^([A-Za-z0-9_-]+)\]:\s*\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
@@ -483,15 +488,133 @@ def ask_plan(points: list[dict], objectives: list[str], relations: int = 0, only
 _BOLD_RE = re.compile(r"\*\*([^*\n]{3,60}?)\*\*|==([^=\n]{3,60}?)==")
 
 
-def _bold_term(raw: str) -> str:
-    """The first short term the author emphasised (`**term**`, `==term==`):
-    the writer's own mark of what matters, which a longest-word guess is
-    not. A label ("**Meccanismo:**") is not a term."""
+def _bold_terms(raw: str) -> list[str]:
+    """The short terms the author emphasised (`**term**`, `==term==`): the
+    writer's own mark of what matters, which a longest-word guess is not. A
+    label ("**Meccanismo:**") is not a term."""
+    out = []
     for m in _BOLD_RE.finditer(raw):
         t = plain(m.group(1) or m.group(2)).strip(" .,;")
         if t and not t.endswith(":") and len(t.split()) <= 4 and len(t) >= 3:
-            return t
-    return ""
+            out.append(t)
+    return out
+
+
+def _bold_term(raw: str) -> str:
+    return next(iter(_bold_terms(raw)), "")
+
+
+# ---------------------------------------------------------------- a choice among four (ADR-0168)
+
+def _stated(option: str, text: str) -> bool:
+    """Whether *text* says *option* word for word, after norm()."""
+    o = norm(option)
+    return bool(o) and re.search(rf"(?<!\w){re.escape(o)}(?!\w)", norm(text)) is not None
+
+
+def _near(a: str, b: str) -> bool:
+    """One answer said twice: one of the two says no word the other does not
+    ("La distanza." and "la distanza", or the answer with a clause added), and
+    a reader could defend either as right. Words and not a character ratio:
+    options share the answer's form, so "ten kinds of question" and "twelve
+    kinds of question" are 0.9 alike and two answers (2026-11-12, the first
+    live reply: a ratio of 0.8 turned away every wrong option it wrote)."""
+    wa, wb = Counter(re.findall(r"\w+", norm(a))), Counter(re.findall(r"\w+", norm(b)))
+    return not (wa - wb) or not (wb - wa)
+
+
+def _held(answer: str, support: list[str]) -> bool:
+    """Whether the line holds the answer: half its words of four letters or
+    more (all its words when it has none) are words of `support`. Written, an
+    answer is graded against the span and a model's ANSWER is only the
+    grader's reference; picked, ANSWER is the key, with no grader after it.
+    shortcut: words, not meaning; on 2026-12-12 read the missed picks of the
+    ledger's choice lines against their lines, and check meaning if one key
+    the line does not hold is among them."""
+    said = set(re.findall(r"\w+", " ".join(norm(t) for t in support)))
+    words = re.findall(r"\w+", norm(answer))
+    long = [w for w in words if len(w) >= 4] or words
+    return bool(long) and sum(w in said for w in long) >= len(long) / 2
+
+
+def choices(answer: str, wrong: list[str], support: list[str], why: dict[str, str] | None = None) -> dict:
+    """What an item is asked with as a choice: the answer and three wrong
+    options, shuffled, `key` the answer's place; {} when the line does not
+    hold the answer or fewer than three wrong ones pass, and the item is then
+    asked in writing only.
+
+    A wrong option passes when it is not the answer said again, nor another
+    wrong option said again, nor said word for word by the line the item rests
+    on (`support`), which would make it right by the reader's own source. Word
+    for word, not the provenance gate's fuzzy match: that would turn away a
+    wrong option for sharing most of the line's words, as a good one about the
+    same subject does. `why` holds a line for a wrong option whose origin is
+    known without a model; it rides as `wrong_why`.
+
+    shortcut: nothing checks that a wrong option is false where it stands (a
+    cloze's other bold term can fit its blank too) nor that the answer is not
+    the longest of the four; read the first 100 choice lines of a real ledger
+    by 2026-12-12 and add the check whose miss they show."""
+    answer = " ".join(str(answer or "").split())
+    kept: list[str] = []
+    for w in wrong:
+        w = " ".join(str(w or "").split())
+        if (w and len(kept) < 3 and not _near(w, answer) and not any(_near(w, k) for k in kept)
+                and not any(t and _stated(w, t) for t in support)):
+            kept.append(w)
+    if not answer or len(kept) < 3 or not _held(answer, support):
+        return {}
+    options = [answer, *kept]
+    random.shuffle(options)
+    out: dict[str, Any] = {"options": options, "key": options.index(answer)}
+    lines = {w: why[w] for w in kept if why and why.get(w)}
+    if lines:
+        out["wrong_why"] = lines
+    return out
+
+
+def reshuffled(item: dict) -> dict:
+    """The item's options in a new order, the key following the answer."""
+    right = item["options"][item["key"]]
+    options = list(item["options"])
+    random.shuffle(options)
+    return {"options": options, "key": options.index(right)}
+
+
+def _cloze_wrong(path: str, text: str) -> tuple[list[str], dict[str, str]]:
+    """What a cloze's blank could be mistaken for, from its own note: the other
+    terms the author emphasised, then the notes it links to, in reading order,
+    each with the line saying where it comes from. A cloze is made without a
+    model, so its wrong options are too (ADR-0168)."""
+    from silica.kernel.base import frontmatter
+
+    _d, _r, body = frontmatter.split(text)
+    heading, fence = title_of(path, text), False
+    bold: list[str] = []
+    links: list[str] = []
+    why: dict[str, str] = {}
+    for line in body.splitlines():
+        if line.startswith("```"):
+            fence = not fence
+            continue
+        m = HEADING_LINE_RE.match(line)
+        if fence or m:
+            heading = m.group(2) if m else heading
+            continue
+        if _FOOTDEF_RE.match(line.strip()):
+            continue
+        for t in _bold_terms(line):
+            if t not in why:
+                bold.append(t)
+                why[t] = f"This note names {t} under {heading}, for another point."
+        for lk in _WIKILINK_ALIAS_RE.finditer(line):
+            target = lk.group(1).strip()
+            t = (lk.group(2) or target.rsplit("/", 1)[-1]).strip()
+            if lk.group(0).startswith("!") or target.startswith("sources/") or not t or t in why:
+                continue
+            links.append(t)
+            why[t] = f"This note links to {t}, another note."
+    return bold + links, why
 
 
 def _head_term(claim: str, title: str, path: str) -> str:
@@ -547,11 +670,13 @@ def cloze(path: str, skip: set[str] | None = None, point: dict | None = None) ->
         source = {"leaf": c["leaf"], "line": no if c.get("self") else c["line"]}
         if c.get("self"):
             source["self"] = True
+        span = line if c.get("self") else c["span"]
+        wrong, why = _cloze_wrong(path, text)
         return {
             "path": path, "title": title, "kind": "cloze", "level": 1,
             "q": f"Fill the blank: {q}", "answer": term, "claim": plain(c["text"]),
             "criteria": f"the blank is {term}", "anchor": c["heading"],
-            "source": source, "span": line if c.get("self") else c["span"], "hints": [],
+            "source": source, "span": span, "hints": [], **choices(term, wrong, [line, span], why),
         }
     return None
 
@@ -689,15 +814,20 @@ _CUE_KEYS = ("i", "path", "title", "kind", "level", "q", "hints", "source", "sta
              "objective", "point", "placement", "retest", "missed_kind")
 
 
-def cue_payload(picked: list[dict]) -> list[dict]:
+def cue_payload(picked: list[dict], options: bool = False) -> list[dict]:
     """What the reader (or the REPL model) sees before answering: cue, hints
-    and the span's location, never the answer key (G5)."""
+    and the span's location, never the answer key (G5). `options` adds an
+    item's choices, unmarked, for the page that asks them (ADR-0168): the REPL
+    model, which writes its own words around a cue, never gets the answer
+    among four."""
     out = []
     for i, it in enumerate(picked, 1):
         row = {k: it[k] for k in _CUE_KEYS if k in it}
         row["i"] = i
         row["source"] = {"leaf": (it.get("source") or {}).get("leaf", ""),
                          "line": (it.get("source") or {}).get("line", 0)}
+        if options and it.get("options"):
+            row["options"] = list(it["options"])
         out.append(row)
     return out
 
@@ -758,6 +888,7 @@ def parse_model_items(reply: str) -> list[dict]:
             "span": fields.get("SPAN", ""), "source": {"leaf": "", "line": 0},
             "hints": [fields["H1"]] if fields.get("H1") else [],
             "objective": fields.get("OBJECTIVE", "").strip().lower(), "point": point,
+            "wrong": [fields[k] for k in ("WRONG1", "WRONG2", "WRONG3") if fields.get(k)],
         }
         item["title"] = title_of(item["path"])
         out.append(item)
@@ -803,6 +934,10 @@ Examples of the shape, on a topic not in these notes:
   good (explain): Why does TCP need a three-way handshake instead of a single request and reply?
   good (apply): A client's SYN reaches the server but the server's SYN-ACK is lost. What does each side do next, and why?
   good (recall): What are the three segments that open a TCP connection?
+    ANSWER: SYN, then SYN-ACK, then ACK.
+    WRONG1: SYN, then ACK, then FIN.
+    WRONG2: SYN, then RST, then ACK.
+    WRONG3: ACK, then SYN-ACK, then FIN.   (each read as ANSWER reads: the same opening, form and length)
 
 The other fields:
 - CRITERIA: the one or two propositions a full answer to Q must state, connected the way the point connects them; nothing Q does not ask for. Never a keyword list.
@@ -810,7 +945,8 @@ The other fields:
 - SPAN: one sentence copied verbatim, character for character, from the POINT's text (from a CLAIMS line when there are no POINTS).
 - ANCHOR: the POINT's heading, verbatim (else one of HEADINGS).
 - H1: a hint about the content that nudges toward the answer without stating it: a cue, a contrast or a case to think about. Never an instruction like "identify ..." or "recall ...", never a rewording of the question.
-- Write Q, CRITERIA, ANSWER and H1 in the block's LANGUAGE, all four. Field labels stay in English as written.
+- WRONG1, WRONG2, WRONG3: only when the item's KIND is recall, contrast or predict, or you set OBJECTIVE recall; leave them out otherwise. Three wrong answers to Q, as a reader who half-knows the notes might give them: each opening, built and as long as ANSWER is (when ANSWER is a whole sentence, so is each WRONG line; the right one must not stand out by its form), each a different idea that the POINT does not support (a neighbouring term, a common confusion), never ANSWER with a word changed, never a sentence of the POINT. Q stays a question answered in words: never list them in it.
+- Write Q, CRITERIA, ANSWER, H1 and the WRONG lines in the block's LANGUAGE. Field labels stay in English as written.
 
 Check every Q before writing it: one demand, no "and" adding a second ask; it names its subject in words; it never mentions a text, a note, a point or a "given" definition; its answer is in SPAN.
 
@@ -827,6 +963,9 @@ ANSWER: <reference answer>
 Q: <question>
 CRITERIA: <propositions>
 H1: <hint>
+WRONG1: <wrong answer, recall, contrast or predict only>
+WRONG2: <wrong answer>
+WRONG3: <wrong answer>
 END
 
 {notes}
@@ -1024,6 +1163,11 @@ def generate(rows: list[dict]) -> dict[str, list[dict]]:
             it["level"] = int(row.get("level") or it["level"])
             if row.get("objective"):
                 it["objective"] = row["objective"]
+        # checked here and not at parse: only now are the kind and the line it
+        # rests on settled, and a kind the ask turned into explain has no choice
+        wrong = it.pop("wrong", [])
+        if it["kind"] in CHOICE_KINDS:
+            it.update(choices(it["answer"], wrong, [it.get("span", ""), it.get("claim", "")]))
         it["grader"] = "model"
         have.append(it)
     if finish == "length":

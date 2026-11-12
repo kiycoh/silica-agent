@@ -67,10 +67,32 @@ def slides(c: Call) -> Result:
         f"Answer in chat with the deck in one ```markdown block. {then}")
 
 
+# /quiz --choice (ADR-0168): the round's questions are the agent's, written in
+# chat, so its options are too, held to the rules Memorize's code checks. A
+# wrong pick is a lapse and a right one a recall, as the legacy line already
+# reads (Again or Good), and `grader: "choice"` keeps the right one out of
+# "met without help" and out of calibration, as in Memorize.
+_CHOICE_ASK = (
+    "Ask every question as a choice among four numbered options, 1 to 4: one right, three wrong, the right "
+    "one's number varying from question to question. Ask only what has one short answer (a fact, a term, a "
+    "difference). The right option is what the note's line says; each wrong one is a different idea the note "
+    "does not support, never the right one reworded and never a sentence of the note. A question that cannot "
+    "get three such wrong options is asked in words instead, and says so.\n")
+_CHOICE_GRADE = (
+    "When the reader replies with the numbers, grade a choice by its key alone: the right number is correct, any "
+    "other is incorrect, with no partial credit and no rubric. Show each right option beside the line of the "
+    "note that holds it, citing the note as a [[wikilink]], then call silica_record_quiz once with one entry per "
+    "question: path, correct, concepts, q, anchor, and grader \"choice\" for a question answered by number (a "
+    "question answered in words is graded as usual and carries no grader). Grade an unanswered or skipped "
+    "question as incorrect.\n")
+
+
 def quiz(c: Call) -> Result:
-    """/quiz [note|folder] [--n=10] [--focus="passage"]: an agent-directed
-    active-recall round; --focus narrows it to one passage of the note."""
+    """/quiz [note|folder] [--n=10] [--focus="passage"] [--choice]: an
+    agent-directed active-recall round; --focus narrows it to one passage of
+    the note, --choice asks each question as a choice among four."""
     args, out = c.args, c.out
+    choice = "--choice" in args
     focus = str_flag(args, "--focus").strip()
     # A passage holds a few testable claims, not ten: ten questions on one
     # paragraph would be asked by rewording the same sentence.
@@ -99,23 +121,25 @@ def quiz(c: Call) -> Result:
         )
     return out.to_model(f"Run a {n}-question active-recall quiz {source}.\n"
         f"{pick}\n"
-        f"Mix recall, comprehension, and application questions; ask only what the notes "
-        f"actually support.\n"
-        f"Ask the numbered questions and STOP. Do not reveal the answers in the same "
-        f"message: retrieving from memory is what makes the round worth running, and a "
-        f"visible answer key destroys it.\n"
-        f"When the reader replies, grade each answer, cite each source note as a "
-        f"[[wikilink]], then call silica_record_quiz once with one entry per question: "
-        f"path, correct, concepts (the 1-3 concepts that question tested), q (the "
-        f"question text), and anchor ('#Heading' when one heading clearly holds the "
-        f"answer). Grade an unanswered or skipped question as incorrect.\n"
-        f"After grading, offer ONE follow-up round drilling what was just missed — run "
-        f"it only if the reader accepts.\n"
-        f"A wrong answer is the reader's miss, not the note's fault, and needs nothing "
-        f"beyond the grade. If grading instead exposes a fault in the note itself (it "
-        f"states something wrong, or contradicts another note you read), offer to record "
-        f"that with silica_flag_note, and only run it once the reader says so.\n"
-        f"READ-ONLY apart from that flag: do not create, edit, patch, or move any note.")
+        + (_CHOICE_ASK if choice else
+           "Mix recall, comprehension, and application questions; ask only what the notes "
+           "actually support.\n") +
+        "Ask the numbered questions and STOP. Do not reveal the answers in the same "
+        "message: retrieving from memory is what makes the round worth running, and a "
+        "visible answer key destroys it.\n"
+        + (_CHOICE_GRADE if choice else
+           "When the reader replies, grade each answer, cite each source note as a "
+           "[[wikilink]], then call silica_record_quiz once with one entry per question: "
+           "path, correct, concepts (the 1-3 concepts that question tested), q (the "
+           "question text), and anchor ('#Heading' when one heading clearly holds the "
+           "answer). Grade an unanswered or skipped question as incorrect.\n") +
+        "After grading, offer ONE follow-up round drilling what was just missed — run "
+        "it only if the reader accepts.\n"
+        "A wrong answer is the reader's miss, not the note's fault, and needs nothing "
+        "beyond the grade. If grading instead exposes a fault in the note itself (it "
+        "states something wrong, or contradicts another note you read), offer to record "
+        "that with silica_flag_note, and only run it once the reader says so.\n"
+        "READ-ONLY apart from that flag: do not create, edit, patch, or move any note.")
 
 
 def _kv_flag(args: list[str], flag: str) -> str | None:

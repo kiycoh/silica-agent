@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from silica.agent import turn_notes
+from silica.agent.general_knowledge import general_notes, without_general
 from silica.agent.constraints import AgentConstraints, chat_constraints
 from silica.agent.loop import run_agent
 from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
@@ -241,7 +242,7 @@ def check_numbers(t: Turn) -> None:
     bound to banked verbatim quotes."""
     assert t.read is not None  # a list with this step calls `watched` first
     t.unread = ([] if t.stopped or t.web else
-                unfounded_in_turn(t.answer, t.read.numbers, t.conv.messages, t.conv.seen_numbers))
+                unfounded_in_turn(without_general(t.answer), t.read.numbers, t.conv.messages, t.conv.seen_numbers))
 
 
 def attribute(t: Turn) -> None:
@@ -289,6 +290,8 @@ def note(t: Turn) -> None:
     so a reopened chat draws them too. A stopped turn has no answer to carry them:
     they are drawn live only."""
     notes = t.watch.notes() if isinstance(t.watch, RecallWatch) else []
+    if not (t.stopped or t.web) and t.read is not None:
+        notes += general_notes(t.answer, looked=t.read.looked, command=t.text.startswith("/"))
     notes += numbers_notes(t.unread)
     if not (t.stopped or t.web):
         # A card or a slide point its cited note does not hold (learn.artifacts).

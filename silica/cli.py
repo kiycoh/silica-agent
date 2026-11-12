@@ -175,6 +175,8 @@ def _command(text: str, messages: list[dict], *, ask: Ask | None = None, rendere
         CONSOLE.print(f"  [yellow]{escape(result.error)}[/]")
     if result.answer is not None:
         CONSOLE.print(FlatMarkdown(result.answer))
+    for note in result.notes:
+        CONSOLE.print(f"  [dim]{escape(note['text'])}[/]")
     if result.batch is not None:
         from silica.ui.renderer import emit_batch_event
 

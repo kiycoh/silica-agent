@@ -451,8 +451,19 @@ html[data-hosted] :is([data-tab], [data-view], [data-route]):not([data-served]) 
   display: none !important;
 }
 
+/* /council is the laptop's in this version (ADR-0170): its handler refuses it
+   on the server, whose door counts one model call a question. */
+html[data-hosted] #attach-menu [data-action="/council"] {
+  display: none;
+}
+
 /* A help row about the server's downloads (ADR-0142): a laptop has none. */
 html:not([data-hosted]) .hp-hosted {
+  display: none;
+}
+
+/* ...and one about what only a laptop has, /council and the setup card (ADR-0172). */
+html[data-hosted] .hp-local {
   display: none;
 }
 
@@ -1161,6 +1172,15 @@ body.sidebar-collapsed #sidebar {
   color: var(--frost);
 }
 
+/* a plain notice's remedy (ADR-0172 point 2), in the words' own face; the
+   doctor's text under it stays in the grid font */
+.notice-fix {
+  margin-top: 0.3rem;
+  color: var(--text);
+  font-size: var(--fs-meta);
+  line-height: 1.45;
+}
+
 /* the fix is usually a config blob: keep it selectable, cap how much it takes */
 .notice-hint {
   margin-top: 0.3rem;
@@ -1638,6 +1658,27 @@ body.sidebar-collapsed #sidebar {
 .tree-file svg {
   flex: none;
   color: var(--ash-dim);
+}
+
+/* A book's or a PDF's cover over the glyph (ADR-0163), in the glyph's column
+   so every name starts on one line; one that fails is taken out and leaves
+   the glyph (app-notes.js). The top of the page, where a title sits. */
+.tree-cover {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 17px;
+}
+
+.tree-cover img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
 }
 
 .tree-file > span {

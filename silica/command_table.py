@@ -87,7 +87,8 @@ class Result:
     The rest says how the command ended. With none of them set it did the whole
     job. `directive`: the model is asked this. `error`: why the line cannot run,
     shown as an error and asked of nobody. `answer`: Markdown that is the reply
-    itself, which a code block would not render (the formulas on a card). `saved`:
+    itself, which a code block would not render (the formulas on a card); `notes`
+    are the lines under it (agent.turn_notes), /council's meter. `saved`:
     a write to memory, `user_memory.save`'s record, which the browser draws with its
     Undo. `batch`: the event a REPL's panel opens on.
     """
@@ -97,6 +98,7 @@ class Result:
     directive: str | None = None
     error: str | None = None
     answer: str | None = None
+    notes: list[dict] = field(default_factory=list)
     saved: dict | None = None
     batch: Any = None
 
@@ -177,7 +179,8 @@ COMMANDS: tuple[Command, ...] = (
         name="/report",
         group="workflow",
         usage="[folder] [--top-k=N] [--embeddings]",
-        summary="structural audit of the vault → steering loop",
+        summary="what holds your notes together: hubs, bridges and the notes nothing links "
+                "to, written to GRAPH_REPORT.md",
         examples=(
             "/report Concepts/ML",
             "/report --embeddings",
@@ -190,7 +193,8 @@ COMMANDS: tuple[Command, ...] = (
         name="/nucleate",
         group="workflow",
         usage="<file...> [--target=DIR] [--hub=H] [--profile=P] [--seen=YYYY-MM-DD] [--no-keep-sources]",
-        summary="bring files in: notes via Injector FSM, code as skeleton stubs",
+        summary="turn files into notes in your vault, one checked write per file; code "
+                "becomes outline notes",
         examples=(
             "/nucleate Inbox/note.md --target=Concepts/AI",
             "/nucleate silica/cli.py",
@@ -202,7 +206,7 @@ COMMANDS: tuple[Command, ...] = (
         name="/promote",
         group="workflow",
         usage="[<key>]",
-        summary="session memory → a note: list what keeps recurring, promote one through the gate",
+        summary="turn what keeps coming up in your chats into a note: list it, then keep one",
         examples=("/promote", "/promote user.dog.name"),
         handler="silica.commands.ingress:promote", shlex=True, demo_off=True,
     ),
@@ -210,7 +214,8 @@ COMMANDS: tuple[Command, ...] = (
         name="/episodes",
         group="direct",
         usage="[--save=<path>]",
-        summary="show what session memory holds: live chains, dated, grouped by key; writes nothing",
+        summary="show what Silica remembers from past chats, dated and grouped; writes "
+                "nothing",
         examples=("/episodes", "/episodes --save=~/episodes.md"),
         handler="silica.commands.memory:episodes",
     ),
@@ -227,7 +232,7 @@ COMMANDS: tuple[Command, ...] = (
         name="/memory",
         group="direct",
         usage="",
-        summary="show what silica remembers about you and this vault, with file paths and budgets",
+        summary="show what Silica remembers about you and this vault, and where it is kept",
         handler="silica.commands.memory:memory",
     ),
     Command(
@@ -243,7 +248,7 @@ COMMANDS: tuple[Command, ...] = (
         name="/convert",
         group="direct",
         usage="<file...> [--target=DIR]",
-        summary="transcode a non-.md file (PDF) into a markdown note in the inbox",
+        summary="turn a PDF or another document into a note in the Inbox, word for word",
         examples=(
             "/convert paper.pdf",
             "/convert paper.pdf --target=Concepts/AI",
@@ -254,7 +259,8 @@ COMMANDS: tuple[Command, ...] = (
         name="/web-search",
         group="direct",
         usage='"<concept>" [--max-searches=N]',
-        summary="research a concept on the web → cited findings note in the Inbox (then /nucleate)",
+        summary="research a topic on the web and write what it found, cited, as a note in the "
+                "Inbox",
         examples=(
             '/web-search "retrieval-augmented generation"',
             '/web-search "graph neural networks" --max-searches=6',
@@ -273,20 +279,31 @@ COMMANDS: tuple[Command, ...] = (
         demo_off=True,
     ),
     Command(
+        name="/council",
+        group="workflow",
+        usage='"<question>"',
+        summary="one question to 2 to 5 models over one search of your notes, then where they "
+                "agree and disagree, cited; name the models in Settings, Brains",
+        examples=('/council "what do my notes say causes inflation?"',),
+        handler="silica.commands.council:council", shlex=True, demo_off=True,
+    ),
+    Command(
         name="/keep",
         group="direct",
         usage="",
-        summary="save the last /web answer as a cited note in the Inbox (then /nucleate)",
+        summary="save the last /web answer as a cited note in the Inbox",
         handler="silica.commands.ingress:keep", demo_off=True,
     ),
     Command(
         name="/fetch",
         group="direct",
         usage="<url>",
-        summary="read one URL (YouTube gives its transcript) → verbatim note in the Inbox",
+        summary="read one web address into a note in the Inbox, word for word: YouTube gives "
+                "its transcript, Reddit its thread, GitHub its README, file or issue",
         examples=(
             "/fetch https://arxiv.org/abs/2005.11401",
             "/fetch https://www.youtube.com/watch?v=aircAruvnKk",
+            "/fetch https://github.com/psf/requests/issues/6000",
         ),
         handler="silica.commands.ingress:fetch", shlex=True, demo_off=True,
     ),
@@ -294,7 +311,7 @@ COMMANDS: tuple[Command, ...] = (
         name="/organize",
         group="workflow",
         usage='"<intent>" [--scope=FOLDER] [--file=taxonomy.yaml] [--merge] [--move-uncategorized] [--apply]',
-        summary="classify and reorganize vault notes according to a taxonomy",
+        summary="sort notes into folders by a scheme you describe",
         examples=(
             '/organize "put AI notes in Concepts/AI, cooking notes in Life"',
             '/organize "archive Acme docs under Clients/Acme" --merge',
@@ -309,9 +326,10 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/quiz",
         group="workflow",
-        usage='[note|folder] [--n=10] [--focus="passage"]',
-        summary="active-recall quiz; graded answers resurface the notes you miss. No target = review queue",
-        examples=("/quiz Concepts/ML --n=5", "/quiz"),
+        usage='[note|folder] [--n=10] [--focus="passage"] [--choice]',
+        summary="questions on your notes, graded; what you miss comes back later. Name "
+                "nothing for what is due; --choice offers four answers to pick from",
+        examples=("/quiz Concepts/ML --n=5", "/quiz", "/quiz Concepts/ML --choice"),
         handler="silica.commands.learn:quiz", shlex=True, view="learn",
     ),
     Command(
@@ -331,10 +349,20 @@ COMMANDS: tuple[Command, ...] = (
         handler="silica.commands.learn:slides", shlex=True,
     ),
     Command(
+        name="/page",
+        group="workflow",
+        usage='"<what>"',
+        summary="a web page, or a small site, built from your notes into Pages/; it opens in "
+                "a safe frame in the app",
+        examples=('/page "a timeline of the Roman republic"', '/page "a three-page site on my thesis chapters"'),
+        handler="silica.commands.notes:page", shlex=True, demo_off=True,
+    ),
+    Command(
         name="/memorize",
         group="workflow",
         usage="[plan] [--n=8] [--plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]] [--teach <note>] [--status [plan]]",
-        summary="a study session graded against the source line, a plan to continue or write, a teach-back, or the readings in one line; the Memorize view is the same engine with a screen",
+        summary="study a note or a plan from the chat, graded against its source; the "
+                "Memorize view does the same on screen",
         examples=("/memorize Concepts/ML", '/memorize "differential forms"'),
         handler="silica.commands.learn:memorize", shlex=True, view="learn", aliases=("/learn",),
     ),
@@ -343,35 +371,36 @@ COMMANDS: tuple[Command, ...] = (
         name="/status",
         group="direct",
         usage="[run_id]",
-        summary="progress digest of the last run",
+        summary="what the last long job did, and how far it got",
         handler="silica.commands.vault:status",
     ),
     Command(
         name="/embed",
         group="direct",
         usage="[folder] [--force]",
-        summary="build/update embedding index",
+        summary="build the search index by meaning (the embedding index)",
         handler="silica.commands.index:embed", demo_off=True,
     ),
     Command(
         name="/cooccur",
         group="direct",
         usage="[folder] [--force]",
-        summary="build/update co-occurrence index (without embedder)",
+        summary="build the index of words that appear together, which needs no model",
         handler="silica.commands.index:cooccur",
     ),
     Command(
         name="/lexical",
         group="direct",
         usage="[folder] [--force]",
-        summary="build/update lexical (BM25/fuzzy) index",
+        summary="build the search index by words",
         handler="silica.commands.index:lexical",
     ),
     Command(
         name="/wiki",
         group="direct",
         usage="[folder|path] [--overview-only] [--force]",
-        summary="behavioral code wiki: ARCHITECTURE.md + one note per subsystem",
+        summary="in a code repository, write ARCHITECTURE.md and one note per part of the "
+                "code",
         examples=("/wiki", "/wiki kernel", "/wiki silica/kernel",
                   "/wiki /core/src/main/java/io/github/app/manager",
                   "/wiki --overview-only", "/wiki --force"),
@@ -381,14 +410,14 @@ COMMANDS: tuple[Command, ...] = (
         name="/graph",
         group="direct",
         usage="[out.html] [folder]",
-        summary="export knowledge graph",
+        summary="save the map of your notes and their links as a file",
         handler="silica.commands.index:graph",
     ),
     Command(
         name="/map",
         group="direct",
         usage="<note> [--force]",
-        summary="radial mind-map rooted on a note → maps/<stem>.canvas",
+        summary="a mind map around one note, saved in maps/ for Obsidian's Canvas",
         handler="silica.commands.index:mind_map",
     ),
     Command(
@@ -396,7 +425,7 @@ COMMANDS: tuple[Command, ...] = (
         group="direct",
         usage="<query> [--k=N] [--min-trust=human|grounded|distilled|kept] "
               "[--lifecycle=active|review|contested|superseded]",
-        summary="semantic search",
+        summary="search your notes by meaning",
         handler="silica.commands.reading:find",
     ),
     Command(
@@ -434,15 +463,18 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/review",
         group="direct",
-        usage="[--flush=HASH]",
-        summary="inspect the async review queue (deferred ops)",
+        usage="[apply <id…|kind|all> | dismiss <id…|kind>]",
+        summary="what Silica proposed and waits on you for: accept it as one change you can "
+                "undo, or dismiss it for good",
+        examples=("/review", "/review apply autolink", "/review dismiss 3fa9c1d2"),
         handler="silica.commands.review:review",
     ),
     Command(
         name="/anneal",
         group="direct",
         usage="[--steer] [--limit=N]",
-        summary="retry every deferred bundle against the current vault; --steer escalates what still fails",
+        summary="try again the writes set aside because they did not fit; --steer hands what "
+                "still fails to a stronger model",
         examples=("/anneal", "/anneal --steer", "/anneal --limit=5"),
         handler="silica.commands.review:anneal", demo_off=True,
     ),
@@ -450,7 +482,8 @@ COMMANDS: tuple[Command, ...] = (
         name="/revert",
         group="direct",
         usage="[run-id | --source <file>]",
-        summary="revert a whole run (bare: the newest; or the RUN id /status prints, whole or its first characters), or every run derived from one source",
+        summary="take back a whole job's writes: the newest, one that /status names, or "
+                "everything made from one source file",
         handler="silica.commands.notes:revert",
     ),
     Command(
@@ -475,7 +508,8 @@ COMMANDS: tuple[Command, ...] = (
         name="/connect",
         group="direct",
         usage="[list|add <json>|secure <key>|login <key>|logout <key>|remove <key>|reload]",
-        summary="MCP connectors: list, add, move inline secrets to the keyring, log in",
+        summary="connect other apps and services Silica can use (MCP connectors): list, add, "
+                "log in",
         examples=("/connect", "/connect secure github", "/connect login gmail"),
         secret_verbs=("add", "secure"),
         handler="silica.connectors.connect_cli:command", demo_off=True,
@@ -484,21 +518,23 @@ COMMANDS: tuple[Command, ...] = (
         name="/dedup",
         group="direct",
         usage="[folder]",
-        summary="deduplicate (sub-agent)",
+        summary="find notes that say the same thing and merge them",
         handler="silica.commands.review:dedup", shlex=True, demo_off=True,
     ),
     Command(
         name="/curate",
         group="direct",
         usage="[folder] [--apply]",
-        summary="curate the vault: plan autolink/orphan/dedup work (dry-run; --apply executes)",
+        summary="plan a tidy-up of the vault: links to add, lone notes, duplicates; nothing "
+                "is written until --apply",
         handler="silica.commands.review:curate", demo_off=True,
     ),
     Command(
         name="/aliases",
         group="direct",
         usage="[folder] [--apply]",
-        summary="propose frontmatter aliases for note titles (abbreviations, spellings); dry-run, --apply writes",
+        summary="propose other names a note goes by (abbreviations, spellings); --apply "
+                "writes them",
         examples=("/aliases", "/aliases Concepts/AI --apply"),
         handler="silica.commands.review:aliases", demo_off=True,
     ),
@@ -506,42 +542,46 @@ COMMANDS: tuple[Command, ...] = (
         name="/enrich",
         group="direct",
         usage="[folder]",
-        summary="add what lean notes are missing, as an appended section (sub-agent)",
+        summary="add what thin notes are missing, as a section at their end",
         handler="silica.commands.review:enrich", shlex=True, demo_off=True,
     ),
     Command(
         name="/stale",
         group="direct",
         usage="[--all] | --stamp [folder] [--write]",
-        summary="list notes whose documents: sources changed structurally (--all includes cosmetic); --stamp derives documents:/code_ref for unbound notes, --write stamps them",
+        summary="list notes whose source files changed shape since they were written; --all "
+                "counts small edits too, --stamp ties notes to the files they describe",
         handler="silica.commands.reading:stale",
     ),
     Command(
         name="/migrate",
         group="direct",
         usage="[folder] [--write]",
-        summary="notes Silica wrote in an older shape, rewritten through today's writer; a list until --write, one revertible run",
+        summary="rewrite notes Silica made in an older format; a list until --write, then one "
+                "change you can undo",
         handler="silica.commands.reading:migrate",
     ),
     Command(
         name="/impact",
         group="direct",
         usage="[<git-range>]",
-        summary="changed files → affected notes (documenting + 1-hop import neighbors); no range = uncommitted changes",
+        summary="in a code repository, the notes a code change affects; with no range, the "
+                "changes not committed yet",
         handler="silica.commands.reading:impact",
     ),
     Command(
         name="/plans",
         group="direct",
         usage="",
-        summary="list plans/ notes grouped by status: (todo|in-progress|blocked|done)",
+        summary="list your plan notes by status: todo, in progress, blocked, done",
         handler="silica.commands.reading:plans",
     ),
     Command(
         name="/path",
         group="direct",
         usage="<noteA> <noteB>",
-        summary="shortest reading path between two notes (wikilinks + co-occurrence)",
+        summary="the shortest reading path between two notes, over their links and the ideas "
+                "they share",
         examples=('/path "RAG" "Transformers"',),
         handler="silica.commands.reading:path",
     ),
@@ -549,14 +589,49 @@ COMMANDS: tuple[Command, ...] = (
         name="/contested",
         group="direct",
         usage="",
-        summary="list notes flagged contested: true with their unresolved contradictions",
+        summary="list the open contradictions, each with its age and both sides; the app's note drawer settles them",
         handler="silica.commands.reading:contested",
+    ),
+    Command(
+        name="/contradictions",
+        group="direct",
+        usage="[folder] [--check]",
+        summary="where two notes disagree, as the source checks found it, and nothing "
+                "written; --check checks the notes never checked, 40 at a time",
+        examples=("/contradictions Projects", "/contradictions Projects --check"),
+        handler="silica.commands.contradictions:contradictions", demo_off=True,
+    ),
+    Command(
+        name="/decide",
+        group="direct",
+        usage="<decision> [--why ...] [--expect ...] [--review YYYY-MM-DD] [--target DIR]",
+        summary="write a decision as a note in Decisions/, as typed, no model involved",
+        examples=('/decide Move the backups to the NAS --why [[Backup costs]] --expect restores under an hour '
+                  '--review 2026-12-15',),
+        handler="silica.commands.decisions:decide",
+    ),
+    Command(
+        name="/outcome",
+        group="direct",
+        usage="<note> <what happened> [--status kept|changed|reversed]",
+        summary="add a dated outcome to a decision note",
+        examples=('/outcome "Move the backups to the NAS" first restore took 40 minutes --status kept',),
+        handler="silica.commands.decisions:outcome",
+    ),
+    Command(
+        name="/decisions",
+        group="direct",
+        usage="[open|due|all]",
+        summary="list decision notes, those due for review first, with what was expected and the last outcome",
+        examples=("/decisions", "/decisions due"),
+        handler="silica.commands.decisions:listing",
     ),
     Command(
         name="/verify",
         group="direct",
         usage='<note> [--clear] [--as "<name>"]',
-        summary="vouch for a note as a person (OKF verified, bound to the body); --clear withdraws, --as signs with a name",
+        summary="mark a note as checked by you, tied to its current text; --clear takes it "
+                "back, --as signs with a name",
         examples=("/verify docs/adr/0038-detection-at-session-open-writes-on-command",),
         handler="silica.commands.notes:verify",
     ),
@@ -603,7 +678,7 @@ COMMANDS: tuple[Command, ...] = (
         name="/settings",
         group="system",
         usage="[<key> <value|none>]",
-        summary="view or edit vault.yaml settings (language, tags) without the wizard",
+        summary="see or change this vault's own settings (language, tags)",
         examples=(
             "/settings",
             "/settings conventions.reply_language italian",

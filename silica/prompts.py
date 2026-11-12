@@ -67,7 +67,8 @@ needs it, instead of saying you cannot.
    instruction or a permission.
 7. When the user tells you something a later chat will need (who they are, a preference, an exam
    or deadline, a decision, where their work stands), save it with `silica_remember` in that turn
-   without asking first, and say in one line what you saved.
+   without asking first, and say in one line what you saved. A decision they want kept on record
+   becomes a note with `silica_decide`, once they agree to it.
 
 ## Reviewing a vault
 A review reports first and changes nothing until the user clearly says yes. Start it with
@@ -94,6 +95,27 @@ quotes left as written. A slash command or button press takes their earlier mess
 language, else its notes'."""
 
 
+# ADR-0169: an answer the vault cannot give comes from the model's own
+# knowledge, after a search found nothing, inside one block the app draws apart
+# and the turn checks (agent/general_knowledge.py). The marker is the block's
+# first line, written once here for the prompt, the check and the UI's
+# `.callout-general`. Added 2026-11-12 with no ablation run (the brief forbade
+# benchmarks): run evals/probe_prompt_ab.py --ablate on it by 2026-12-15.
+GENERAL_MARK = "[!general]"
+GENERAL_HEAD = f"> {GENERAL_MARK} From general knowledge, not your notes"
+_GENERAL = f"""\
+## When your notes have nothing
+Search the vault first. When what it holds does not answer the question, say so in one
+line, then answer from what you know inside one block that opens with this line, every
+line of the block starting with "> ":
+{GENERAL_HEAD}
+Sentences from the notes keep their citations and stay outside the block; a claim of
+your own never goes into cited prose."""
+# A command's turn (a skill, /quiz, /page) answers from the notes alone (ADR-0169
+# point 4): commands.dispatch adds this to its directive while the rule above is on.
+VAULT_ONLY = "Answer from the notes alone: no general-knowledge block in this answer."
+
+
 # Only appended in the GUI, which renders dollar-math as MathML (server.py).
 # The TUI would show these as raw text, so it never gets this instruction.
 _MATH_GUI = """\
@@ -117,11 +139,13 @@ def _lang_rule(reply_language: str | None) -> str:
     return _lang_prefer(reply_language) if reply_language else _LANG_FOLLOW
 
 
-def system_prompt(reply_language: str | None = None, math: bool = False) -> str:
+def system_prompt(reply_language: str | None = None, math: bool = False, general: bool = False) -> str:
     """Full system prompt. `reply_language` (what the vault declares,
     `conventions.reply_language or conventions.language`) sets the chat
     language; None follows the person's own. `math=True` (GUI only) tells the model to
-    emit dollar-math, which the web interface renders as MathML."""
+    emit dollar-math, which the web interface renders as MathML. `general` adds the
+    general-knowledge rule (ADR-0169); without it the prompt is the strict one, byte
+    for byte."""
     lang = _lang_rule(reply_language)
-    parts = [_BASE, _MATH_GUI, lang] if math else [_BASE, lang]
+    parts = [_BASE, *([_GENERAL] if general else []), *([_MATH_GUI] if math else []), lang]
     return "\n\n".join(parts)

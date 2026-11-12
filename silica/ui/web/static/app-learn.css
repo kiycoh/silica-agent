@@ -1662,6 +1662,87 @@ button.lr-exp:hover {
   flex-wrap: wrap;
 }
 
+/* Choose (ADR-0168): the four as rows to aim at, a pick in the selection fill
+   as every other selection; after the answer the right one and the pick say so
+   in words beside their mark, never in colour alone */
+.lr-format {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem 0.75rem;
+  flex-wrap: wrap;
+}
+
+.lr-choices {
+  display: grid;
+  gap: 0.35rem;
+  max-width: var(--prose-measure, 43rem);
+}
+
+.lr-choice {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+button.lr-choice {
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+button.lr-choice:hover {
+  color: var(--frost);
+  background: var(--slate-2);
+}
+
+button.lr-choice:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.lr-choice.on {
+  color: var(--frost);
+  background: var(--sel);
+}
+
+.lr-choice .lr-k {
+  margin-left: 0;
+}
+
+.lr-choice .t {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.lr-choices.done .lr-choice {
+  color: var(--ash);
+}
+
+.lr-choices.done .lr-choice.right,
+.lr-choices.done .lr-choice.picked {
+  color: var(--frost);
+}
+
+.lr-choice .say {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+  white-space: nowrap;
+}
+
 .lr-actions {
   display: flex;
   align-items: center;

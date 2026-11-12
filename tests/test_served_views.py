@@ -127,17 +127,19 @@ def test_the_chat_hears_of_no_view_the_account_does_not_get(monkeypatch):
 # every account; a new one goes here or into its view's row in view_table.VIEWS.
 SHARED_ROUTES = {
     "/link",
+    "/contradictions", "/contradictions/note", "/contradictions/resolve",   # ADR-0166: every account
     "/", "/asset", "/attachment/{name}", "/bug_report", "/changes", "/changes/diff", "/changes/keep",
     "/chat", "/chat/files/add", "/commands", "/concept", "/concepts", "/config", "/connectors",
     "/connectors/{name}/{action}", "/context", "/docs", "/docs/oauth2-redirect", "/endpoints",
-    "/endpoints/start", "/file", "/file/chapters", "/vectors", "/vectors/refresh", "/file/ocr", "/file/study", "/find", "/flag", "/health", "/instructions", "/jobs", "/jobs/running",
+    "/endpoints/start", "/file", "/file/chapters", "/file/cover", "/vectors", "/vectors/refresh", "/file/ocr", "/file/study", "/find", "/flag", "/health", "/instructions", "/jobs", "/jobs/running",
     "/jobs/{job_id}/dismiss", "/jobs/{job_id}/retry", "/jobs/{job_id}/turn", "/limits", "/mail/upload",
     "/memory", "/memory/reset", "/memory/undo", "/memory/{scope}", "/messages", "/narration",
     "/narration/sse", "/note", "/note/asset", "/note/check", "/note/check/keep", "/note/history",
-    "/note/history/diff", "/note/history/restore", "/note/let-go", "/note/new", "/note/raw",
-    "/note/render", "/note/save", "/nucleate",
-    "/openapi.json", "/path", "/phone/new", "/phone/turn", "/raw", "/redoc", "/reset", "/session/delete",
-    "/session/load", "/session/rename", "/sessions", "/settings", "/settings/confirm", "/skills",
+    "/note/history/diff", "/note/history/restore", "/note/let-go", "/note/link-title", "/note/new", "/note/raw", "/note/similar",
+    "/note/render", "/note/save", "/nucleate", "/page/{path:path}",
+    "/openapi.json", "/path", "/phone/new", "/phone/turn", "/raw", "/raw/cover", "/redoc", "/reset", "/session/delete",
+    "/session/load", "/session/rename", "/sessions", "/settings", "/settings/confirm",
+    "/settings/setup", "/settings/setup/test", "/skills",
     "/skills/proposed/{name}/dismiss", "/skills/proposed/{name}/install", "/skills/{name}", "/static",
     "/stop", "/stt", "/supported_types", "/trash", "/trash/erase", "/trash/restore", "/tree/delete",
     "/tree/move", "/tree/undo", "/turn/redo", "/vault/export", "/vault/export/added",
@@ -157,7 +159,7 @@ SHARED_TOOLS = {
     "silica_concepts", "silica_cooccurrence_refresh", "silica_curate", "silica_dedup",
     "silica_dedup_pairs", "silica_deferred_flush", "silica_deferred_list", "silica_deferred_retry",
     "silica_delete", "silica_doctor", "silica_document", "silica_embed_refresh",
-    "silica_enrich_batch", "silica_exists", "silica_file_links", "silica_files", "silica_flag_note", "silica_require",
+    "silica_enrich_batch", "silica_exists", "silica_file_links", "silica_files", "silica_flag_note", "silica_require", "silica_decide",
     "silica_generate_taxonomy", "silica_graph_explain", "silica_graph_export", "silica_graph_path",
     "silica_health", "silica_impact", "silica_inbox_ls", "silica_ledger_digest", "silica_ledger_next",
     "silica_ledger_update", "silica_lexical_refresh", "silica_links", "silica_load_tools",
@@ -167,15 +169,15 @@ SHARED_TOOLS = {
     "silica_rework", "silica_run_injector", "silica_run_organizer",
     "silica_search", "silica_search_context", "silica_semantic_search", "silica_session_search",
     "silica_tables", "silica_timeline", "silica_unresolved",
-    "silica_vault_report", "silica_vaults", "silica_web_answer", "silica_write_note",
+    "silica_vault_report", "silica_vaults", "silica_web_answer", "silica_write_note", "silica_write_page",
     "web_fetch", "web_search",
 }
 SHARED_COMMANDS = {
-    "/aliases", "/anneal", "/changes", "/check", "/clear", "/connect", "/contested", "/convert",
+    "/aliases", "/anneal", "/changes", "/check", "/clear", "/connect", "/contested", "/contradictions", "/convert", "/council", "/decide", "/decisions", "/outcome",
     "/cooccur", "/curate", "/dedup", "/delete", "/embed", "/enrich", "/episodes", "/exit", "/fetch",
     "/find", "/flashcards", "/graph", "/help", "/impact", "/incognito", "/keep", "/lexical", "/mail",
     "/map", "/memory", "/migrate", "/model", "/new", "/nucleate", "/organize", "/path", "/persona",
-    "/plans", "/promote", "/remember", "/report", "/resume", "/revert", "/review", "/sessions",
+    "/page", "/plans", "/promote", "/remember", "/report", "/resume", "/revert", "/review", "/sessions",
     "/settings", "/slides", "/stale", "/status", "/thinking", "/tools", "/trash", "/undo", "/vault",
     "/verbose", "/verify", "/web", "/web-search", "/wiki", "/zotero",
 }
@@ -231,7 +233,10 @@ def test_every_route_a_help_row_names_is_a_route_of_the_app():
 
     html = (STATIC_SRC / "index.html").read_text(encoding="utf-8")
     named = set(re.findall(r'data-route="([^"]+)"', html))
-    assert named and named <= set(_paths(server.app.routes))
+    # a route or the prefix of one, as the refusal reads it (security.withheld_views):
+    # "/page" names /page/{path:path}
+    paths = set(_paths(server.app.routes))
+    assert named and all(r in paths or any(p.startswith(r + "/") for p in paths) for r in named), named
 
 
 def test_each_address_the_chat_is_told_is_a_view_the_help_panel_names():
@@ -295,7 +300,8 @@ def test_the_catalog_tab_reads_through_the_apps_server_and_sets_its_words_as_tex
     js = _read("app-public.js")
     cat = js[js.index("// --- Wikis, the catalog"):js.index("// --- the cover (ADR-0146")]
     assert '"/wikis/catalog"' in cat and "/wikis/graph?handle=" in cat
-    assert '"Wikis could not be read."' in cat and '"No wiki is in Wikis yet."' in cat
+    assert '"Wikis could not be reached. Check your connection, then open Wikis again."' in cat
+    assert '"No wiki is in Wikis yet. ' in cat
     assert '"Search Wikis"' in cat and '"Open ↗"' in cat and '"Save to Silica"' in cat
     assert "IntersectionObserver" in cat
     assert "openSaveSheet({ url: wikiAddr(w)" in cat

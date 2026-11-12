@@ -29,6 +29,8 @@ from silica.sources.zotero import ZoteroError
 from silica.ui.web import (
     calendar_routes,
     chat_routes,
+    contradictions_routes,
+    decisions_routes,
     discover_routes,
     explore_routes,
     failures,
@@ -158,7 +160,7 @@ app.add_exception_handler(HTTPException, _http_refused)
 
 for _routes in (chat_routes, files_routes, workspaces_routes, metrics_routes, calendar_routes, explore_routes,
                 notes_routes, tree_routes, stt_routes, settings_routes, zotero_web, learn_routes, skills_routes,
-                jobs_routes, discover_routes, public_routes, library_routes):
+                jobs_routes, discover_routes, public_routes, library_routes, contradictions_routes, decisions_routes):
     app.include_router(_routes.router)
 
 
@@ -243,7 +245,10 @@ def index(request: Request):
     html = html.replace(ROOT_TAG, " ".join([ROOT_TAG, *root]), 1)
     # Last: the markers above are found by pattern over the whole page, and a word
     # in the table must never read as one.
-    return HTMLResponse(html.replace(VOCAB_ISLAND, VOCAB_ISLAND + vocabulary.island(), 1))
+    # Its own policy, so on the server it says the image rule the middleware would.
+    policy = security.APP_FRAMES + (f"; {security.HOSTED_IMAGES}" if hosted() else "")
+    return HTMLResponse(html.replace(VOCAB_ISLAND, VOCAB_ISLAND + vocabulary.island(), 1),
+                        headers={"Content-Security-Policy": policy})
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

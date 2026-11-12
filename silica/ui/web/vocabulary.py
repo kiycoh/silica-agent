@@ -21,6 +21,7 @@ from silica.kernel.base.formats import IMAGE_MIME, SHOWN_IMAGE_EXTS, WEB_IMAGE_E
 from silica.kernel.check import ORDER
 from silica.kernel.learn import grade, items, mastery, objectives, pace, pick, quiz, reasons, reference, session, sources
 from silica.kernel.report import note_context
+from silica.sources import covers
 from silica.sources.discover import story
 from silica.tools import TOOLS, note_keys
 from silica.ui.web import discover_routes, failures, jobs, library_routes, rail, stt_routes
@@ -72,7 +73,9 @@ def table() -> dict[str, Any]:
         "formats": {"chat_images": list(dict.fromkeys(IMAGE_MIME.values())),
                     "note_images": list(dict.fromkeys(IMAGE_MIME[e] for e in WEB_IMAGE_EXTS)),
                     "shown_images": list(SHOWN_IMAGE_EXTS),
-                    "file_pictures": list(library_routes.FILE_PICTURES)},
+                    "file_pictures": list(library_routes.FILE_PICTURES),
+                    # what the cover routes may draw a picture of (ADR-0163)
+                    "covers": list(covers.COVER_EXTS)},
     }
 
 

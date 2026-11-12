@@ -323,6 +323,28 @@ def silica_require(
 
 
 @tool(cls="composed", collapse="eager", ingress=False, mutates="written", note_args=("path",),
+      label=("decide", "path"))
+def silica_decide(
+    path: Annotated[str, Field(description="Vault-relative path of the new note: 'Decisions/<a short title>.md' unless the person names a folder")],
+    decision: Annotated[str, Field(description="The decision, in the person's words")],
+    why: Annotated[str, Field(description="Why it was taken, with [[wikilinks]] to the notes that argued it")] = "",
+    expected: Annotated[str, Field(description="What the person expects to happen")] = "",
+    review_on: Annotated[str, Field(description="YYYY-MM-DD to look back at it; the Calendar shows it that day")] = "",
+) -> dict[str, Any]:
+    """Record a decision the person stated as a decision note (ADR-0167):
+    `decision: true` with the day, then Decision, Why, Expected and an empty
+    Outcomes that /outcome fills later. Call it only once the person agreed to
+    record it; otherwise offer to. Revertible with /undo.
+    """
+    from silica.kernel.calendar.decisions import create
+
+    try:
+        return create(decision, why=why, expect=expected, review=review_on, path=path, person=False)
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@tool(cls="composed", collapse="eager", ingress=False, mutates="written", note_args=("path",),
       label=("write note", "path"))
 def silica_write_note(
     path: Annotated[str, Field(description="Vault-relative path for the new note (e.g. 'Computer Science/Computer Vision.md')")],

@@ -187,8 +187,137 @@ async function loadConfig() {
     chatModels = { model: c.model ? short(c.model) : "no model",
                    worker: c.worker_model && c.worker_model !== c.model ? short(c.worker_model) : "" };
     if (!$("#ctx-panel").hidden) renderCtxPanel();
-  } catch { notify("couldn't load session config"); }
+    showSetup(!!c.setup);
+  } catch { notify("Couldn't read which model answers. Reload the page to try again."); }
+  document.dispatchEvent(new CustomEvent("silica:config")); // the tour waits on it (ADR-0172 point 1)
 }
+
+// --- the first run without a terminal (ADR-0172 point 1) ----------------------
+// One card over the box while no model can answer: a key for an online model,
+// or LM Studio or Ollama found running here. It writes through POST /settings,
+// the panel's own writer, the keys `silica init` writes; Test sends the one
+// request `silica doctor --live` sends, and only when pressed.
+const setupCard = $("#setup-card");
+let setupOpts = null;   // the last GET /settings/setup
+let setupChosen = "";   // the model the card just set, kept on screen until Start asking
+
+function setupSay(text, failed = false, detail = "") {
+  const p = $("#setup-said");
+  p.replaceChildren(text);
+  if (detail) {
+    const d = mkEl("details", "setup-detail");
+    d.append(mkEl("summary", null, "detail"), mkEl("pre", null, detail));
+    p.append(d);
+  }
+  p.classList.toggle("failed", failed);
+  p.hidden = !text;
+}
+
+function showSetup(needed) {
+  setupNeeded = needed;
+  document.body.classList.toggle("setup-needed", needed);
+  // A model chosen here stays on the card until Start asking, so its Test is in reach.
+  if (!needed && !setupChosen) { setupCard.hidden = true; return; }
+  setupCard.hidden = false;
+  $("#setup-done").hidden = needed;
+  setupCard.querySelector(".setup-opts").hidden = !needed;
+  if (needed && !setupOpts) loadSetup();
+}
+
+function pointToSetup() {
+  setupCard.scrollIntoView({ block: "nearest" });
+  setupSay("Choose a model first: a question needs one to be answered.");
+  (setupCard.querySelector("#setup-key") || setupCard).focus();
+}
+
+async function loadSetup() {
+  const box = $("#setup-runtimes");
+  box.replaceChildren(mkEl("p", "setup-dim", "Looking for LM Studio and Ollama…"));
+  try { setupOpts = await api("/settings/setup"); }
+  catch { box.replaceChildren(mkEl("p", "setup-dim", "Couldn't look for them. Press Check again.")); return; }
+  // Which command starts each one when it is installed and not running.
+  const HOW = {
+    lmstudio: "Open LM Studio and start its server in the Developer tab, or run lms server start.",
+    ollama: "Install it from ollama.com, then run ollama serve.",
+  };
+  box.replaceChildren(...setupOpts.local.map((r) => {
+    const row = mkEl("div", "setup-rt");
+    const text = mkEl("p");
+    if (r.up && r.models.length) {
+      text.append(mkEl("b", null, r.label), ` is running with ${r.models.length === 1 ? r.models[0] : r.models.length + " models"}.`);
+      const use = mkEl("button", "st-btn primary", "Use " + r.label);
+      use.type = "button";
+      use.addEventListener("click", () => setupWrite([["SILICA_PROVIDER", r.runtime]], use));
+      row.append(text, use);
+    } else {
+      text.append(mkEl("b", null, r.label), r.up
+        ? ` is running, with no model that can chat loaded. ${r.runtime === "ollama" ? "Run ollama pull qwen3.5:4b" : "Load one in LM Studio"}, then press Check again.`
+        : ` is not running. ${HOW[r.runtime]}`);
+      row.append(text);
+    }
+    return row;
+  }));
+}
+
+// The rows in order, each through the panel's writer; the first refusal stops the rest.
+async function setupWrite(rows, btn) {
+  btn.disabled = true;
+  setupSay("Saving…");
+  try {
+    for (const [key, value] of rows) await apiPost("/settings", { key, value });
+  } catch (e) {
+    setupSay(e.message, true);
+    btn.disabled = false;
+    return;
+  }
+  btn.disabled = false;
+  setupSay("");
+  setupChosen = "set";
+  await loadConfig();
+  if (setupNeeded) {
+    setupChosen = "";
+    setupSay("That did not give Silica a model it can use. Check again, or set one in Settings.", true);
+    return;
+  }
+  $("#setup-model").replaceChildren("Silica will answer with ", mkEl("b", null, chatModels.model),
+    ". Test sends it one short request.");
+}
+
+$("#setup-online").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const key = $("#setup-key").value.trim();
+  if (!key) { setupSay("Paste your key first.", true); return; }
+  const rows = [[setupOpts?.key_env || "OPENROUTER_API_KEY", key]];
+  // A model already on OpenRouter only lacked its key: keep it.
+  if (setupOpts?.provider !== "openrouter" || !setupOpts?.model) rows.push(["SILICA_PROVIDER", "openrouter"]);
+  setupWrite(rows, e.submitter || $("#setup-online button"));
+});
+$("#setup-again").addEventListener("click", () => { setupSay(""); loadSetup(); });
+$("#setup-test").addEventListener("click", async (e) => {
+  const b = e.currentTarget;
+  b.disabled = true;
+  setupSay("Asking the model…");
+  try {
+    const r = await apiPost("/settings/setup/test");
+    if (r.ok) setupSay("It works: the model answered.");
+    else setupSay(r.error, true, r.detail);
+  } catch (err) { setupSay(err.message, true); }
+  b.disabled = false;
+});
+// A key the provider refused is pasted again here, not looked for in Settings.
+$("#setup-other").addEventListener("click", () => {
+  setupSay("");
+  $("#setup-done").hidden = true;
+  setupCard.querySelector(".setup-opts").hidden = false;
+  $("#setup-key").focus();
+});
+$("#setup-go").addEventListener("click", () => {
+  setupChosen = "";
+  setupCard.hidden = true;
+  setupSay("");
+  input.focus();
+  tourFirstVisit(); // held while the card stood over the box
+});
 $("#metrics-cancel").addEventListener("click", () => {
   if (metricsAbort) metricsAbort.abort();
 });

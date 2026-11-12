@@ -186,7 +186,7 @@ def test_no_route_serialises_str_exc_into_a_user_facing_field():
     assert "str(exc)" not in jobs, "a job hands the raw exception to the person"
     from silica.ui.web.failures import explain
     out = explain(RuntimeError("HTTPError 502 upstream (request id 4f2a)"))
-    assert out["error"].startswith("The model endpoint didn't answer")
+    assert out["error"].startswith("The model didn't answer")
     assert "4f2a" in out["detail"] and "4f2a" not in out["error"]
 
 

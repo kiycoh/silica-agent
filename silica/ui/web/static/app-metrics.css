@@ -348,6 +348,128 @@
   outline-offset: 1px;
 }
 
+.mini:disabled {
+  border-color: var(--line);
+  color: var(--ash-dim);
+  cursor: default;
+}
+
+/* --- the review queue (ADR-0165) ---------------------------------------------
+   A kind is a ruled head with its two batch actions; a proposal is a row of
+   checkbox, title over its reason, and its own yes and no. Compartment chrome,
+   so the corners stay square, as the worklist's are. */
+.rv .ev-acts {
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+}
+
+.rv-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 0.4rem;
+}
+
+.rv-k {
+  margin-top: 1.2rem;
+}
+
+.rv-kh {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--line-2);
+}
+
+.rv-kt {
+  font-size: var(--fs-ctl);
+  color: var(--frost);
+}
+
+.rv-kh .ev-acts {
+  margin-left: auto;
+}
+
+.rv-note {
+  font-size: 12px;
+  color: var(--ash-dim);
+  margin: 0.4rem 0 0;
+}
+
+.rv-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rv-row.rv-done {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.rv-row input[type="checkbox"] {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.rv-x {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rv-t {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-family: var(--sans);
+  font-size: var(--fs-ctl);
+  color: var(--frost);
+  overflow-wrap: anywhere;
+}
+
+button.rv-t[data-path] {
+  cursor: pointer;
+}
+
+button.rv-t[data-path]:hover {
+  color: var(--accent);
+}
+
+.rv-done.gone .rv-t {
+  color: var(--ash-dim);
+}
+
+.rv-w {
+  font-size: 12px;
+  color: var(--ash-dim);
+  overflow-wrap: anywhere;
+}
+
+.rv-p summary {
+  font-size: 12px;
+  color: var(--ash);
+  cursor: pointer;
+}
+
+.rv-p pre {
+  margin: 0.3rem 0 0;
+  padding: 0.4rem 0.55rem;
+  background: var(--well);
+  border-radius: var(--r-xs);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* --- the tail ---------------------------------------------------------------
    Linear height, and the caption names both ends. The skew IS the reading: a
    handful of targets carry most of the references and the rest are asked for

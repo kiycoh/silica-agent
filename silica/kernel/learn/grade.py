@@ -100,16 +100,20 @@ def reply_language(q: str, production: str) -> str:
     return language.named(f"{q} {production}")
 
 
-def rating_for(outcome: str, *, hints: int, told: bool, conf: int | None, precise: bool = False) -> int:
+def rating_for(outcome: str, *, hints: int, told: bool, conf: int | None, precise: bool = False,
+               chosen: bool = False) -> int:
     """Outcome to FSRS rating, then the caps. Easy is recalled without effort:
-    complete and precise, no hint, confidence 70 or more (engram's rule)."""
+    complete and precise, no hint, confidence 70 or more (engram's rule).
+    `chosen` is a right pick among four, never precise, so Good at most; a
+    right pick while guessing is the one-in-four the options give anyone, so
+    Hard (ADR-0168)."""
     rating = RATING_OF[outcome]
     if outcome == "recalled" and precise and not hints and not told and conf is not None and conf >= EASY_MIN_CONF:
         rating = EASY
     if hints or told:
         rating = min(rating, HARD)
     if conf == 25 and outcome == "recalled":
-        rating = min(rating, GOOD)
+        rating = min(rating, HARD if chosen else GOOD)
     return rating
 
 
@@ -127,6 +131,21 @@ def told_grade(item: dict, *, hints: int) -> dict:
     out = base(item, "told")
     out.update(grade="lapsed", correct=False, rating=HARD, feedback_line=TOLD_LINE,
                rubric_notes="", told=True, skip=False)
+    return out
+
+
+def choice_grade(item: dict, *, pick: int, conf: int | None, hints: int) -> dict:
+    """A pick among the item's options, graded by its key with no call
+    (ADR-0168): right is recalled at Good at most, wrong is Again. The grader
+    `choice` keeps the line out of calibration and grader agreement, which
+    read model verdicts only, and out of "met without help" (reasons.outcome)."""
+    right = pick == item.get("key")
+    outcome = "recalled" if right else "lapsed"
+    picked = item["options"][pick]
+    out = base(item, "choice")
+    out.update(grade=outcome, correct=right, rating=rating_for(outcome, hints=hints, told=False, conf=conf, chosen=True),
+               feedback_line="" if right else (item.get("wrong_why") or {}).get(picked, ""),
+               rubric_notes="", skip=False, pick=pick)
     return out
 
 

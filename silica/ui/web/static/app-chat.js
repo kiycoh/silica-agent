@@ -198,7 +198,7 @@ function injectorSummaryLine(label, s) {
     bits.push(`${s.failed_chunks.length} of ${s.committed + s.failed_chunks.length} chunks failed`);
   }
   const mark = SUMMARY_MARK[s.kind] || "✓";
-  return `${mark} injector · ${label}${bits.length ? "   " + bits.join(" · ") : ""}`;
+  return `${mark} into notes · ${label}${bits.length ? "   " + bits.join(" · ") : ""}`;
 }
 
 function makePipelineBlock(label, tracks) {
@@ -211,7 +211,7 @@ function makePipelineBlock(label, tracks) {
   const pos = el.querySelector(".pipe-pos");
   const bar = progressBar(0, "nucleation");
   el.querySelector(".pipe-head").after(bar);
-  head.textContent = `» injector · ${label}`;
+  head.textContent = `» into notes · ${label}`;
 
   // Both tracks are drawn once, greyed out, so the pipeline reads as a known
   // sequence with a position in it rather than a list that grows as it goes.
@@ -305,7 +305,7 @@ function makePipelineBlock(label, tracks) {
       running = null;
       bar.remove();
       const s = summary || { kind: "failed", reason: "", notes: 0, links: 0, files: 0, committed: 0, failed_chunks: [] };
-      const name = (head.textContent || "").replace(/^» injector · /, "");
+      const name = (head.textContent || "").replace(/^» into notes · /, "");
       el.classList.remove("running");
       el.classList.add(s.kind);
       head.textContent = injectorSummaryLine(name, s);
@@ -889,7 +889,7 @@ $("#flag-sheet").addEventListener("click", (e) => { if (e.target === e.currentTa
 // second call landing mid-draw would have taken a pending block for a failed one.
 async function drawDiagrams(root, { keepStyles = false } = {}) {
   const pending = [...root.querySelectorAll("pre.mermaid:not([data-processed])")];
-  if (!pending.length) return;
+  if (!pending.length) return renderSmiles(root); // a molecule needs no diagram beside it (ADR-0159)
   await loadMermaid();
   for (const b of pending) {
     // A model's own `style A fill:#f9f` paints over the theme (ADR-0069) and,
@@ -1072,11 +1072,11 @@ function mdLite(src) {
       closeList();
       const buf = []; i++;
       while (i < lines.length && !/^```\s*$/.test(lines[i])) buf.push(lines[i++]);
-      // Only a closed mermaid fence becomes the server's <pre class="mermaid">:
+      // Only a closed mermaid or smiles fence becomes the server's <pre class="…">:
       // drawDiagrams() runs it once the turn ends, and half a diagram is not one.
-      const diagram = i < lines.length && line.slice(3).trim() === "mermaid";
+      const kind = line.slice(3).trim(), diagram = i < lines.length && (kind === "mermaid" || kind === "smiles");
       i++; // closing fence (or EOF while still streaming)
-      out.push(diagram ? `<pre class="mermaid">${escapeHtml(buf.join("\n"))}</pre>` : `<pre><code>${escapeHtml(buf.join("\n"))}</code></pre>`);
+      out.push(diagram ? `<pre class="${kind}">${escapeHtml(buf.join("\n"))}</pre>` : `<pre><code>${escapeHtml(buf.join("\n"))}</code></pre>`);
       continue;
     }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
@@ -1173,6 +1173,9 @@ function setCtxTokens(m) {
 
 // Who answers in this session, filled by loadConfig (app-boot.js).
 let chatModels = null;
+// No model can answer yet (ADR-0172 point 1), as GET /config says; the setup
+// card (app-boot.js) shows while it holds.
+let setupNeeded = false;
 function renderCtxPanel() {
   const panel = $("#ctx-panel");
   const { used, max, parts, compactAt } = ctxMeter;
@@ -2398,6 +2401,10 @@ function autoGrow(el) {
 $("#composer").addEventListener("submit", (e) => {
   e.preventDefault();
   const t = input.value;
+  // A question with no model to answer it would fail: the card says what to do,
+  // and what was typed stays in the box. A /command still runs: /decide, /undo
+  // and /status need no model, and one that does says so in its own failure.
+  if (setupNeeded && !t.trim().startsWith("/")) { pointToSetup(); return; }
   // Files ride the turn they were attached to and cannot wait in a text
   // queue, so an attach during a turn keeps the box as it is.
   if (streaming && staged.length) return;
@@ -2701,6 +2708,7 @@ $("#dock-composer").addEventListener("submit", (e) => {
   e.preventDefault();
   const t = dockInput.value;
   if (!t.trim()) return;
+  if (setupNeeded && !t.trim().startsWith("/")) { showTab("chat"); pointToSetup(); return; }
   dockInput.value = "";
   autoGrow(dockInput);
   if (streaming) { queueMessage(t); return; } // the same queue as the chat composer (P20)

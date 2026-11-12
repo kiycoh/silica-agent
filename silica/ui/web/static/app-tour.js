@@ -1,30 +1,35 @@
-// --- the first-visit tour (ADR-0105) -----------------------------------------
-// Four numbered steps on the student's own file. Each lights the real control it
-// is about and moves on when the thing it asks for has happened, read off the
-// events the page already raises. It never sends: the question and the quiz are
-// prefilled and the turn stays the student's, as the chat's + does (ADR-0083).
-// After the four it can go on through Discover, Explore and Learn, and a plan
-// step's reading and Create walk through themselves the first time they open
-// (amendment of 2026-10-29: the owner chose one long tour over chapters).
+// --- the first-visit tour (ADR-0105, ADR-0172 point 4) ------------------------
+// Eight bubbles at most, the welcome counted, on the student's own file. The
+// first three are what a newcomer needs: bring in a file, ask about it, see the
+// notes the answer stands on. The four after them each name a part of the app in
+// a sentence and light where it lives. A step lights the real control it is
+// about and moves on when the thing it asks for has happened, read off the
+// events the page already raises. It never sends: the question is prefilled and
+// the turn stays the student's, as the chat's + does (ADR-0083). The long run
+// through Discover, Explore and Memorize (amendment of 2026-10-29) is gone with
+// ADR-0172; a plan step's reading and Create still walk through themselves the
+// first time they open.
 
 const TOUR_KEY = "silica.tour";
 // The field's visible box: #composer is the whole width of the view.
 const TOUR_COMPOSER = "#composer .composer-shell";
 const tourLastAnswer = () => [...document.querySelectorAll("#log .msg.silica")].pop();
+const tourHosted = () => "hosted" in document.documentElement.dataset;
 
-// The steps by name, in order of `next`. `n` is the number the student sees; a
-// step's second half (cite, map) keeps its number. `wait` names what moves it
-// on when it has no button: a note in the tree, a turn that ended well, a view.
+// The steps by name, in order of `next`. `n` is the number the student sees; the
+// link's step (fetch) keeps the number of the one it stands in for. `wait` names
+// what moves a step on when it has no button: a note in the tree, a turn that
+// ended well.
 const TOUR_STEPS = {
   welcome: {
     n: 0, dim: "all",
-    body: "Silica works on your own notes. Four steps, about three minutes: bring in a file, ask about it, see it on the map, get quizzed on it.",
+    body: "Silica answers from your own notes and names the note behind each answer. Three steps get you started: add a file, ask about it, see where the answer came from.",
     primary: ["Start", () => tourGo("file")],
     secondary: ["Later", () => tourEnd()],
   },
   file: {
     n: 1, target: "#vault-add", prepare: () => tourOpenDrawer(), wait: "note",
-    body: "Add your notes here: a PDF, a .md or a .txt. Each file becomes a note at the top of your vault.",
+    body: "Add your notes here: a PDF, a Word file, a .md or a .txt. Each file becomes a note at the top of your vault.",
     link: ["only have a link?", () => tourGo("fetch")],
   },
   fetch: {
@@ -39,144 +44,75 @@ const TOUR_STEPS = {
     body: "Ask about it. The question is written for you: send it, or write your own.",
     // The turn steps had no button, so a turn that failed, was stopped or was
     // never sent left the tour on step 2 for good (reported 2026-10-29).
-    link: ["skip this step", () => tourGo("explore")],
+    link: ["skip this step", () => tourGo("views")],
   },
   cite: {
     // Where the answer says what it stands on (ADR-0117), not the answer: a
     // long one is taller than the window and lights nothing. A cited note is a
     // numbered link in the text; a note read and not cited is named on the
     // line above the answer.
-    n: 2, target: () => tourSource() || tourLastAnswer(),
+    n: 3, target: () => tourSource() || tourLastAnswer(),
     body: () => {
       const s = tourSource();
       if (s?.dataset.cite) return "The answer comes from your notes: each numbered link is one of them. Click it to open the note.";
       if (s) return "The answer comes from your notes: the ones it read are named above it. Click one to open it.";
       return "The answer comes from the notes in your vault.";
     },
-    primary: ["Next", () => tourGo("explore")],
-  },
-  explore: {
-    n: 3, target: '.tab[data-tab="graph"]', wait: "graph",
-    body: "Now open Explore.",
-  },
-  map: {
-    n: 3, dim: "none",
-    body: "Every note is a dot on this map, and notes that say similar things sit close together. It grows with every file you add.",
-    // Step 4 is Learn's: an account without it ends here (ADR-0140).
-    primary: viewServed("learn") ? ["Next", () => tourGo("quiz")] : ["Done", () => tourEnd()],
-  },
-  quiz: {
-    // Two turns: the questions, then the student's answers, which are what
-    // Learn's queue records. Moving on after the first dimmed the questions
-    // the bubble had just said to answer.
-    n: 4, target: TOUR_COMPOSER, wait: "turn",
-    dim: () => tour.quizAsked ? "none" : "",  // the questions are what they read now
-    prepare: () => tour.quizAsked ? showTab("chat") : prefillChat(`/quiz "${tour.note}" --n=3`),
-    body: () => tour.quizAsked
-      ? "Now answer the three questions in the chat and send your answers. Silica grades each one."
-      : "Last one: Silica asks you three questions on your note. Send it, then answer in the chat.",
-    link: ["skip this step", () => tourGo("learn")],
-  },
-  learn: {
-    n: 4, target: '.tab[data-tab="learn"]',
-    body: "What you get wrong comes back here to review. That is the basics. The tour can go on through Discover, Explore and Memorize, about three minutes more; Shortcuts and help has it again any time.",
-    primary: ["Go on", () => tourRun("more", 0)],
+    primary: ["Show me more", () => tourGo("views")],
     secondary: ["Stop here", () => tourEnd()],
   },
+  views: {
+    // The rows on the drawer, or the rail's icons below the fold: whichever is laid out.
+    n: 4, target: "#views, #railmini", prepare: () => showTab("chat"),
+    body: () => [
+      viewServed("graph") && "Explore draws your notes as a map, where notes that say similar things sit close.",
+      viewServed("learn") && "Memorize asks you questions on them and brings back what you miss; Choose offers four answers to pick from.",
+      viewServed("calendar") && "Calendar holds your dates, your study plans and the decisions you log with /decide.",
+    ].filter(Boolean).join(" ") || "Your views are listed here.",
+    primary: ["Next", () => tourGo("write")],
+  },
+  write: {
+    n: 5, target: "#write-note, #rail-write",
+    body: "Write a note here. Its toolbar's Formula and Molecule buttons write a formula or draw a molecule from its name, a table shows as a grid of cells, and pointing at a link shows the note it leads to.",
+    primary: ["Next", () => tourGo("more")],
+  },
+  more: {
+    n: 6, target: "#attach",
+    body: () => (tourHosted() ? "The + holds more ways to ask: make a page builds a web page from your notes."
+      : "The + holds more ways to ask: a council puts one question to several models, and make a page builds a web page from your notes.")
+      + " When your notes hold nothing on a question, any answer from general knowledge comes in its own labelled block.",
+    primary: ["Next", () => tourGo("review")],
+  },
+  review: {
+    n: 7, target: '.tab[data-tab="metrics"]',
+    body: () => (viewServed("metrics") ? "Examine shows what needs your attention, and its Review lists what Silica proposed, to accept or dismiss. " : "")
+      + "When two notes disagree, the note shows both sides for you to settle. Shortcuts and help has all of this, and this tour, again.",
+    primary: ["Done", () => tourEnd()],
+  },
 };
+// The highest number a step shows, for "Step n of N".
+const TOUR_LAST = Math.max(...Object.values(TOUR_STEPS).map((s) => s.n));
 // A reload lands on the half of a step that can be drawn again from nothing:
-// the answer a `cite` pointed at and the frame a `map` sat on are gone.
+// the answer a `cite` pointed at is gone.
 function tourSource() {
   const a = tourLastAnswer();
   return a?.querySelector(".stream-text .note-link[data-cite]") || a?.querySelector(".lg-reads") || null;
 }
-const TOUR_RESUME = { fetch: "file", cite: "explore", map: "quiz" };
+const TOUR_RESUME = { fetch: "file", cite: "views" };
 
-// --- after the basics, and the two walkthroughs that start by themselves -------
+// --- the two walkthroughs that start by themselves -----------------------------
 // A run is a list of steps shown in order with Next and Back. `ch` names the
 // chapter the head counts in; `when` leaves a step out when the vault has no
-// such thing (no plan, no story yet), so a new vault sees fewer steps, not empty
-// ones. A chapter's first step holds Next until its view has the data every
-// later `when` reads (`ready`). Each step restores its own view, because Back
-// crosses from one chapter into the last. `side: "right"` asks to sit beside a
-// wide control; `high` lifts the tour over Learn's dialog.
+// such thing, so a new vault sees fewer steps, not empty ones. `side: "right"`
+// asks to sit beside a wide control; `high` lifts the tour over Learn's dialog.
 const tourQ = (sel) => document.querySelector(sel);
 // the one laid out: a reading can hold a second Rewrite, on its stale line
 const tourByText = (sel, text) => [...document.querySelectorAll(sel)]
   .find((b) => b.textContent.trim() === text && b.getBoundingClientRect().width) || null;
-function tourView(tab) { if (activeTab !== tab) showTab(tab); }
-function tourSurface(mode) { tourView("graph"); if (graphMode !== mode) setGraphMode(mode); }
-// replace: the tour's moves are not the student's history to walk back through
-function tourLearn(r) {
-  tourView("learn");
-  if (lrRoute.view !== r.view || (r.plan && lrRoute.plan !== r.plan)) lrGo(r, { replace: true });
-}
-// Two controls a step names together, lit as one box (only its rect is read).
-function tourUnion(...els) {
-  if (!els.every(Boolean)) return null;
-  return { getBoundingClientRect() {
-    const rs = els.map((e) => e.getBoundingClientRect());
-    const left = Math.min(...rs.map((r) => r.left)), top = Math.min(...rs.map((r) => r.top));
-    const right = Math.max(...rs.map((r) => r.right)), bottom = Math.max(...rs.map((r) => r.bottom));
-    return { left, top, right, bottom, width: right - left, height: bottom - top };
-  } };
-}
-const tourDvFront = () => !!dv.data?.setup;
-const tourLrPlan = () => lrData?.plans?.[0]?.path;
 const tourField = (name) => () => [...document.querySelectorAll(".lr-dialog .lr-fs")]
   .find((s) => s.querySelector("h3")?.firstChild?.textContent.trim() === name) || null;
 
 const TOUR_RUNS = {
-  more: [
-    { ch: "Discover", prepare: () => tourView("discover"),
-      ready: () => !!dv.data && !!(tourQ(".dv-tabs") || tourQ(".dv-first-in")), loading: "Discover is loading.",
-      // the first visit's whole setup, Start reading included: the step asks for it
-      target: () => tourDvFront() ? tourQ(".dv-tabs") : tourQ(".dv-first-in"),
-      body: () => tourDvFront()
-        ? "Discover reads the feeds you picked and groups what they publish into stories. For you puts first the ones nearest your notes; News and Research show each feed as it comes."
-        : "Pick what Discover reads, then Start reading. Its stories come in while the tour goes on." },
-    { ch: "Discover", prepare: () => tourView("discover"), when: () => tourDvFront() && !!tourQ(".dv-lead"), target: ".dv-lead",
-      body: "A story is written from its articles the first time you open it, and names the notes in your vault it sits near." },
-    { ch: "Discover", prepare: () => tourView("discover"), when: () => tourDvFront() && !!tourQ(".dv-lead"), target: ".dv-lead .dv-actions",
-      body: "Ask starts a chat on the story. Save puts it in your Inbox as a note, the only way anything from Discover reaches your vault. The thumbs teach For you." },
-    { ch: "Discover", prepare: () => tourView("discover"), when: tourDvFront, target: ".dv-rail .dv-panel",
-      body: "These folders and tags steer For you. Switch one off and its notes stop ranking the stories." },
-    { ch: "Discover", prepare: () => tourView("discover"), when: tourDvFront, target: () => tourByText(".dv-head .dv-btn", "Feeds"),
-      body: "Feeds lists what Discover reads: add a feed, import a list, or browse the catalog. It reads them when you open Discover, at most once an hour." },
-    { ch: "Explore", prepare: () => tourSurface("graph"), dim: "none",
-      body: "A dot is a note. A grey line is a link you wrote; a blue one joins two notes that say similar things. The key at the right says what each mark means and how many there are." },
-    { ch: "Explore", prepare: () => tourSurface("graph"), target: "#node-search",
-      body: "Find a note and the map flies to it, with its neighbours arranged around it. Click any dot to open its note beside the map." },
-    { ch: "Explore", prepare: () => tourSurface("graph"), target: "#surface-tabs",
-      body: "The same notes, read five ways. Graph draws the links, Flow and Clusters arrange them, Folders and Read read the shape. Library is here when the vault is linked to Zotero." },
-    { ch: "Explore", prepare: () => tourSurface("flow"), target: surfaceTab("flow"),
-      body: "Flow puts one note in its reading order, in the graph: what comes before it, and what it unlocks. Click a note to place it." },
-    { ch: "Explore", prepare: () => tourSurface("clusters"), target: surfaceTab("clusters"),
-      body: "Clusters gathers each area in one place, on a ring, and the links between them stay drawn. Folders, beside it, shades each folder by how much it mixes areas." },
-    { ch: "Explore", prepare: () => tourSurface("read"), target: surfaceTab("read"),
-      body: "Read is a way through the whole vault: each area's hub first, then the notes it opens onto." },
-    { ch: "Explore", prepare: () => tourSurface("graph"), target: "#dock .composer-shell",
-      body: "Ask from here. The answer opens in a card over the map, and goes on in the chat when you want the whole of it." },
-    { ch: "Memorize", prepare: () => tourLearn({ view: "home" }),
-      ready: () => !!lrData && !!tourQ(".lr-ask"), loading: "Memorize is reading your notes.", target: ".lr-ask",
-      body: "Name a note, a folder or a topic and press Test me: the questions start at once and nothing is written. Create makes it a plan with a date." },
-    { ch: "Memorize", prepare: () => tourLearn({ view: "home" }), when: () => !!lrData?.recent?.length, target: ".lr-recent",
-      body: "Changed this week: one click tests you on a note you have just edited." },
-    { ch: "Memorize", prepare: () => tourLearn({ view: "home" }), when: () => !!lrData?.next?.plans?.length,
-      target: () => [...document.querySelectorAll(".lr-home .lr-hsec")].find((s) => s.querySelector(".lr-hh")?.textContent.startsWith("Your plans")) || null,
-      body: "Your plans. A plan spreads a folder or a syllabus over the days up to your date. Its name opens it; Continue asks its next questions." },
-    { ch: "Memorize", prepare: () => tourLearn({ view: "home" }), when: () => !!lrData?.session_rows?.length, target: ".lr-next",
-      body: "Your next session, chosen for you: each note says why it is up. Take one out before you start, then Start these." },
-    { ch: "Memorize", prepare: () => tourLearn({ view: "plan", plan: tourLrPlan() }), when: () => !!tourLrPlan(),
-      target: () => tourUnion(tourByText(".lr-one button", "Continue plan"), tourByText(".lr-one button", "Check what I already know")),
-      body: "Continue plan asks the next step's questions. Check what I already know asks up to two a step first; a step you know moves to the end, and nothing is passed for you." },
-    { ch: "Memorize", prepare: () => tourLearn({ view: "plan", plan: tourLrPlan() }), when: () => !!tourLrPlan(), target: ".lr-readbtn",
-      body: "Read opens a step as cards: Silica's summary of each note, ending on a question about the next one. Rewrite a card in your own words and Silica checks it." },
-    { ch: "Memorize", prepare: () => tourLearn({ view: "map" }), target: ".lr-mapv .mv-l", side: "right",
-      body: "What you know: every mark is a note. Dashed is not tested yet, open is still to verify, half is met with help, full is met without help. Pick one to see its history." },
-    { ch: "Memorize", prepare: () => tourLearn({ view: "home" }), target: () => tourByText(".lr-next button", "Start these"),
-      body: "In a session you answer, say how sure you are, then compare with your note. What you miss comes back in a later session. You can take this tour again from Shortcuts and help." },
-  ],
   // The first time a plan step's reading opens. It only scrolls: moving between
   // cards marks the one left behind as read (lrReadShow).
   read: [
@@ -242,8 +178,7 @@ function tourSave() {
 const tourStep = () => tour.run ? TOUR_RUNS[tour.run][tour.i] : TOUR_STEPS[tour.step];
 // A chapter whose view the account is not served is skipped whole, as a step
 // this vault lacks is (ADR-0140); Create and the rest live in the chat.
-const tourShows = (st) => (!st.ch || viewServed({ Discover: "discover", Explore: "graph", Memorize: "learn", Reading: "learn" }[st.ch] ?? "chat"))
-  && (!st.when || st.when());
+const tourShows = (st) => (!st.ch || viewServed("learn")) && (!st.when || st.when());
 function tourSaved() {
   try { return JSON.parse(localStorage.getItem(TOUR_KEY)); } catch { return null; }
 }
@@ -294,7 +229,7 @@ function tourRender() {
     // counted among the chapter's steps this vault has
     const shown = TOUR_RUNS[tour.run].filter((st) => st.ch === s.ch && tourShows(st));
     count.textContent = `${s.ch} · ${shown.indexOf(s) + 1} of ${shown.length}`;
-  } else count.textContent = s.n ? `Step ${s.n} of ${viewServed("learn") ? 4 : 3}` : "Welcome";
+  } else count.textContent = s.n ? `Step ${s.n} of ${TOUR_LAST}` : "Welcome";
   const close = tourButton("tour-x", ["✕", () => tourEnd()]);
   close.setAttribute("aria-label", "close the tour");
   head.append(count, close);
@@ -313,7 +248,7 @@ function tourRender() {
   let secondary = s.secondary, primaryAct = s.primary;
   if (tour.run && !s.wait) {
     const steps = TOUR_RUNS[tour.run];
-    const back = steps.slice(0, tour.i).some((st) => tourShows(st) && !st.once) || tour.run === "more";
+    const back = steps.slice(0, tour.i).some((st) => tourShows(st) && !st.once);
     const next = steps.slice(tour.i + 1).some(tourShows);
     if (back) secondary = ["Back", () => tourRun(tour.run, tour.i - 1, -1)];
     primaryAct ||= next ? ["Next", () => tourRun(tour.run, tour.i + 1, 1)] : ["Done", () => tourEnd()];
@@ -401,12 +336,11 @@ function tourLoop() {
   tourRaf = tour ? requestAnimationFrame(tourLoop) : 0;
 }
 
-// The next step of a run in direction `dir` that this vault has. Back past the
-// first chapter lands on the basics' last bubble.
+// The next step of a run in direction `dir` that this vault has.
 function tourRun(run, i, dir = 1) {
   const steps = TOUR_RUNS[run];
   while (i >= 0 && i < steps.length && (!tourShows(steps[i]) || (dir < 0 && steps[i].once))) i += dir;
-  if (i < 0) { if (run === "more") tourGo("learn"); return; }
+  if (i < 0) return;
   if (i >= steps.length) { tourEnd(); return; }
   Object.assign(tour, { step: run, run, i, scrolled: false });
   tourSave();
@@ -490,12 +424,9 @@ document.addEventListener("silica:turn-end", (e) => {
     return;
   }
   if (tour.step === "ask") tourGo("cite");
-  else if (tour.quizAsked) tourGo("learn");
-  else { tour.quizAsked = true; tourSave(); tourRender(); }
 });
 
 document.addEventListener("silica:view", (e) => {
-  if (tourWaiting("graph") && e.detail === "graph") tourGo("map");
   if (tour?.mini && e.detail !== "learn") tourEnd();
 });
 
@@ -522,24 +453,27 @@ $("#tour-start").addEventListener("click", (e) => {
 });
 
 // --- the first visit ---------------------------------------------------------
-// Both lists the condition reads arrive once at start (app-settings.js), in
-// either order; the tour decides when it has seen the two.
+// A vault with no notes and no chats, on a browser the tour has not been turned
+// off in. Held while the setup card stands over the box (ADR-0172 point 1): the
+// tour's first steps ask a model, and its dim covered the card. The card's
+// Start asking calls this again.
+function tourFirstVisit() {
+  if (!tour && tourSaved() !== "off" && !tourFirstNote() && sessionCount === 0 && !setupNeeded) tourStart();
+}
+
+// The three answers the condition reads arrive once at start (app-settings.js),
+// in any order; the tour decides when it has seen them all.
 {
   let seen = 0;
   const boot = () => {
-    if (++seen !== 2) return;
+    if (++seen !== 3) return;
     const saved = tourSaved();
-    if (saved?.run === "more" && TOUR_RUNS.more[saved.i]) {
-      // the chapter's start, where Next waits for the data its later steps read
-      tour = saved;
-      tourRun("more", TOUR_RUNS.more.findIndex((st) => st.ch === TOUR_RUNS.more[saved.i].ch));
-    } else if (saved && saved.step && TOUR_STEPS[saved.step]) {
+    if (saved && saved.step && TOUR_STEPS[saved.step]) {
       tour = saved;
       tourGo(TOUR_RESUME[saved.step] || saved.step);
-    } else if (saved !== "off" && !tourFirstNote() && sessionCount === 0) {
-      tourStart();
-    }
+    } else tourFirstVisit();
   };
   document.addEventListener("silica:vault-info", boot, { once: true });
   document.addEventListener("silica:sessions", boot, { once: true });
+  document.addEventListener("silica:config", boot, { once: true });
 }

@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 from silica.kernel.base.formats import file_act
 from silica.kernel.graph import file_tree
+from silica.sources.covers import COVER_EXTS
 
 
 def _more_button(target: str, shown: str, *, folder: bool) -> str:
@@ -96,7 +97,15 @@ def _file(leaf: str, key: str, note: str | None, state: str = "") -> str:
     """A raw (`note` names it) or a file no note names (`note` None, keyed by its
     own path), with its extension."""
     stem, dot, ext = leaf.rpartition(".")
-    shown = (f'{_RAW_GLYPH}<span>{html.escape(stem or leaf)}<span class="tree-ext">'
+    glyph = _RAW_GLYPH
+    if stem and f".{ext.lower()}" in COVER_EXTS:
+        src = (f"/file/cover?path={quote(key, safe='')}" if note is None
+               else f"/raw/cover?path={quote(note, safe='')}")
+        # The cover laid over the glyph (ADR-0163): a file with none answers
+        # 404, and the page takes a failed <img> out, so the glyph shows.
+        glyph = (f'<span class="tree-cover">{_RAW_GLYPH}'
+                 f'<img src="{src}" alt="" loading="lazy" decoding="async"></span>')
+    shown = (f'{glyph}<span>{html.escape(stem or leaf)}<span class="tree-ext">'
              f'{dot}{html.escape(ext if stem else "")}</span></span>')
     if note is None:
         mark = _FILE_MARKS.get(state)

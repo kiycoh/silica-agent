@@ -370,6 +370,9 @@ function neighbourRows(d) {
   for (const r of d.similar) {
     const row = put(r, "similar", 3);
     row.unreachable = String(r.why || "").startsWith("unreachable");
+    // ADR-0164: the cosine as a percentage, or null where only shared concepts
+    // proposed the note, which the row then says in words.
+    row.similarity = r.similarity == null ? null : r.similarity;
   }
   for (const r of d.missing) { put(r, "unwritten", 4).why = r.why || ""; }
   const behind = new Set((d.structure && d.structure.behind) || []);
@@ -1019,13 +1022,13 @@ function neighbourRows(d) {
   const TAG_TEXT = { both: "⇄", in: "in", out: "out", "-1": "−1", "+1": "+1", declared: "declared",
                      similar: "~", unwritten: "unwritten", behind: "behind" };
   const TAG_SAY = { both: "linked both ways", in: "links to this note", out: "linked from this note",
-                    "-1": "read before it", "+1": "read after it", declared: "declared in the frontmatter, not linked",
+                    "-1": "read before it", "+1": "read after it", declared: "named in its properties, not linked",
                     similar: "similar, not linked", unwritten: VOCAB.notes.unwritten,
                     behind: "cut off without this note" };
   // One legend entry per family of tags, listed only when a row carries one.
   const LEGEND = [
     [["both"], "⇄ both ways"], [["in", "out"], "in / out one way"], [["-1", "+1"], "±1 reading order"],
-    [["declared"], "declared: in its frontmatter only"], [["similar"], "~ similar, not linked"],
+    [["declared"], "declared: in its properties only"], [["similar"], "~ similar, not linked"],
     [["unwritten"], "unwritten: linked, never written"], [["behind"], "behind: cut off without this note"],
   ];
 
@@ -1040,7 +1043,9 @@ function neighbourRows(d) {
     // The folder only where it is news, and "not connected" for a relative the
     // graph cannot reach at all: two notes called Cell stay two notes.
     const fold = folderOf(r.path);
-    const meta = [fold && fold !== folderOf(d.path) ? fold : "", r.unreachable ? "not connected" : ""]
+    const alike = !r.tags.includes("similar") ? ""
+      : r.similarity != null ? r.similarity + "% similar" : "shares concepts";
+    const meta = [alike, fold && fold !== folderOf(d.path) ? fold : "", r.unreachable ? "not connected" : ""]
       .filter(Boolean).join(" · ");
     if (meta) n.appendChild(mkEl("span", "nb-m", meta));
     row.appendChild(n);

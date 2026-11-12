@@ -1227,6 +1227,149 @@ function evList(title, sub, rows, cols, empty) {
   return box;
 }
 
+// --- the review queue (ADR-0165) ----------------------------------------------
+// What Silica proposes, by kind, and the batches already accepted. A yes that
+// writes without a model lands from here as one run the list can revert; a kind
+// whose yes runs the worker model is drafted into the chat, where a turn is
+// counted, as every other action of this view is.
+function evReview() {
+  const box = mkEl("div", "ev rv");
+  box.appendChild(evHead("Review", ""));
+  loadReview(box);
+  return box;
+}
+
+async function loadReview(box) {
+  let d;
+  try {
+    d = await answerOf(await fetch("/metrics/review"));
+  } catch (e) {
+    box.replaceChildren(evHead("Review", ""));
+    evEmpty(box, "Couldn't read the review queue: " + e.message);
+    return;
+  }
+  drawReview(box, d);
+}
+
+const rvBtn = (label, go, fn) => {
+  const b = mkEl("button", "mini" + (go ? " go" : ""), label);
+  b.type = "button";
+  b.addEventListener("click", (e) => { e.stopPropagation(); fn(); });
+  return b;
+};
+
+function reviewSend(box, path, body, done) {
+  postJson(path, body).then(answerOf).then((r) => {
+    if (done) done(r);
+    // A yes or a revert rewrote notes outside the editor: the note open in the
+    // drawer, and the Changes record, take the disk's bytes, as after an /undo.
+    loadChanges();
+  })
+    .catch((e) => notify(e.message))
+    .finally(() => loadReview(box));
+}
+
+function reviewAccept(box, kindOf, ids) {
+  if (!ids.length) return;
+  // One line for the whole selection, so the chat lands it as one batch too.
+  if (ids.some((id) => kindOf.get(id).spends_model)) { prefillChat("/review apply " + ids.join(" ")); return; }
+  reviewSend(box, "/metrics/review/apply", { ids }, (r) => {
+    if (r.failed.length) notify(`${r.failed.length} not accepted: ${r.failed[0].why}`, "warn");
+  });
+}
+
+function reviewRow(box, kindOf, it, picked, sync) {
+  const row = mkEl("div", "rv-row");
+  const cb = mkEl("input");
+  cb.type = "checkbox";
+  cb.setAttribute("aria-label", "select " + it.title);
+  cb.addEventListener("click", (e) => e.stopPropagation());
+  cb.addEventListener("change", () => { if (cb.checked) picked.add(it.id); else picked.delete(it.id); sync(); });
+  const text = mkEl("div", "rv-x");
+  const t = mkEl("button", "rv-t", it.title);
+  t.type = "button";
+  if (it.notes[0]) t.dataset.path = it.notes[0];  // the view's own row click: the note in the column
+  text.append(t, mkEl("span", "rv-w", it.why));
+  if (it.preview) {
+    const more = mkEl("details", "rv-p");
+    more.append(mkEl("summary", null, "what it writes"), mkEl("pre", null, it.preview));
+    text.appendChild(more);
+  }
+  const acts = mkEl("span", "ev-acts");
+  acts.append(rvBtn("accept", true, () => reviewAccept(box, kindOf, [it.id])),
+              rvBtn("dismiss", false, () => reviewSend(box, "/metrics/review/dismiss", { ids: [it.id] })));
+  row.append(cb, text, acts);
+  return row;
+}
+
+function drawReview(box, d) {
+  const kindOf = new Map();
+  for (const k of d.kinds) for (const it of k.items) kindOf.set(it.id, k);
+  const total = kindOf.size;
+  box.replaceChildren(evHead("Review", total ? nfmt(total) + (total === 1 ? " proposal" : " proposals") : ""));
+  // The worklist's figure came with the report; this list is newer than it.
+  const q = document.querySelector('.wl[data-sig="review"] .wl-q');
+  if (q) q.textContent = nfmt(total);
+  if (!total) {
+    evEmpty(box, "Nothing to review. What Silica proposes to change in your notes waits here for your yes or no, "
+      + "and so does a write it could not make. To get proposals, type /curate in the chat.");
+  } else {
+    box.appendChild(evProse("A yes lands as one run you can revert below; a no is remembered, "
+      + "and the same proposal is not offered again."));
+    const picked = new Set();
+    const bar = mkEl("div", "rv-bar");
+    const yes = rvBtn("accept selected", true, () => reviewAccept(box, kindOf, [...picked]));
+    const no = rvBtn("dismiss selected", false,
+      () => reviewSend(box, "/metrics/review/dismiss", { ids: [...picked] }));
+    const sync = () => {
+      yes.disabled = no.disabled = !picked.size;
+      yes.textContent = picked.size ? `accept ${picked.size} selected` : "accept selected";
+    };
+    sync();
+    bar.append(yes, no);
+    box.appendChild(bar);
+    for (const k of d.kinds) {
+      if (!k.items.length) continue;
+      const sec = mkEl("section", "rv-k");
+      const h = mkEl("div", "rv-kh");
+      h.append(mkEl("span", "rv-kt", k.label), mkEl("span", "ev-n", nfmt(k.items.length)));
+      const acts = mkEl("span", "ev-acts");
+      const ids = k.items.map((it) => it.id);
+      acts.append(rvBtn("accept all", true, () => reviewAccept(box, kindOf, ids)),
+                  rvBtn("dismiss all", false, () => reviewSend(box, "/metrics/review/dismiss", { ids })));
+      h.appendChild(acts);
+      sec.appendChild(h);
+      if (k.spends_model) sec.appendChild(mkEl("p", "rv-note", "A yes runs the worker model, so it goes to the chat as a turn."));
+      else if (!k.in_all) sec.appendChild(mkEl("p", "rv-note", "A yes says the note still holds: read it first."));
+      for (const it of k.items) sec.appendChild(reviewRow(box, kindOf, it, picked, sync));
+      box.appendChild(sec);
+    }
+  }
+  if (d.batches.length) {
+    const sec = mkEl("section", "rv-k");
+    const h = mkEl("div", "rv-kh");
+    h.append(mkEl("span", "rv-kt", "Accepted"), mkEl("span", "ev-n", nfmt(d.batches.length)));
+    sec.appendChild(h);
+    for (const b of d.batches) {
+      const row = mkEl("div", "rv-row rv-done" + (b.reverted ? " gone" : ""));
+      const text = mkEl("div", "rv-x");
+      const when = new Date(b.at * 1000).toLocaleString(undefined,
+        { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+      text.append(mkEl("span", "rv-t", b.titles.join(", ") + (b.count > b.titles.length ? ", …" : "")),
+                  mkEl("span", "rv-w", `${when} · ${b.count} accepted` + (b.reverted ? " · reverted" : "")));
+      row.appendChild(text);
+      if (!b.reverted) {
+        const acts = mkEl("span", "ev-acts");
+        acts.appendChild(rvBtn("revert", false, () => reviewSend(box, "/metrics/review/revert", { run: b.run },
+          (r) => notify(`Reverted ${r.restored.length} note${r.restored.length === 1 ? "" : "s"}.`, "info"))));
+        row.appendChild(acts);
+      }
+      sec.appendChild(row);
+    }
+    box.appendChild(sec);
+  }
+}
+
 function evidence(key, d, T, attnRows, attnMeasured) {
   switch (key) {
     case "dangling": return evDangling(d, T);
@@ -1234,6 +1377,7 @@ function evidence(key, d, T, attnRows, attnMeasured) {
     case "lean": return evLean(d, T);
     case "gaps": return evGaps(d, T);
     case "attention": return evAttention(d, T, attnRows, attnMeasured);
+    case "review": return evReview();
     case "contested":
       return evList("Contested", `${nfmt(T.contested || 0)} notes`,
         (d.contested || []).map((c) => ({
@@ -1363,18 +1507,22 @@ function renderMetrics(d) {
     ["lean", T.lean_notes, "lean notes", "too thin to carry their topic"],
     ["orphans", T.orphans, "orphans", "nothing links to them"],
     ["gaps", T.structural_gaps, "structural gaps", "areas that should connect and do not"],
-    ["attention", attnCount, "waiting on attention", "idle and missed in recall"],
+    ["attention", attnCount, "waiting on attention", "not read in a while, or missed in a quiz"],
     // "—" not "0" when the leg that measures it never ran: a printed zero reads
     // as "measured, came out flat".
     ["deficits", full ? T.integration_deficits : null, "integration deficits",
-     "concept-rich text, few wikilinks"],
-    ["contested", T.contested, "contested", "frontmatter flags a conflict"],
+     "many ideas, few links to other notes"],
+    ["contested", T.contested, "contested", "marked as disagreeing with another note"],
     ["drift", T.source_drift, "source drift", "the source moved on without the note"],
+    // ADR-0165: what Silica proposes, waiting for a yes or a no.
+    ["review", d.review || 0, "waiting for review", "proposals to accept or dismiss"],
   ].sort((a, b) => (b[1] || 0) - (a[1] || 0));
 
   let firstRow = null;
   for (const [key, n, label, means] of signals) {
-    const live = n > 0;
+    // The review queue opens at zero too: its pane says what it is for and how
+    // to fill it (ADR-0172 point 3), and lists the accepted runs to revert.
+    const live = n > 0 || key === "review";
     // A row that goes nowhere stays a div: a button that does nothing is worse
     // than a line of text, and a zero has no evidence to show.
     const row = mkEl(live ? "button" : "div", "wl" + (live ? "" : " zero"));
@@ -1608,6 +1756,7 @@ function renderMetrics(d) {
     const unplaceable = {
       dangling: "a missing target has no note, so it belongs to no area.",
       gaps: "a gap is already a fact about a PAIR of areas.",
+      review: "a proposal is about the notes it names, not about an area.",
     };
     relens = (key) => {
       const lens = (d.signal_areas || {})[key] || null;
@@ -1825,9 +1974,12 @@ function renderMetrics(d) {
   }
   const props = [
     ["Duplicate pairs", "embeddings propose · graph disposes", d.duplicates,
-     [{ key: "pair", label: "Pair" }, { key: "score", label: "Cosine", num: true },
+     [{ key: "pair", label: "Pair" }, { key: "alike", label: "Similar", num: true },
       { key: "band", label: "Band", nowrap: true }],
-     (x) => ({ pair: x.a + " ↔ " + x.b, score: x.score, band: x.confirmed ? "merge?" : "link", _path: x.a_path }),
+     // The cosine as a percentage (ADR-0164); a pair found by its wording alone,
+     // with no vectors in the vault, says so instead of printing a number.
+     (x) => ({ pair: x.a + " ↔ " + x.b, alike: x.similarity != null ? x.similarity + "%" : "same wording",
+               band: x.confirmed ? "merge?" : "link", _path: x.a_path }),
      (T.confirmed_duplicates || 0) + (T.duplicate_pairs || 0), "pairs"],
     ["Autolink candidates", "co-mentioned in text, never linked", d.autolinks,
      [{ key: "pair", label: "Pair" }, { key: "shared", label: "Shared concepts" },

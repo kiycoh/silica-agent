@@ -58,6 +58,30 @@ def vault_file(path: str = "", download: bool = False):
                         content_disposition_type="attachment" if attach else "inline")
 
 
+@router.get("/file/cover")
+def file_cover(path: str = ""):
+    """A rail row's cover (ADR-0163), by the file's path as /file takes it."""
+    return cover_response(_vault_file(path))
+
+
+# /asset's sandbox and nosniff, kept five minutes: the address names the file
+# and not the drawing, so a file changed under it shows its new cover within
+# 300 s. Not no-cache: this FileResponse answers If-None-Match with a 200
+# (checked 2026-11-12), so every rail redraw would send every cover again.
+_COVER_HEADERS = {**render.ASSET_HEADERS, "Cache-Control": "private, max-age=300"}
+
+
+def cover_response(found: Path):
+    """The cover of a vault file a route has already let through, or 404 for
+    a file that has none, which the page draws as its title's tile."""
+    from silica.sources import covers
+
+    got = covers.cover(found)
+    if got is None:
+        raise HTTPException(404)
+    return FileResponse(got[0], media_type=got[1], headers=_COVER_HEADERS)
+
+
 @router.get("/file/chapters")
 def file_chapters(path: str = ""):
     """A vault PDF's chapters for the drawer's info view (ADR-0156 point 6):

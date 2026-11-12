@@ -1569,7 +1569,7 @@ class QuizResult(BaseModel):
     level: int | None = Field(default=None, description="SOLO rung the item asked at, 1..4")
     conf: int | None = Field(default=None, description="Confidence band 90/70/50/25 collected before the reveal; null when skipped")
     source: dict | None = Field(default=None, description="{leaf, line}: the sources/ leaf and line the question rests on")
-    grader: str = Field(default="", description="model | self | told")
+    grader: str = Field(default="", description="model | self | told | choice (a pick among four options)")
     grader_rating: int | None = Field(default=None, description="The model's proposed rating when the reader overrode it")
     hints: int | None = Field(default=None, description="Hint rungs used")
     told: bool | None = Field(default=None, description="True when the reader asked for the answer")

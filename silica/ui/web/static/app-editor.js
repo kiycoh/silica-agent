@@ -150,7 +150,7 @@
   // module: the drawer and Learn's write view are two editors of one kind
   // (ADR-0134 point 6), and module state let the second create() take the
   // first one's hooks. Every reader has a view or a state in hand.
-  const NO_INST = { hooks: {}, top: null };
+  const NO_INST = { hooks: {}, top: null, foot: null };
   const instField = StateField.define({ create: () => NO_INST, update: (v) => v });
   const hooksOf = (view) => view.state.field(instField).hooks;
   const renderCache = new Map(); // source -> html; a block redrawn is not refetched, by either editor
@@ -211,6 +211,266 @@
       el.addEventListener("click", (e) => { if (!e.target.closest("summary")) { e.preventDefault(); e.stopPropagation(); } });
       return el;
     }
+    ignoreEvent() { return true; }
+  }
+
+  // --- a table is a grid (ADR-0160) ------------------------------------------
+  // A table the caret is not in is a grid: each cell shows the server's render of
+  // itself and edits its own Markdown while focused. A cell's edit is one
+  // transaction on that cell's bytes, a row's on its line, a column's on the whole
+  // table written compactly, so undo and the save are the editor's own. The caret
+  // in the table (the arrows, find, "Edit as text") shows its lines as source.
+
+  // A row's cells as [from, to) in the line, between their pipes. A pipe inside a
+  // wikilink or inline math is the cell's own, as the server reads it
+  // (render.py _escape_table_aliases), and `\|` always is. Where this and the
+  // server's render count different cells, the grid stands down (paintGrid).
+  function tableCells(line) {
+    const cells = [], lead = /^\s*\|/.exec(line);
+    let start = lead ? lead[0].length : 0, math = false, wiki = 0;
+    for (let i = start; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === "\\") i++;
+      // Math and a link open only where they close, as the server's patterns match:
+      // the `$5` of a price is text, and its cell ends at the next pipe.
+      else if (ch === "$") math = math ? false : line[i + 1] !== "$" && line[i - 1] !== "$" && line.indexOf("$", i + 2) > 0;
+      else if (!math && line.startsWith("[[", i) && line.indexOf("]]", i + 2) > 0) { wiki++; i++; }
+      else if (!math && wiki && line.startsWith("]]", i)) { wiki--; i++; }
+      else if (ch === "|" && !math && !wiki) { cells.push([start, i]); start = i + 1; }
+    }
+    if (line.slice(start).trim()) cells.push([start, line.length]);
+    return cells;
+  }
+  const alignOf = (d) => (/^\s*:-+:\s*$/.test(d) ? "center" : /-:\s*$/.test(d) ? "right" : /^\s*:/.test(d) ? "left" : "");
+  const DELIM = { "": "---", left: ":---", center: ":---:", right: "---:" };
+  // null for a table whose rows are not all as wide as its head: drawn, never gridded
+  function tableModel(source) {
+    const rows = source.split("\n").map((l) => tableCells(l).map(([a, b]) => l.slice(a, b).trim()));
+    const n = rows[0].length;
+    if (rows.length < 2 || !n || rows.some((r) => r.length !== n)) return null;
+    return { n, head: rows[0], aligns: rows[1].map(alignOf), body: rows.slice(2) };
+  }
+  const rowText = (cells) => `| ${cells.join(" | ")} |`;
+  const tableText = (m) => [m.head, m.aligns.map((a) => DELIM[a]), ...m.body].map(rowText).join("\n");
+  // A cell shows its pipes bare and writes them escaped, inline math aside: there
+  // `\|` is a norm, and the server already keeps a formula's bars in its cell.
+  const outsideMath = (t, f) => t.split(/(\$[^$\n]*\$)/).map((s, i) => (i % 2 ? s : f(s))).join("");
+  const cellShown = (raw) => outsideMath(raw, (s) => s.replace(/\\\|/g, "|"));
+  const cellRaw = (shown) => outsideMath(shown.trim(), (s) => s.replace(/\\\||\|/g, (m) => (m === "|" ? "\\|" : m)));
+
+  const gridAt = (view, from) => [...view.contentDOM.querySelectorAll(".cm-grid")].find((g) => view.posAtDOM(g) === from) || null;
+  function focusCell(view, from, r, c) {
+    const g = gridAt(view, from), td = g && g.querySelector(`[data-r="${r}"][data-c="${c}"]`);
+    if (td) editCell(view, g, td);
+  }
+  // A line of the table by its offset from the head; grid row r is offset r, the
+  // delimiter row standing between the head (0) and the first body row (2).
+  const tableLine = (doc, from, off) => doc.line(doc.lineAt(from).number + off);
+  const rowLine = (doc, from, r) => tableLine(doc, from, r ? r + 1 : 0);
+
+  function commitCell(view, el, r, c, was, now) {
+    if (now === was || !el.isConnected) return;
+    const ln = rowLine(view.state.doc, view.posAtDOM(el), r), span = tableCells(ln.text)[c];
+    if (span) view.dispatch({ changes: { from: ln.from + span[0], to: ln.from + span[1], insert: ` ${cellRaw(now)} ` }, userEvent: "input.type" });
+  }
+
+  function editCell(view, el, td) {
+    const open = td.querySelector("input");
+    if (open) { open.focus(); return; }
+    const g = el._grid, r = +td.dataset.r, c = +td.dataset.c, rows = g.model.body.length;
+    const was = cellShown(r ? g.model.body[r - 1][c] : g.model.head[c]);
+    const input = document.createElement("input");
+    input.className = "cm-grid-input";
+    input.value = was;
+    input.spellcheck = true;
+    input.size = 1; // the column keeps its width: a field's default 20 characters widened it
+    input.setAttribute("aria-label", `${r ? `row ${r}` : "header"}, column ${c + 1}`);
+    td.classList.add("cm-grid-editing");
+    td.append(input);
+    input.focus();
+    input.setSelectionRange(was.length, was.length);
+    let done = false;
+    // `go`: where the caret goes once this cell's bytes are written, given the table's start.
+    const finish = (go) => {
+      if (done) return;
+      done = true;
+      const from = view.posAtDOM(el);
+      commitCell(view, el, r, c, was, input.value); // a change redraws the grid, this field with it
+      if (el._at && el._at.input === input) el._at = null;
+      if (input.isConnected) { td.classList.remove("cm-grid-editing"); input.remove(); }
+      if (go) go(from);
+    };
+    el._at = { r, c, input, flush: () => finish() };
+    const to = (rr, cc) => (from) => focusCell(view, from, rr, cc);
+    // Out of the grid, the caret goes to the text after it (or before it, backwards).
+    const out = (dir) => (from) => {
+      const g2 = gridAt(view, from), len = g2 ? g2._grid.source.length : 0;
+      view.focus();
+      view.dispatch({ selection: { anchor: dir > 0 ? Math.min(view.state.doc.length, from + len + 1) : Math.max(0, from - 1) } });
+    };
+    input.addEventListener("keydown", (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (e.key === "Tab") {
+        const at = r * g.model.n + c + (e.shiftKey ? -1 : 1), last = (rows + 1) * g.model.n;
+        e.preventDefault();
+        finish(at < 0 || at >= last ? out(at < 0 ? -1 : 1) : to(Math.floor(at / g.model.n), at % g.model.n));
+      } else if (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const rr = r + (e.key === "ArrowUp" ? -1 : 1);
+        if (rr < 0 || (rr > rows && e.key === "ArrowDown")) return;
+        if (rr > rows) finish((from) => { addRow(view, from, rows); focusCell(view, from, rr, c); }); // Enter on the last row
+        else finish(to(rr, c));
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation(); // not the drawer's Escape
+        input.value = was;
+        finish(out(1));
+      } else if (mod && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        finish(to(r, c));
+        hooksOf(view).save();
+      } else if (mod && /^[zy]$/i.test(e.key) && input.value === was) {
+        // nothing typed here: the note's own undo, and the cell stays open on its new bytes
+        e.preventDefault();
+        const cmd = historyKeymap.find((k) => k.key === (e.key.toLowerCase() === "y" || e.shiftKey ? "Mod-y" : "Mod-z"));
+        finish((from) => { if (cmd) cmd.run(view); focusCell(view, from, r, c); });
+      }
+    });
+    input.addEventListener("blur", () => finish());
+  }
+
+  // A blank row under grid row `after` (under the delimiter, for the head).
+  function addRow(view, from, after) {
+    const m = gridAt(view, from)._grid.model, ln = tableLine(view.state.doc, from, after + 1);
+    view.dispatch({ changes: { from: ln.to, insert: "\n" + rowText(Array(m.n).fill("")) }, userEvent: "input" });
+  }
+  // The bar's acts, on the cell being edited; its bytes are written first.
+  const GRID_ACTS = {
+    "row-add": (view, from, { r }) => { addRow(view, from, r); return [r + 1, null]; },
+    "row-del": (view, from, { r }) => {
+      if (!r) return null; // the head is the table's, not a row of it
+      const ln = rowLine(view.state.doc, from, r);
+      view.dispatch({ changes: { from: ln.from - 1, to: ln.to }, userEvent: "delete" });
+      return [Math.min(r, gridAt(view, from)._grid.model.body.length), null];
+    },
+    "col-add": (view, from, { c }, m) => { m.head.splice(c + 1, 0, ""); m.aligns.splice(c + 1, 0, ""); m.body.forEach((x) => x.splice(c + 1, 0, "")); return [null, c + 1]; },
+    "col-del": (view, from, { c }, m) => {
+      if (m.n < 2) return null;
+      for (const x of [m.head, m.aligns, ...m.body]) x.splice(c, 1);
+      return [null, Math.min(c, m.n - 2)];
+    },
+    align: (view, from, { c }) => {
+      const m = gridAt(view, from)._grid.model, ln = tableLine(view.state.doc, from, 1);
+      m.aligns[c] = { "": "left", left: "center", center: "right", right: "" }[m.aligns[c]];
+      view.dispatch({ changes: { from: ln.from, to: ln.to, insert: rowText(m.aligns.map((a) => DELIM[a])) }, userEvent: "input" });
+      return [null, null];
+    },
+  };
+  function gridAct(view, el, act) {
+    const from = view.posAtDOM(el);
+    if (act === "text") { // the source, as the caret in the table shows it
+      if (el._at) el._at.flush();
+      view.focus();
+      view.dispatch({ selection: { anchor: from } });
+      return;
+    }
+    const at = el._at;
+    if (!at) return;
+    at.flush();
+    const g = gridAt(view, from)._grid, m = tableModel(g.source);
+    const go = GRID_ACTS[act](view, from, at, m);
+    if (!go) { focusCell(view, from, at.r, at.c); return; }
+    if (act.startsWith("col")) view.dispatch({ changes: { from, to: from + g.source.length, insert: tableText(m) }, userEvent: "input" });
+    focusCell(view, from, go[0] ?? at.r, go[1] ?? at.c);
+  }
+
+  function paintGrid(el, view, w) {
+    const m = w.model, rows = [m.head, ...m.body], token = (el._fill = {});
+    el._grid = w;
+    el._at = null;
+    el.classList.remove("cm-grid-off");
+    const bar = document.createElement("div");
+    bar.className = "cm-grid-bar";
+    for (const [act, label, say] of [["row-add", "+ row", "add a row under this one"], ["row-del", "− row", "remove this row"],
+      ["col-add", "+ column", "add a column after this one"], ["col-del", "− column", "remove this column"],
+      ["align", "Align", "this column's alignment: left, centre, right, none"], ["text", "Edit as text", "edit the table as Markdown"]]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.act = act;
+      b.className = act === "text" ? "" : "cm-grid-op";
+      b.textContent = label;
+      b.title = say;
+      bar.append(b);
+    }
+    const table = document.createElement("table"), thead = table.createTHead(), tbody = table.createTBody();
+    rows.forEach((cells, r) => {
+      const tr = (r ? tbody : thead).insertRow();
+      cells.forEach((raw, c) => {
+        const td = document.createElement(r ? "td" : "th");
+        td.dataset.r = r;
+        td.dataset.c = c;
+        td.tabIndex = -1;
+        if (m.aligns[c]) td.style.textAlign = m.aligns[c];
+        const show = document.createElement("span");
+        show.className = "cm-grid-show";
+        show.textContent = cellShown(raw); // the source until the server's render comes
+        td.append(show);
+        tr.append(td);
+      });
+    });
+    el.replaceChildren(bar, table);
+    const paint = (html) => {
+      if (el._fill !== token) return; // a newer table's bytes are drawn here now
+      const t = document.createElement("template");
+      t.innerHTML = html;
+      const got = [...t.content.querySelectorAll("tr")].map((tr) => [...tr.children]);
+      if (got.length !== rows.length || got.some((cells, r) => cells.length !== rows[r].length)) {
+        // The server split a row where this did not: a cell edit here would write the
+        // wrong bytes, so the table is drawn as the reader draws it, and edited as text.
+        el.classList.add("cm-grid-off");
+        el.innerHTML = html;
+      } else {
+        got.forEach((cells, r) => cells.forEach((cell, c) => {
+          el.querySelector(`[data-r="${r}"][data-c="${c}"] > .cm-grid-show`).innerHTML = cell.innerHTML;
+        }));
+      }
+      const body = el.querySelectorAll("tbody tr");
+      for (const [i, grade, hollow, line, n] of w.glyphs) {
+        const cell = body[i] && body[i].firstElementChild;
+        if (cell) { cell.classList.add("cm-chk-cell"); cell.prepend(glyphButton(view, grade, hollow, line, n)); }
+      }
+      const hooks = hooksOf(view);
+      if (hooks.decorate) hooks.decorate(el, view);
+      view.requestMeasure();
+    };
+    if (renderCache.has(w.source)) paint(renderCache.get(w.source));
+    else rendered(view, w.source).then(paint, () => {}); // unrendered, each cell still reads as its source
+  }
+
+  class Grid extends WidgetType {
+    constructor(source, glyphs = []) {
+      super(); this.source = source; this.glyphs = glyphs; this.gkey = JSON.stringify(glyphs); this.model = tableModel(source);
+    }
+    eq(o) { return o.source === this.source && o.gkey === this.gkey; }
+    toDOM(view) {
+      const el = document.createElement("div");
+      el.className = "cm-rendered cm-rendered-block cm-grid";
+      el.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        const b = e.target.closest(".cm-grid-bar button");
+        if (b) { e.preventDefault(); gridAct(view, el, b.dataset.act); return; } // the cell keeps the focus
+        if (el.classList.contains("cm-grid-off") || e.target.closest(".note-link, a[href]")) { followOrReveal(view, el, e); return; }
+        const td = e.target.closest("td, th");
+        if (!td || e.target.closest("input, .cm-chk-glyph")) return;
+        e.preventDefault();
+        editCell(view, el, td);
+      });
+      el.addEventListener("click", (e) => { if (!e.target.closest("input, summary")) { e.preventDefault(); e.stopPropagation(); } });
+      paintGrid(el, view, this);
+      return el;
+    }
+    // The same element, redrawn: the cell the edit moves to is found in it by its place.
+    updateDOM(el, view) { paintGrid(el, view, this); return true; }
     ignoreEvent() { return true; }
   }
 
@@ -637,7 +897,9 @@
       const whole = !doc.sliceString(a.from, from).trim() && !doc.sliceString(to, b.to).trim();
       if (whole && !touches(a.from, b.to)) {
         const glyphs = deco === LINE.table ? tableGlyphs(state, a.from, b.to) : [];
-        add(Decoration.replace({ widget: new Rendered(doc.sliceString(a.from, b.to), true, glyphs), block: true }), a.from, b.to);
+        const src = doc.sliceString(a.from, b.to);
+        const widget = deco === LINE.table && tableModel(src) ? new Grid(src, glyphs) : new Rendered(src, true, glyphs);
+        add(Decoration.replace({ widget, block: true }), a.from, b.to);
       } else {
         eachLine(from, to, deco);
       }
@@ -808,6 +1070,9 @@
       const key = label(from, to);
       if (live) add(Decoration.replace({ widget: new FootnoteLabel(String(num.get(key) || key)) }), from, to);
     }
+    // What follows the note, as `top` heads it: the similar notes (ADR-0164).
+    const foot = state.field(instField).foot;
+    if (foot) add(Decoration.widget({ widget: new Top(foot), block: true, side: 1 }), doc.length);
     return Decoration.set(out, true);
   }
 
@@ -961,7 +1226,7 @@
   // save(), decorate(el, view), select(view), links(paths) -> ["[[…]]"],
   // openAt(path, line). The only caller is app-notes.js, once per editor.
   function create(parent, hooks) {
-    const inst = { hooks, top: null };
+    const inst = { hooks, top: null, foot: null };
     const view = new EditorView({ parent, state: EditorState.create({ doc: "", extensions: extensions(inst) }) });
     return {
       view,
@@ -969,9 +1234,11 @@
       // A fresh state per note: the undo history of one note must not reach
       // into the next. The caret starts under the properties, on the text;
       // it does not take focus, which only a click in the text gives it
-      // (ADR-0059). `top` is what heads the note, `missing` its broken links.
-      load(text, { top = null, missing = [] } = {}) {
+      // (ADR-0059). `top` is what heads the note, `foot` what follows it,
+      // `missing` its broken links.
+      load(text, { top = null, foot = null, missing = [] } = {}) {
         inst.top = top;
+        inst.foot = foot;
         const fm = frontmatterEnd(text.slice(0, HEAD));
         const at = fm > 0 ? Math.min(fm + 1, text.length) : 0;
         const state = EditorState.create({ doc: text, selection: { anchor: at }, extensions: extensions(inst) });
@@ -1102,5 +1369,6 @@
 
   // The link the server named as resolving nowhere, as the editor keys it.
   const isMissing = (state, target) => state.field(broken).has(target);
-  window.LiveEditor = { create, extensions, buildDecorations, frontmatterEnd, language, focusEffect, brokenEffect, isMissing, toggleWrap };
+  window.LiveEditor = { create, extensions, buildDecorations, frontmatterEnd, language, focusEffect, brokenEffect, isMissing, toggleWrap,
+                        tableCells, tableModel, tableText, cellRaw, cellShown };
 })();

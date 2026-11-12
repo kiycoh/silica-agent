@@ -407,8 +407,8 @@ function dvRail() {
   const saved = mkEl("section", "dv-panel");
   saved.append(mkEl("h2", "", "Saved to Inbox"),
     mkEl("div", "dv-meta-strong", d.saved ? `${d.saved} stor${d.saved === 1 ? "y" : "ies"} waiting` : "Nothing saved yet"),
-    mkEl("span", "dv-meta", "A saved story waits in the Inbox as a cited note. It joins the vault when you nucleate it."));
-  if (d.saved) saved.append(dvBtn("Nucleate the Inbox", "dv-sm", () => dvNucleate(d.inbox || "Inbox")));
+    mkEl("span", "dv-meta", "A saved story waits in the Inbox as a cited note. It joins your notes when you turn the Inbox into notes."));
+  if (d.saved) saved.append(dvBtn("Turn the Inbox into notes", "dv-sm", () => dvNucleate(d.inbox || "Inbox")));
   rail.append(shaped, feeds, saved);
   return rail;
 }
@@ -555,7 +555,7 @@ function dvToast(card, path) {
     if (dvRoute().screen === "story") dvRenderStory();
     else if (dv.data) dvRenderFront();
   });
-  const nuc = dvBtn("Nucleate now", "", () => { t.remove(); dvNucleate(path); });
+  const nuc = dvBtn("Turn into notes now", "", () => { t.remove(); dvNucleate(path); });
   t.append(txt, undo, nuc);
   $("#view-discover").append(t);
   dv.toast = setTimeout(() => t.remove(), 12000);

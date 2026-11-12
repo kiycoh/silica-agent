@@ -1044,6 +1044,68 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   white-space: nowrap;
 }
 
+/* A source's cover (ADR-0163) leads its strip, the line and the doors in a
+   column beside it. The box is a fixed size, so the strip heading the editor
+   never changes height when the picture lands or fails; the picture is the
+   whole page, letterboxed on the raised plane, never cropped. */
+.raw-strip:has(> .src-cover) {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.raw-strip-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.8rem;
+  min-width: 0;
+}
+
+.src-cover {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 60px;
+  overflow: hidden;
+  background: var(--slate-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+}
+
+.src-cover.big {
+  width: 120px;
+  height: 160px;
+}
+
+.src-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* No picture: the title set as type, never generated art. */
+.src-cover-t {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  padding: 0 4px;
+  font-size: var(--fs-meta);
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+  color: var(--frost);
+}
+
+.src-cover.big .src-cover-t {
+  -webkit-line-clamp: 8;
+  padding: 0 10px;
+  font-size: var(--fs-ctl);
+  font-weight: 500;
+}
+
 /* The strip over a source (ADR-0129): .note-paper's line, the file named in
    the text's ink, its two doors as the paper's links. */
 .raw-strip b {
@@ -1075,6 +1137,66 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 
 :is(#note-edit,#nv-edit) .note-paper a.wk-paper-a:hover {
   text-decoration: underline;
+}
+
+/* The similar notes after the note's last line (ADR-0164): the Links rows of
+   the details (.nb-row), its cosine as Data and then a name in the text's ink.
+   The figure leads because the block is as wide as the note's widest line: a
+   code line that scrolls sideways took a right-hand figure out of view. */
+.note-similar {
+  margin: 2.2rem 0 0.5rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.6rem;
+}
+
+.note-similar-h {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  margin-bottom: 0.2rem;
+}
+
+.note-similar-row {
+  display: grid;
+  grid-template-columns: 3.4em minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: baseline;
+  width: 100%;
+  padding: 0.35rem 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  font-family: var(--sans);
+  cursor: pointer;
+}
+
+.note-similar-row:last-child {
+  border-bottom: 0;
+}
+
+.note-similar-t {
+  font-size: var(--fs-ctl);
+  color: var(--frost);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-similar-row:hover .note-similar-t {
+  color: var(--accent);
+}
+
+.note-similar-row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.note-similar-p {
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ash);
 }
 
 .raw-strip .wk-paper-a:focus-visible,
@@ -1338,6 +1460,78 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 
 :is(#note-edit,#nv-edit) .cm-rendered-block:hover {
   box-shadow: 0 0 0 1px var(--line);
+}
+
+/* A table is a grid (ADR-0160): the cell being edited holds its source in a field
+   ringed in teal, as any focus is; the bar over the table's corner shows on
+   hover, its row and column acts only while a cell is being edited. */
+:is(#note-edit,#nv-edit) .cm-grid {
+  position: relative;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid :is(td, th) {
+  cursor: text;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid .cm-grid-editing {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid .cm-grid-editing > .cm-grid-show {
+  display: none;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid-input {
+  width: 100%;
+  min-width: 6ch;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: var(--frost);
+  font: inherit;
+  outline: none;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid-bar {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% - 0.35em);
+  z-index: 2;
+  display: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 1px;
+  max-width: 100%;
+  padding: 2px;
+  background: var(--bubble);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+
+:is(#note-edit,#nv-edit) .cm-grid:is(:hover, :focus-within) .cm-grid-bar {
+  display: flex;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid:not(:focus-within) .cm-grid-op {
+  display: none;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid-bar button {
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ash);
+  font: 500 12px/1 var(--sans);
+  padding: 0.3rem 0.45rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+:is(#note-edit,#nv-edit) .cm-grid-bar button:hover {
+  color: var(--frost);
+  background: var(--sel-hover);
 }
 
 :is(#note-edit,#nv-edit) .cm-rendering {

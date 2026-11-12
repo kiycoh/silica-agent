@@ -400,7 +400,7 @@ def test_the_page_without_the_demo_is_unchanged(sandbox, monkeypatch):
 
 # The help rows about a control the demo refuses, by the route each is keyed on
 REFUSED_ROWS = {"ctrl ,": "/settings", "drop a file": "/chat/files/add", "download": "/vault/export",
-                "the mic": "/stt"}
+                "the mic": "/stt", "/page": "/page"}
 
 
 def _terms(sections) -> list[str]:

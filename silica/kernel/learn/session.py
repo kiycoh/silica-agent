@@ -392,7 +392,7 @@ def _payload(s: dict, amnesty=None, short=None) -> dict:
             "objectives": s["objectives"], "objective_labels": [obj.LABEL[o] for o in s["objectives"]],
             # numbered on the whole list, then filtered: `i` is the item's place in
             # s["items"], which every route resolves it by
-            "items": [c for c in items.cue_payload(s["items"]) if c["i"] not in (s.get("dropped") or set())],
+            "items": [c for c in items.cue_payload(s["items"], options=True) if c["i"] not in (s.get("dropped") or set())],
             "reasons": [REASON.get("stale" if it.get("stale") else it["pool"], it["pool"]) for it in _asked(s)],
             "minutes": items.minutes(len(_asked(s))), "mode": s.get("mode", "questions")}
 
@@ -427,20 +427,25 @@ def _item(s: dict, i: Any) -> dict:
 
 def _verdict_payload(v: dict, it: dict) -> dict:
     out = {k: v.get(k) for k in ("grade", "rating", "correct", "feedback_line", "rubric_notes", "grader",
-                                 "paraphrase", "misconception", "note_defect", "skip", "needs_self_grade", "told")}
+                                 "paraphrase", "misconception", "note_defect", "skip", "needs_self_grade", "told", "pick")}
     out.update({"claim": it.get("claim", ""), "answer": it.get("answer", ""), "criteria": it.get("criteria", ""),
                 "span": {**(it.get("source") or {}), "text": it.get("span", "")}, "path": it["path"],
                 "title": it.get("title", ""), "kind": it["kind"], "level": it["level"],
                 "objective": it.get("objective"), "point": it.get("point")})
+    if it.get("options"):
+        out.update(options=it["options"], key=it["key"])
     return out
 
 
 def answer(sid: str, i: Any, *, conf=None, hints=0, told=False, production="", modality="", self_graded=False,
-           force_model=False) -> dict:
+           force_model=False, pick=None) -> dict:
     from silica.kernel.learn import grade
 
     s = _live(sid)
     it = _item(s, i)
+    if pick is not None and not (isinstance(pick, int) and not isinstance(pick, bool)
+                                 and 0 <= pick < len(it.get("options") or [])):
+        raise Refused(INVALID, "pick one of the item's options")
     conf = conf if conf in (90, 70, 50, 25) else None
     hints = max(0, int(hints or 0))
     told = bool(told)
@@ -448,7 +453,11 @@ def answer(sid: str, i: Any, *, conf=None, hints=0, told=False, production="", m
     # Anything but "voice" is typed: the page sends voice once a dictation
     # landed in this answer, however much was typed around it (ADR-0049).
     modality = "voice" if modality == "voice" else "typed"
-    if (it.get("grader") == "self" or self_graded) and not told and not force_model:
+    if pick is not None and not told:
+        # first: a cloze is a self-graded item, and its pick has a key (ADR-0168)
+        v = grade.choice_grade(it, pick=pick, conf=conf, hints=hints)
+        production, modality = it["options"][pick], "typed"
+    elif (it.get("grader") == "self" or self_graded) and not told and not force_model:
         # A mechanical item, or the 20 s fallback (§5.1): the evidence shows
         # and the reader rates; a late model verdict cannot replace a rating.
         v = grade.base(it, "self")
@@ -576,7 +585,11 @@ def _rate(sid: str, i: Any, raw: Any) -> dict:
     rating = max(1, min(4, rating))
     grader = v.get("grader", "self")
     proposed = v.get("rating")
-    if grader == "self" or v.get("needs_self_grade"):
+    if grader == "choice":
+        # the key's rating and not the reader's: the cap at Good is the format's
+        # (ADR-0168), and a number from the page could lift it
+        correct, rating = bool(v.get("correct")), int(v["rating"])
+    elif grader == "self" or v.get("needs_self_grade"):
         from silica.kernel.learn import grade
 
         sg = grade.self_grade(it, rating=rating, hints=v.get("hints", 0), told=v.get("told", False))
@@ -594,7 +607,7 @@ def _rate(sid: str, i: Any, raw: Any) -> dict:
         "grader": grader, "S_before": before.get("S") if before else None, "S_after": after.get("S") if after else None,
         "next_due": iso_day(after.get("due")) if after else None,
         "momentum": _momentum(before, after, first) if rating >= 3 else None,
-        "objective": entry["objective"], "unassisted": bool(correct and not entry["hints"] and not entry["told"]),
+        "objective": entry["objective"], "unassisted": outcome(entry) == "met",
         "escalate": None if correct else _escalate(s, it),
     }
     drop = _walk(s, it, entry)
@@ -639,6 +652,11 @@ def _retest(s: dict, it: dict, entry: dict) -> dict | None:
     if it["path"] in done or len(done) >= RETEST_MAX:
         return None
     done.add(it["path"])
+    if entry["grader"] == "choice":
+        # a wrong pick is asked again on the same four in a new order (ADR-0168),
+        # not in another kind: the line is kept apart from FSRS and the
+        # objectives either way, and the reader chose to be asked among four
+        return _append_retest(s, {**it, **items.reshuffled(it)}, it["kind"])
     row = {**(learner.view().get(ledger_key(it["path"])) or {}), "path": it["path"], "pool": "retest",
            "objective": it.get("objective")}
     if it["kind"] not in MECHANICAL:
@@ -657,7 +675,7 @@ def _append_retest(s: dict, new: dict, missed_kind: str) -> dict:
     with _ITEMS_LOCK:
         s["items"].append({**new, "retest": True, "missed_kind": missed_kind, "pool": "retest",
                            "i": len(s["items"]) + 1})
-        return items.cue_payload(s["items"])[-1]
+        return items.cue_payload(s["items"], options=True)[-1]
 
 
 def _generate_retest(s: dict, row: dict, missed_kind: str) -> None:
@@ -797,7 +815,7 @@ def _receipt(s: dict) -> dict:
         v = s["verdicts"].get(it["i"]) or {}
         rec = s["recorded"].get(it["i"])
         marker = ("told" if v.get("told") else "assisted" if v.get("hints") else "self-assessed" if v.get("grader") == "self"
-                  else "first attempt" if it["kind"] == "predict" else "")
+                  else "chosen among four" if v.get("grader") == "choice" else "first attempt" if it["kind"] == "predict" else "")
         rows.append({
             "i": it["i"], "path": it["path"], "title": it.get("title", ""), "kind": it["kind"], "level": it["level"],
             "retest": bool(it.get("retest")),
@@ -1028,7 +1046,8 @@ def receipt(sid: str) -> dict:
                      "level": e.get("level"), "level_label": mastery.DEPTH_LABEL.get(e.get("level") or 0), "q": e.get("q", ""),
                      "objective": o, "objective_label": obj.LABEL[o], "point": {"i": e["point"]} if e.get("point") else None,
                      "correct": e.get("correct"), "conf": e.get("conf"), "rating": r, "rating_name": RATING_NAME[r],
-                     "marker": "told" if e.get("told") else "assisted" if e.get("hints") else "self-assessed" if e.get("grader") == "self" else "",
+                     "marker": "told" if e.get("told") else "assisted" if e.get("hints") else "self-assessed" if e.get("grader") == "self"
+                     else "chosen among four" if e.get("grader") == "choice" else "",
                      "span": e.get("source") or {}, "skip": False, "note_defect": "", "answered": True, "status": outcome(e)})
     plan = next((e.get("plan") for e in evs if e.get("plan")), "")
     paths = list(dict.fromkeys(e["path"] for e in evs))

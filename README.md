@@ -42,6 +42,8 @@ silica init       # pick a model: a hosted API key, or a local LM Studio / Ollam
 silica --gui      # serves http://localhost:8765, open it in your browser; plain `silica` opens the terminal instead
 ```
 
+Skipped `silica init`? With no model set, the web app walks you through choosing one: paste an OpenRouter key, or use LM Studio or Ollama found running on this computer.
+
 Then type `/report`. It is read-only: it writes one file, `GRAPH_REPORT.md`, and shows the hubs, bridges and orphans already in your vault. Search and the graph work with no model at all.
 
 <p align="center">
@@ -57,15 +59,17 @@ Silica is single-user: one person, one vault. There are no per-person permission
 **Bring documents in.** Slides, case files, papers and mail become notes in the source's own words, not a summary of them.
 
 - `/nucleate Inbox/` takes a folder, a glob or one file (PDF, DOCX, EPUB, PPTX, notebooks). Each file is one transaction, checked against what you already have. Stop it whenever; it resumes.
-- The vault's `+` imports files or a whole folder at the top of the vault, as they are, and a link into `Inbox/`, with no chat turn; move a folder into `Inbox/` and `/nucleate` it when you want it rewritten as notes. A YouTube link gives the video's transcript, and `/fetch <url>` does the same from the chat. A file dropped on the chat stays that chat's until you press "add to vault".
+- The vault's `+` imports files or a whole folder at the top of the vault, as they are, and a link into `Inbox/`, with no chat turn; move a folder into `Inbox/` and `/nucleate` it when you want it rewritten as notes. A YouTube link gives the video's transcript, a Reddit link the post and its top comments, and a GitHub link the repository's README, the file, or the issue or pull request with its comments (set `GITHUB_TOKEN` past GitHub's 60 reads an hour); `/fetch <url>` does the same from the chat. A file dropped on the chat stays that chat's until you press "add to vault".
 - A long document is split at its headings into parts of at most 40,000 characters. A PDF page with no text, or with formulas its text layer loses, is read from its image by the model, up to 60 pages a file.
 - A note keeps its source's DOI, arXiv id, authors and title, so it can be cited without reopening the document. With Zotero linked, a paper's note opens under its byline, with links to Zotero, the PDF and the DOI.
 - `/mail import` keeps only the threads you took part in, from a mail client's export or Google Takeout, and writes nothing until `--apply`.
 - In a git repository, `/wiki` writes an `ARCHITECTURE.md` plus a note per subsystem under `docs/silica/`, and `/stale` flags the notes whose code changed shape since.
 
-**Ask, with the sources in view.** An answer comes from your notes and shows which ones.
+**Ask, with the sources in view.** An answer comes from your notes and shows which ones; what they do not hold is labelled as general knowledge.
 
-- `/explain`, `/compare`, `/summarize` and the chat answer from your notes and cite them. What the vault does not hold is refused, not filled in; `/web` is the explicit way out, cited from the pages it actually opened.
+- `/explain`, `/compare`, `/summarize` and the chat answer from your notes and cite them. When the notes hold nothing on a question, the chat says so in one line, then answers from the model's own knowledge inside a block headed "From general knowledge, not your notes", never mixed into cited sentences. The line under the answer says "partly from general knowledge", and warns when that block came before any search of your notes. Commands and Memorize answer from the notes alone. Turn off Settings › Session › general knowledge (`SILICA_GENERAL_KNOWLEDGE=False`) for the strict chat: cited or refused. `/web` answers from the web, cited from the pages it actually opened.
+- `/council "<question>"` puts one question to several models over one search of your notes. Each member answers from the same passages, with the same rules; the chat model then writes what they agree on, where they disagree and which member said what, every claim cited, with each member's own answer folded underneath. You name the members, 2 to 5, in `SILICA_COUNCIL_MODELS` or Settings › Brains; Silica picks none. A member that fails or runs out of time is named and skipped, and the line under the answer counts each member's calls and tokens. Not on the server in this version.
+- `/page "<what>"` builds a self-contained HTML page from your notes into `Pages/`, or a small site in `Pages/<name>/`, its CSS and scripts inline, with a footer naming the notes it came from. It opens in the drawer or full window, in a sandbox with no access to the app, your session or the network; a page that tries to send its frame to another site is stopped there. A page's address opened in a browser tab of its own keeps the sandbox but not that last guard. Its write card reverts it, and "Revise this page: ..." in the chat writes a new version with a card of its own.
 - Each cited note gets a number. Clicking it opens the note at the line closest to the paragraph that cites it, when enough of their words match; pointing at it lights every paragraph that cites the same note.
 - A line under the answer counts the notes read, the steps and the seconds, and lists under "not cited" the notes it read and did not cite.
 - A number in the answer that is in no note the chat read and in nothing you typed is listed under it: "numbers not in what this turn read".
@@ -80,6 +84,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 
 - `/memorize` and the Memorize tab ask ten kinds of question, from recall and cloze to transfer and contradiction, and correct you by quoting the source line the note rests on. When the note says more than its source, the answer reads "Source mismatch" and is not scored. `/quiz` re-tests what is fading, scheduled with FSRS-6.
 - Before the reveal you say how sure you are: certain (90), pretty sure (70), half unsure (50), guessing (25), or skip. The grader never sees it, nor the session or the chat. Caps come after, in code: a hint or "Just tell me" caps the rating at Hard, and a right answer given while guessing caps at Good.
+- A recall, fill-in, comparison or prediction can also be answered by choosing among four options: switch a session from "Answer by writing" to "Choose" (kept for the plan, or for the session), pick with 1 to 4, or run `/quiz --choice` in the terminal. The wrong options come with the question, a fill-in's from its own note, and each is checked in code: not the answer said again, not another option said again, not a phrase of the line the note rests on. A question without three that pass is asked in writing. A pick is graded by its key, with no model call: a wrong one is Again, a right one Good at most and Hard while guessing, and it never counts as met without help nor in Calibration. A missed pick comes back before the end on the same four in a new order.
 - After 10 unassisted answers with a confidence, Calibration sets what you said against how often you met the criteria, level by level.
 - "Explain it" closes the book: you explain a note in your own words, a student who has not read it asks 4 questions, and your explanation is then checked against the note and its source.
 - No single score: estimated retention, depth (Facts, Parts, Mechanisms, New contexts), the relations you answered on and the misconceptions noted are shown apart. A note never asked counts as never practised, not as failed.
@@ -99,6 +104,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 
 - On the graph, a click makes a note the centre of its own map. In 2D the areas are an atlas: each note owns the ground nearest it, and zooming in names the sub-areas, then the notes.
 - In Explore, Clusters gathers each area in one place on a ring, Flow puts one note in its reading order inside the graph, and Folders shades each folder by how much it mixes areas. Click a link to read the line it is written on. Read gives the whole vault a reading order from its hubs.
+- Under a note's last line, the five notes nearest it by what they say, each with its similarity as a percentage: the cosine of the two notes' embeddings, not a probability. A similar note found only through shared concepts says so instead of showing a number.
 - Compare one folder or area with another: the panel says what characterises each and quotes the links that join them.
 - Click a concept to light the notes that treat it; a second concept narrows them to the notes that treat both, and the panel quotes the lines.
 
@@ -112,7 +118,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 
 - Each write is a card in the chat with its revert. When the check is unsure, the card says why, shows the changed lines and asks you to keep or revert it.
 - `/undo` one note, `/revert <run-id>` one run, `/revert --source paper.pdf` everything one document produced, however far it spread. A deleted note waits in the trash until you bring it back or delete it for good.
-- When a new source contradicts a note, the contradiction stays written on the note until you resolve it; `/contested` lists them.
+- When a new source contradicts a note, the contradiction stays written on the note until you resolve it; `/contested` lists them with their age; while one is open the dot on SILICA lights, and its menu lists them. `/contradictions` lists what the source checks found between your notes, without writing anything. The note's drawer sets both sides side by side, each opening at its line, and settles one in four ways: this note holds, the other holds, both hold under a condition you write, or keep it open. The outcome and its date stay in the note as text, and one undo takes back every note it touched.
 - A flashcard whose answer is not in the note it cites is dropped before you see it; a slide point that is not in its note is named under the deck.
 - `/verify` vouches for a note as you, bound to its text. `/stale` lists the notes whose source changed and the notes Silica wrote that were since edited by hand.
 
@@ -122,8 +128,16 @@ Silica is single-user: one person, one vault. There are no per-person permission
 - Vault instructions, written once in Settings, are read by every chat over the vault.
 - Silica keeps what a later chat will need and says so in the answer, unless the chat has brought in outside text such as a web page or a file. `/memory` shows what it holds, `/remember` saves your words as typed, `/incognito` keeps a chat off the record.
 - The Calendar holds events, deadlines and the day each study plan is due; click or drag an empty time to add an event, with a reminder if you want one. `/agenda` lists a day or a week.
+- A decision is a note: `/decide` writes your words to `Decisions/` with why you took it, what you expect and a day to review it; any note becomes one by gaining `decision: true`. `/outcome` adds what happened, dated, `/decisions` lists them, and the Calendar shows each on its review day and in its Decisions view, expected beside outcomes. Nothing judges one against the other but you.
 - A request you make in 3 separate chats, never undone, becomes a proposed skill drafted from your own words. It runs only once you install it from Settings › Skills.
 - `/curate` plans links, orphans and duplicates, and `/aliases` proposes other names for note titles; both write only with `--apply`.
+- What they propose waits in `/review`, with `/organize`'s dry runs, the writes the check refused and the notes whose code moved on. `/review apply` lands a selection as one run `/revert` takes back, `/review dismiss` forgets a proposal for good; Examine's Review row does the same with buttons.
+
+**Write science notes by hand.** The editor needs no model for any of this.
+
+- Formulas are LaTeX, and `$\ce{H2SO4}$` or `$\ce{2H2 + O2 -> 2H2O}$` writes chemistry as mhchem does; a ```` ```smiles ```` block draws the molecule, as Obsidian's Chem plugin reads it. Type a name in English or Italian inside a formula or a smiles block ("acido solforico", "pythagoras") and pick the formula or the molecule from the list.
+- A table is a grid: click a cell to edit it, Tab and Enter move on, and a bar adds or removes rows and columns. "Edit as text" shows the Markdown.
+- A pasted web address becomes a link named after its page. Pointing at a `[[link]]` shows the note it leads to.
 
 ## How a write is checked
 
@@ -205,7 +219,7 @@ Where Silica is behind: no native phone app, no audio or video overviews, and a 
 Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://github.com/kiycoh/silica-core), the retrieval engine Silica is built on, with no model in the loop.
 
 <details>
-<summary><b>All 63 commands</b></summary>
+<summary><b>All 69 commands</b></summary>
 
 <br/>
 
@@ -217,13 +231,15 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/nucleate <file...> [--target=DIR] [--hub=H]` | bring files in: notes via Injector FSM, code as skeleton stubs |
 | `/promote [<key>]` | session memory -> a note: list what keeps recurring, promote one through the gate |
 | `/web [keywords]` | answer from the web instead of the vault, cited; bare /web re-asks your last question |
+| `/council "<question>"` | one search of the vault, the same question to 2 to 5 models of `SILICA_COUNCIL_MODELS`, and a cited synthesis of where they agree and disagree, each member's answer folded under it |
 | `/organize "<intent>" [--scope=FOLDER] [--file=taxonomy.yaml] [--merge] [--move-uncategorized] [--apply]` | classify and reorganize vault notes according to a taxonomy |
 | `/summarize <note|folder...>` | read-only digest of one or more notes in chat (key points, tables) |
 | `/explain "<concept>" [--level=intro|expert]` | explain a concept grounded in the vault, at the chosen register |
 | `/compare "<A>" "<B>" [...]` | comparison table of notes/concepts; surfaces contradictions |
-| `/quiz [note|folder] [--n=10]` | active-recall quiz; graded answers resurface the notes you miss. No target = review queue |
+| `/quiz [note|folder] [--n=10] [--choice]` | active-recall quiz; graded answers resurface the notes you miss. No target = review queue; `--choice` asks each question among four options |
 | `/flashcards <note|folder> [--n=12] [--save=<path>]` | question-and-answer cards from the notes' checked points; `--save` writes them for the Spaced Repetition plugin |
 | `/slides <note|folder> [--save=<path>]` | a slide deck of what the notes say; `--save` writes it for Obsidian's Slides |
+| `/page "<what>"` | a self-contained HTML page, or a small site, built from the notes into `Pages/`; opens sandboxed in the app |
 | `/memorize [plan] [--n=8] [--plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]] [--teach <note>] [--status [plan]]` | a study session graded against the source line, a plan note to continue or write, a teach-back, or the readings in one line; the Memorize tab is the same engine with a screen; `/learn`, its name before, still runs it |
 | `/relate <note> [--n=8]` | typed relationship map: how/why one note relates to its vault neighbors |
 | `/schematize <note|folder|topic> [--save=<path>]` | Markdown table schematizing a note, folder, or topic |
@@ -239,10 +255,13 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/remember [text]` | save your text as typed to this vault's memory, no model involved; bare, asks silica to keep what you just said |
 | `/memory` | show what silica remembers about you and this vault, with file paths and budgets |
 | `/agenda [today|week|YYYY-MM-DD]` | per-day merge of events, dated notes, agent activity and review due |
+| `/decide <decision> [--why ...] [--expect ...] [--review YYYY-MM-DD] [--target DIR]` | write a decision as a note in Decisions/, as typed, no model involved |
+| `/outcome <note> <what happened> [--status kept\|changed\|reversed]` | add a dated outcome to a decision note |
+| `/decisions [open\|due\|all]` | list decision notes, those due for review first, with what was expected and the last outcome |
 | `/convert <file...> [--target=DIR]` | transcode a non-.md file (PDF) into a markdown note in the inbox |
 | `/web-search "<concept>" [--max-searches=N]` | research a concept on the web -> cited findings note in the Inbox (then /nucleate) |
 | `/keep` | save the last /web answer as a cited note in the Inbox (then /nucleate) |
-| `/fetch <url>` | read one URL (YouTube gives its transcript) -> verbatim note in the Inbox |
+| `/fetch <url>` | read one URL (YouTube gives its transcript, Reddit its thread, GitHub its README, file or issue) -> verbatim note in the Inbox |
 | `/status [run_id]` | progress digest of the last run |
 | `/embed [folder] [--force]` | build/update embedding index |
 | `/cooccur [folder] [--force]` | build/update co-occurrence index (without embedder) |
@@ -255,7 +274,7 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/undo [note-path]` | undo the last patch on a note |
 | `/delete <path>` | delete a note, even one other notes link to; says which links it left pointing nowhere, /undo brings it back |
 | `/trash [restore <path> | erase <path> | empty]` | the notes deleted from this vault: bring one back, or delete for good |
-| `/review [--flush=HASH]` | inspect the async review queue (deferred ops) |
+| `/review [apply <id…\|kind\|all> \| dismiss <id…\|kind>]` | the review queue: refused writes, /curate, /aliases and /organize proposals and stale notes, accepted as one revertible run or dismissed for good |
 | `/anneal [--steer] [--limit=N]` | retry every deferred bundle against the current vault; --steer escalates what still fails |
 | `/revert [run-id | --source <file>]` | revert a whole run (bare: the newest; or the RUN id /status prints, whole or its first characters), or every run derived from one source |
 | `/zotero [file|group|unlink|grant] [--apply|--yes]` | the linked Zotero library: status, file the inbox, write groups, unlink |
@@ -270,7 +289,8 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/impact [<git-range>]` | changed files -> affected notes (documenting + 1-hop import neighbors); no range = uncommitted changes |
 | `/plans` | list plans/ notes grouped by status: (todo\|in-progress\|blocked\|done) |
 | `/path <noteA> <noteB>` | shortest reading path between two notes (wikilinks + co-occurrence) |
-| `/contested` | list notes flagged contested: true with their unresolved contradictions |
+| `/contested` | list the open contradictions, each with its age and both sides; the app's note drawer settles them |
+| `/contradictions [folder] [--check]` | contradictions the source checks found between notes, proposed and never written; --check first checks the notes never checked, 40 at a time |
 | `/verify <note> [--clear] [--as "<name>"]` | vouch for a note as a person (OKF verified, bound to the body); --clear withdraws, --as signs with a name |
 | `/check <note>` | read a note you wrote against the vault, block by block: what a source contradicts or overstates, links, identifiers, dates and quotations, by grade; never edits it. In the app, `check sources` in the note's menu underlines the text |
 

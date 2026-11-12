@@ -55,6 +55,7 @@ DEMO_OFF: dict[str, tuple[str, ...]] = {
     "routes": (
         # an upload is personal data, and an import reaches the internet
         "/chat/files/add", "/vault/import", "/vault/fetch", "/vault/save", "/mail/upload", "/note/asset",
+        "/note/link-title",
         # Settings and what only Settings reaches. The Caddy block that refuses
         # /settings/*, /endpoints, /zotero and /bug_report on a tenant's route
         # never sees the demo's hostname (ADR-0139 point 4).
@@ -70,5 +71,9 @@ DEMO_OFF: dict[str, tuple[str, ...]] = {
         "/jobs",
         # ADR-0142's two downloads: the owner has not decided (2026-10-31)
         "/vault/export",
+        # the review queue's yes writes the vault outside a turn (ADR-0165)
+        "/metrics/review",
+        # a page the chat wrote runs its own script (ADR-0171 point 7)
+        "/page",
     ),
 }

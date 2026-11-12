@@ -47,8 +47,11 @@ def day(when) -> str:
 
 
 def outcome(e: dict) -> str:
-    """met | assisted | missed, the receipt's words for one ledger line."""
-    if e.get("correct") and not e.get("hints") and not e.get("told"):
+    """met | assisted | missed, the receipt's words for one ledger line, and
+    the one rule of "met without help" that objectives, depth and a placement
+    read. A right pick among four is assisted: the options are the cue, and
+    recognising the answer is not recalling it (ADR-0168)."""
+    if e.get("correct") and not e.get("hints") and not e.get("told") and e.get("grader") != "choice":
         return "met"
     return "assisted" if e.get("correct") else "missed"
 
@@ -147,7 +150,8 @@ def history(path: str, entries: list[dict]) -> list[dict]:
     for e in sorted((e for e in entries if ledger_key(str(e.get("path") or "")) == key),
                     key=lambda e: str(e.get("ts")), reverse=True):
         o = outcome(e)
-        word = ("told the answer" if e.get("told") else "met with a hint" if o == "assisted"
+        word = ("told the answer" if e.get("told") else "chosen among four" if o == "assisted" and e.get("grader") == "choice"
+                else "met with a hint" if o == "assisted"
                 else "sure, but wrong" if o == "missed" and (e.get("conf") or 0) >= 70 else o)
         out.append({"ts": e.get("ts"), "day": day(e.get("ts")), "q": e.get("q", ""), "outcome": o, "word": word,
                     "conf": e.get("conf"), "rating": RATING_NAME.get(e.get("rating") or 0, ""),

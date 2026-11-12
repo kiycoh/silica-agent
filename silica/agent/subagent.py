@@ -115,9 +115,10 @@ def run_subagent_batch(
     wq.close()
 
     # One undo-journal run for the whole batch so /revert can undo the entire
-    # /enrich or /dedup.
-    from silica.kernel.write.gate import open_run
-    worker = RunContext.of_run(undo=open_run(f"{items[0].kind}-batch")).spawn(consume)
+    # /enrich or /dedup. A batch of the review queue (ADR-0165) is already in
+    # one, which the workers join: a second run would split one yes in two.
+    from silica.kernel.write.gate import current_run, open_run
+    worker = RunContext.of_run(undo=current_run() or open_run(f"{items[0].kind}-batch")).spawn(consume)
 
     with ThreadPoolExecutor(max_workers=mw, thread_name_prefix="subagent") as ex:
         futures = [ex.submit(worker, wq, agent, cancel_token) for _ in range(mw)]

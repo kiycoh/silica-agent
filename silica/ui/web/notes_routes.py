@@ -52,7 +52,9 @@ def note(path: str = ""):
     html = render.linkify(body, resolve)
     if props:
         html = html + render.render_frontmatter(props)
-    return {**_note_identity(canon, props), "html": html}
+    # `path` only when found: a miss and a name two notes share answer 200 with a sentence,
+    # and the hover preview (ADR-0161) shows nothing for those.
+    return {**_note_identity(canon, props), "path": canon, "html": html}
 
 
 def _note_identity(canon: str, props: dict | None) -> dict:
@@ -210,6 +212,24 @@ def note_raw(path: str = ""):
             "broken": _broken_links(text, resolve)}
 
 
+@router.get("/note/similar")
+def note_similar(path: str = ""):
+    """The notes nearest this one by cosine, for the list after its last line
+    (ADR-0164 point 2). `notes` is null when the vault or this note has no
+    vectors, which hides the list. Stored vectors only: opening a note makes no
+    model call, and so this route is no view's and no demo refuses it."""
+    from silica.kernel.recall.relatedness import similar_notes
+
+    resolve = note_resolver()
+    canon = resolve(path)
+    near = similar_notes(canon) if canon else None
+    if near is None:
+        return {"notes": None}
+    # Store keys carry no `.md`; the drawer opens a note by its vault path.
+    return {"notes": [{"name": r.name, "path": p, "similarity": r.similarity}
+                      for r in near if (p := resolve(r.path))]}
+
+
 @router.get("/raw")
 def raw_file(path: str = "", download: bool = False):
     """The raw a note names (ADR-0129 point 1): the PDF the drawer frames, or
@@ -219,6 +239,24 @@ def raw_file(path: str = "", download: bool = False):
     headers, whose `sandbox` keeps a navigated file off the GUI's origin;
     checked 2026-11-03, Chrome 156 and Firefox 158 still draw a PDF under
     them, in an iframe and at #page=N."""
+    found = _raw_path(path)
+    attach = download or found.suffix.lower() not in render.RAW_OPENS
+    return FileResponse(found, headers=render.ASSET_HEADERS, filename=found.name,
+                        content_disposition_type="attachment" if attach else "inline")
+
+
+@router.get("/raw/cover")
+def raw_cover(path: str = ""):
+    """The cover of the raw a note names (ADR-0163), for its byline and the
+    PDF's header: reached through the note as /raw is, so on the server too."""
+    from silica.ui.web.library_routes import cover_response
+
+    return cover_response(_raw_path(path))
+
+
+def _raw_path(path: str) -> Path:
+    """The file the note `path` names as its raw, or 404: /raw's one rule,
+    which its cover keeps."""
     from silica.driver import get_driver
     from silica.driver.base import NoteRef
 
@@ -232,9 +270,7 @@ def raw_file(path: str = "", download: bool = False):
     _value, found = _raw_found(canon, split_shown(text)[0])
     if found is None:
         raise HTTPException(404)
-    attach = download or found.suffix.lower() not in render.RAW_OPENS
-    return FileResponse(found, headers=render.ASSET_HEADERS, filename=found.name,
-                        content_disposition_type="attachment" if attach else "inline")
+    return found
 
 
 @router.post("/note/save")
@@ -384,6 +420,29 @@ def _write_asset(canon: str, data: bytes, suffix: str) -> str:
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         atomic_write_bytes(root / rel, data)
     return rel
+
+
+@router.get("/note/link-title")
+async def note_link_title(request: Request, url: str = ""):
+    """The words a pasted address takes in its link (ADR-0161): the editor wrote `[url](url)`
+    at once and swaps in this title only if the person has not touched it. One page read under
+    /vault/fetch's guards, ceiling and clocks, nothing written and no model. Checked like a write
+    although it is a GET: it makes this server open a connection on another page's say-so."""
+    from silica.sources.web_fetch import link_title
+    from silica.ui.web.security import require_same_origin
+
+    require_same_origin(request)
+    url = url.strip()
+    if not url.lower().startswith(("http://", "https://")) or len(url) > 2048 or any(c.isspace() for c in url):
+        raise HTTPException(400, "a link is one web address, at most 2,048 characters")
+    try:
+        title = await asyncio.to_thread(link_title, url)
+    except Exception as exc:
+        # A private, oversized, refused or unreachable address keeps the link as pasted, which
+        # already works: a title is a nicety, so the answer is no title, not an error.
+        logger.info("no title for a pasted address: %s", type(exc).__name__)
+        title = ""
+    return {"title": title}
 
 
 @router.post("/note/render")
@@ -622,6 +681,22 @@ def note_history_restore(payload: dict):
         DRIVER.overwrite(note, body, loss=Loss.RESTORE)
         push_landed(note, prior, body, kind="restore", of=version)
     return {"restored": note, "id": payload.get("id")}
+
+
+@router.get("/page/{path:path}")
+def page(path: str):
+    """A page the chat wrote (ADR-0171), by its vault path, and any vault image it
+    names by a relative one: path-shaped, so a site's links and its images resolve
+    against the page as they do on disk. Every account's, on the server too: the
+    page runs in its own origin (render.PAGE_HEADERS), never the app's."""
+    from silica.kernel.write.pages import is_page, page_file
+
+    if is_page(path):
+        found = page_file(Path(CONFIG.vault_path), path)
+        if found is None:
+            raise HTTPException(status_code=404)
+        return FileResponse(found, media_type="text/html", headers=render.PAGE_HEADERS)
+    return asset(path)
 
 
 @router.get("/asset")

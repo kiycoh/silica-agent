@@ -287,12 +287,12 @@ function renderWikis() {
   wikisSized.disconnect();
   if (!cat) {
     from.replaceChildren();
-    body.replaceChildren(mkEl("p", "pp-status", "Wikis could not be read."));
+    body.replaceChildren(mkEl("p", "pp-status", "Wikis could not be reached. Check your connection, then open Wikis again."));
     return;
   }
   from.replaceChildren("from ", mkEl("b", "", cat.host), `, read ${wikisAgo(cat.read_at)}`);
   if (!cat.wikis.length) {
-    body.replaceChildren(mkEl("p", "pp-status", "No wiki is in Wikis yet."));
+    body.replaceChildren(mkEl("p", "pp-status", "No wiki is in Wikis yet. A wiki people publish shows here once it is reviewed; My wikis is where you make your own."));
     return;
   }
   const search = Object.assign(document.createElement("input"), { type: "search", className: "pg-sel", placeholder: "Search Wikis" });

@@ -19,6 +19,9 @@ heads its row and leaves the dated-notes list, for the reason event notes do.
 A study plan lands on its `by` day and nowhere else: the deadline is the one
 date a plan states, and spreading it over the days before would be a schedule
 the reader never chose.
+
+An open decision (ADR-0167) lands as a task does: on its `review_on` day while
+that is ahead, on today's row once it has come, until an outcome closes it.
 """
 from __future__ import annotations
 
@@ -68,19 +71,20 @@ def agenda(win_start: dt.date, win_end: dt.date, *,
            today: dt.date,
            tasks: Sequence[Task] = (),
            dailies: dict[str, dt.date] | None = None,
-           plans: Sequence[dict] = ()) -> list[dict]:
+           plans: Sequence[dict] = (),
+           decisions: Sequence[dict] = ()) -> list[dict]:
     """One DayRow per day of the half-open window [win_start, win_end).
 
-    DayRow: {date, daily, events, notes, tasks, activity, review, plans}, all
-    JSON-ready. `dailies` is the vault's daily notes, path -> day; `plans` is
-    `plans.list_plans()`.
+    DayRow: {date, daily, events, notes, tasks, activity, review, plans,
+    decisions}, all JSON-ready. `dailies` is the vault's daily notes, path ->
+    day; `plans` is `plans.list_plans()`; `decisions` is `decisions.scan()`.
     """
     by_day: dict[str, dict] = {}
     d = win_start
     while d < win_end:
         by_day[d.isoformat()] = {"date": d.isoformat(), "daily": None, "events": [],
                                  "notes": [], "tasks": [], "activity": [], "review": [],
-                                 "plans": []}
+                                 "plans": [], "decisions": []}
         d += dt.timedelta(days=1)
 
     daily_stems: set[str] = set()
@@ -119,6 +123,16 @@ def agenda(win_start: dt.date, win_end: dt.date, *,
         row = by_day.get(str(p.get("by") or "")[:10])
         if row is not None:
             row["plans"].append({"name": p["name"], "path": p["path"], "status": p["status"]})
+
+    for dec in decisions:
+        try:
+            review = dt.date.fromisoformat(str(dec.get("review_on") or "")[:10])
+        except ValueError:
+            continue  # no review day, or one written as words: nothing to land on
+        row = by_day.get(max(review, today).isoformat()) if dec.get("status") == "open" else None
+        if row is not None:
+            row["decisions"].append({"name": dec["name"], "path": dec["path"],
+                                     "review_on": review.isoformat(), "overdue": review < today})
 
     for line in log_lines:
         m = _LOG_LINE_RE.match(line.strip())

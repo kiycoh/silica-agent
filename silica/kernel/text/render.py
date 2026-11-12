@@ -366,17 +366,19 @@ def _inline_ofm(text: str, resolve, link, asset, mentions=None) -> str:
 
 
 def _ofm_blocks(tokens) -> None:
-    """OFM block sugar, rewriting the token stream in place: ```mermaid fences
-    become client-rendered <pre class="mermaid">, `> [!kind] title` blockquotes
+    """OFM block sugar, rewriting the token stream in place: ```mermaid and ```smiles
+    fences become client-rendered <pre class="mermaid|smiles">, `> [!kind] title` blockquotes
     become callouts, and `- [ ]` list items become checkbox tasks."""
     from markdown_it.token import Token
 
     i = 0
     while i < len(tokens):
         tok = tokens[i]
-        if tok.type == "fence" and tok.info.strip() == "mermaid":
+        # A ```smiles fence (Obsidian Chem's syntax) is a molecule the page draws
+        # with smiles-drawer, as it draws mermaid (ADR-0159); unread, it is its source.
+        if tok.type == "fence" and tok.info.strip() in ("mermaid", "smiles"):
             raw = Token("html_block", "", 0)
-            raw.content = f'<pre class="mermaid">{_html.escape(tok.content)}</pre>\n'
+            raw.content = f'<pre class="{tok.info.strip()}">{_html.escape(tok.content)}</pre>\n'
             tokens[i] = raw
         elif tok.type == "math_block":
             raw = Token("html_block", "", 0)
@@ -486,7 +488,12 @@ def mathml(tex: str, display: bool) -> str:
     try:
         from latex2mathml.converter import convert
 
-        out = convert(tex, display="block" if display else "inline")
+        from silica.kernel.text import mhchem
+
+        # `\ce{}` and `\pu{}` become plain LaTeX first (ADR-0159); one the grammar
+        # cannot read raises here, and the whole formula shows as its source.
+        out = convert(mhchem.expand(tex) if "\\ce" in tex or "\\pu" in tex else tex,
+                      display="block" if display else "inline")
         probe = _MathMLProbe()
         probe.feed(out)
         probe.close()
@@ -565,8 +572,10 @@ def _escape_table_aliases(text: str) -> str:
     if "|" not in text:
         return text
 
+    # `\vert{}` and not `\vert `: a formula ending on its bar (`$|x|$`) left a space
+    # before the closing `$`, which dollarmath does not close on, and drew as source.
     def math(m: re.Match) -> str:
-        return "$" + m.group(1).replace("\\|", "\\Vert ").replace("|", "\\vert ") + "$"
+        return "$" + m.group(1).replace("\\|", "\\Vert{}").replace("|", "\\vert{}") + "$"
 
     return "\n".join(_TABLE_MATH.sub(math, _TABLE_ALIAS.sub(r"[[\1\\|\2]]", line))
                      if line.lstrip().startswith("|") else line for line in text.split("\n"))

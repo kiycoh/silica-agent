@@ -49,9 +49,11 @@ _SHOWN_PROPS = ("title", "tags", "date")
 # built on a laptop carries its own copy in _s/ so its folder opens from disk. mermaid.min.js is
 # the app's own copy, which pages.js loads only on a note that holds a diagram (owner, 2026-11-02):
 # the policy runs scripts from /_s/ alone, so it is a file there and never a script in a page.
+# smiles-drawer.min.js is the same for a ```smiles molecule (ADR-0159).
 # body.css and cover.js are the app's as much as a page's, so each is one file both load.
 _STATIC = ("pages/pages.css", "pages/body.css", "pages/pages.js", "pages/cover.js", "archivo-latin.woff2",
-           "martian-mono-latin.woff2", "host-grotesk-latin.woff2", "host-grotesk-OFL.txt", "mermaid.min.js")
+           "martian-mono-latin.woff2", "host-grotesk-latin.woff2", "host-grotesk-OFL.txt", "mermaid.min.js",
+           "smiles-drawer.min.js")
 _LANGS = {"italian": "it", "english": "en", "spanish": "es", "french": "fr",
           "german": "de", "portuguese": "pt"}
 # shortcut: past this many linked notes the cover keeps the best linked ones, so the layout stays
@@ -566,7 +568,8 @@ def _write_wiki(slug: str, conf: dict, vault: Path, site: _Site, build_dir: Path
         (build_dir / "index.html").write_text(_vault_page(manifest, c, site, h, lang), encoding="utf-8")
     return {"manifest": manifest, "notes_md": notes_md, "shown": shown, "blocked": blocked,
             "images": sum(1 for v in copied.values() if v),
-            "diagram": any('<pre class="mermaid">' in r["html"] for r in rendered.values())}
+            "diagram": any('<pre class="mermaid">' in r["html"] for r in rendered.values()),
+            "molecule": any('<pre class="smiles">' in r["html"] for r in rendered.values())}
 
 
 def build_file(slug: str, vault: Path | None = None) -> tuple[Path, dict]:
@@ -612,6 +615,8 @@ def build_file(slug: str, vault: Path | None = None) -> tuple[Path, dict]:
         static = static_files()
         if not w["diagram"]:
             static.pop("mermaid.min.js", None)  # 3.4 MB that pages.js loads only for a diagram
+        if not w["molecule"]:
+            static.pop("smiles-drawer.min.js", None)
         (tree / "_s").mkdir()
         for name, blob in static.items():
             (tree / "_s" / name).write_bytes(blob)

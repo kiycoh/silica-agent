@@ -345,15 +345,16 @@ def _render(pdf, indices: list[int]):
             if blank:
                 yield i, None
             continue
-        png = png_gray(rows.translate(_LEVELS), w, h)
-        spent += len(png)
+        drawn = png(rows.translate(_LEVELS), w, h)
+        spent += len(drawn)
         if spent > _IMAGE_BYTES:
             return
-        yield i, png
+        yield i, drawn
 
 
-def png_gray(rows: bytes, width: int, height: int) -> bytes:
-    """An 8-bit grayscale PNG of `rows` (each a filter byte, then `width` pixels).
+def png(rows: bytes, width: int, height: int, rgb: bool = False) -> bytes:
+    """An 8-bit PNG of `rows` (each a filter byte, then `width` pixels), gray,
+    or RGB for a cover (ADR-0163).
 
     Over zlib and struct, because Pillow is not a dependency of the hosted
     install and the child imports nothing else (ADR-0087 amendment point 1)."""
@@ -364,8 +365,36 @@ def png_gray(rows: bytes, width: int, height: int) -> bytes:
         return struct.pack(">I", len(body)) + tag + body + struct.pack(">I", zlib.crc32(tag + body))
 
     return (b"\x89PNG\r\n\x1a\n"
-            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2 if rgb else 0, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(rows, 6)) + chunk(b"IEND", b""))
+
+
+# A cover's height in device pixels: 160 CSS px at 2x (ADR-0163). The width is
+# held to twice that, so a page whose MediaBox is a hair tall and a mile wide
+# cannot ask for a bitmap the size of its own width.
+COVER_HEIGHT = 320
+
+
+def _cover(pdf) -> bytes | None:
+    """The first page in colour, COVER_HEIGHT tall, as PNG; None for a
+    document with no page."""
+    import pypdfium2.raw as raw
+
+    if not len(pdf):
+        return None
+    page = pdf[0]
+    try:
+        width, height = page.get_size()
+        scale = min(COVER_HEIGHT / max(height, 1.0), 2 * COVER_HEIGHT / max(width, 1.0)) * (1 - 1e-9)
+        bitmap = page.render(scale=scale, rev_byteorder=True, force_bitmap_format=raw.FPDFBitmap_BGR)
+        try:
+            w, h, stride = bitmap.width, bitmap.height, bitmap.stride
+            pixels = bytes(bitmap.buffer)
+        finally:
+            bitmap.close()
+    finally:
+        page.close()
+    return png(b"".join(b"\x00" + pixels[y * stride:y * stride + w * 3] for y in range(h)), w, h, rgb=True)
 
 
 class _Refused(Exception):
@@ -620,6 +649,37 @@ def metadata(path: str | os.PathLike) -> dict:
             pdf.close()
 
 
+def cover_png(path: str | os.PathLike) -> bytes | None:
+    """The PDF's first page drawn small, for the Library's cover (ADR-0163);
+    None for a file PDFium cannot draw, whose cover is the title's tile. On the
+    server in the limited child, as every open of an uploaded PDF is
+    (ADR-0087 point 2); here under the one-thread lock."""
+    import base64
+    import logging
+
+    from silica.config import hosted
+
+    try:
+        require_header(path)
+        if hosted():
+            out = _run_child(path, ["cover"], TOO_LARGE)
+            line = json.loads(out[:out.find(b"\n")]) if b"\n" in out else {}
+            return base64.b64decode(line["png"], validate=True) if isinstance(line.get("png"), str) else None
+        import pypdfium2 as pdfium
+
+        with _PDFIUM:
+            pdf = pdfium.PdfDocument(os.fspath(path))
+            try:
+                return _cover(pdf)
+            finally:
+                pdf.close()
+    except Exception:
+        # Any failure is the file's (no header, a password, a page that will not
+        # draw, a child past its limits): the Library shows the title's tile.
+        logging.getLogger(__name__).info("pdf cover not drawn", exc_info=True)
+        return None
+
+
 def cached(path: str | os.PathLike) -> dict | None:
     """The last read of `path`, for a caller that reports on it after converting.
 
@@ -869,6 +929,23 @@ def _child(fd: int, vision: int, kind: str = "pdf", pages: list[int] | None = No
         # Python's buffer, and the text must already be in the pipe.
         out.flush()
 
+    if kind == "cover":
+        try:
+            import base64
+
+            import pypdfium2 as pdfium
+
+            with os.fdopen(fd, "rb") as fh:
+                pdf = pdfium.PdfDocument(fh)
+                try:
+                    drawn = _cover(pdf)
+                finally:
+                    pdf.close()
+            emit({"png": base64.b64encode(drawn).decode("ascii") if drawn else None})
+        except Exception:
+            # The file's failure: the parent reads no png and shows the tile.
+            emit({"error": "malformed"})
+        return 0
     if kind == "docx":
         try:
             import io
@@ -911,7 +988,7 @@ if __name__ == "silica.sources.pdf_extract":
     _engine.pdf_reader = sys.modules[__name__]
 
 if __name__ == "__main__":
-    if sys.argv[2:3] == ["docx"]:
-        sys.exit(_child(int(sys.argv[1]), 0, "docx"))
+    if sys.argv[2:3] in (["docx"], ["cover"]):
+        sys.exit(_child(int(sys.argv[1]), 0, sys.argv[2]))
     sys.exit(_child(int(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else 0,
                     pages=[int(i) for i in sys.argv[3].split(",")] if len(sys.argv) > 3 else None))
