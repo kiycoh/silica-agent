@@ -171,7 +171,7 @@ SHARED_TOOLS = {
     "web_fetch", "web_search",
 }
 SHARED_COMMANDS = {
-    "/aliases", "/anneal", "/changes", "/check", "/clear", "/connect", "/contested", "/convert",
+    "/aliases", "/anneal", "/changes", "/check", "/clear", "/connect", "/contested", "/convert", "/council",
     "/cooccur", "/curate", "/dedup", "/delete", "/embed", "/enrich", "/episodes", "/exit", "/fetch",
     "/find", "/flashcards", "/graph", "/help", "/impact", "/incognito", "/keep", "/lexical", "/mail",
     "/map", "/memory", "/migrate", "/model", "/new", "/nucleate", "/organize", "/path", "/persona",

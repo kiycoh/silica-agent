@@ -210,20 +210,24 @@ def _drawn(result: Result) -> tuple[str, Callable[[], str], dict]:
         saved = user_memory.describe(result.saved)
         return saved, lambda: render.linkify(saved, remote_images=False), {"memory": user_memory.undo_payload(result.saved)}
     if (answer := result.answer) is not None:
-        return answer, lambda: render.answer_html(answer, []), {}
+        return answer, lambda: render.answer_html(answer, []), {"notes": result.notes}
     shown = plain(result.lines)
     block = f"```text\n{shown}\n```" if shown else "```text\n(done)\n```"
     return block, lambda: render.linkify(block, note_resolver(), remote_images=False), {}
 
 
-def _answered(messages: list[dict], typed: dict, answer: str, *, narrated: bool = False) -> None:
-    """A command's whole exchange, which no model answered."""
+def _answered(messages: list[dict], typed: dict, answer: str, *, narrated: bool = False,
+              notes: Sequence[dict] = ()) -> None:
+    """A command's whole exchange, which no model answered, with the lines under
+    it stored on the answer, as a turn's are (turn_notes), before the beat."""
+    from silica.agent import turn_notes
     from silica.obs import narration as _narr
 
     messages.append(typed)
     if not narrated:
         session.narrate_user_turn(typed)
     messages.append({"role": "assistant", "content": answer})
+    turn_notes.attach(messages, list(notes))
     _narr.NARRATOR.turn(messages[-1])
 
 
@@ -348,7 +352,7 @@ async def run_turn(ask: Ask) -> AsyncIterator[dict]:
                 # Appended only once the verdict is in: a directive falls through
                 # to the agent below, which appends the expanded turn itself.
                 answer, html, extra = _drawn(result)
-                _answered(messages, typed, answer, narrated=bool(told))
+                _answered(messages, typed, answer, narrated=bool(told), notes=result.notes)
                 if result.answer is not None:
                     meter.update_context_tokens(messages)
                 line.outcome = "done"

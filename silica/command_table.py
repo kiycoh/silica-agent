@@ -87,7 +87,8 @@ class Result:
     The rest says how the command ended. With none of them set it did the whole
     job. `directive`: the model is asked this. `error`: why the line cannot run,
     shown as an error and asked of nobody. `answer`: Markdown that is the reply
-    itself, which a code block would not render (the formulas on a card). `saved`:
+    itself, which a code block would not render (the formulas on a card); `notes`
+    are the lines under it (agent.turn_notes), /council's meter. `saved`:
     a write to memory, `user_memory.save`'s record, which the browser draws with its
     Undo. `batch`: the event a REPL's panel opens on.
     """
@@ -97,6 +98,7 @@ class Result:
     directive: str | None = None
     error: str | None = None
     answer: str | None = None
+    notes: list[dict] = field(default_factory=list)
     saved: dict | None = None
     batch: Any = None
 
@@ -271,6 +273,15 @@ COMMANDS: tuple[Command, ...] = (
             "/web",
         ),
         demo_off=True,
+    ),
+    Command(
+        name="/council",
+        group="workflow",
+        usage='"<question>"',
+        summary="one search of the vault, the same question to 2 to 5 models of SILICA_COUNCIL_MODELS, "
+                "and a cited synthesis of where they agree and disagree",
+        examples=('/council "what do my notes say causes inflation?"',),
+        handler="silica.commands.council:council", shlex=True, demo_off=True,
     ),
     Command(
         name="/keep",

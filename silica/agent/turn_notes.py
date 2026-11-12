@@ -23,7 +23,8 @@ KEY = "silica_turn_notes"
 # nothing about the answer, so it is last. A general-knowledge block (ADR-0169)
 # follows the retrieval that came up empty before it, and says where the
 # answer's uncited part came from before the numbers check names any of it.
-KINDS = ("retrieval", "general", "numbers", "grounding", "graph", "skill")
+# /council's meter (ADR-0170) counts what the answer cost, after all of that.
+KINDS = ("retrieval", "general", "numbers", "grounding", "graph", "council", "skill")
 
 
 def ordered(notes: list[dict]) -> list[dict]:
