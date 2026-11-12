@@ -94,11 +94,13 @@ def _day(stamp: object) -> str:
 def _bounded(head: str, blocks: list[str], total: int, how: str = "") -> str:
     """`head`, then as many of `blocks` as the ceiling holds, under one line
     saying how many of `total` comments they are. The line goes first, so it is
-    read before the comments it counts."""
-    head = wf.truncate(head, wf._MAX_CHARS - _HEAD_ROOM)
+    read before the comments it counts. A fence left open closes where its
+    post or comment ends, as the site draws it, or every comment after it
+    reads as code."""
+    head = wf.close_fence(wf.truncate(head, wf._MAX_CHARS - _HEAD_ROOM))
     room = wf._MAX_CHARS - len(head) - _HEAD_ROOM
     kept: list[str] = []
-    for block in blocks:
+    for block in map(wf.close_fence, blocks):
         room -= len(block) + 2
         if room < 0:
             break

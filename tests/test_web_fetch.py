@@ -896,6 +896,16 @@ def test_truncation_leaves_balanced_fences_alone():
     assert out.count("```") == 2
 
 
+def test_truncation_closes_a_fence_that_names_its_language():
+    """An opening fence carries its language (```bash) and a closing one is
+    bare: counting only bare lines left a README cut inside its third block
+    open, its marker and the note's Sources drawn as code."""
+    text = "```bash\na\n```\n\n```py\nb\n```\n\n```sh\n" + "echo hi\n" * 40
+    body, marker = wf.truncate(text, limit=80).rsplit("\n\n", 1)
+    assert body.endswith("\n```") and marker.startswith("[truncated at 80")
+    assert sum(ln.startswith("```") for ln in body.splitlines()) == 6
+
+
 # --- image alt text ---------------------------------------------------------
 
 

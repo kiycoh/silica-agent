@@ -152,6 +152,19 @@ def test_reddits_refusal_is_named_and_nothing_is_written(served, status, words, 
     assert sorted(vault.rglob("*")) == before
 
 
+def test_a_code_fence_left_open_closes_where_its_post_or_comment_ends(served):
+    """Reddit closes a fence at the end of the comment that opened it; the note
+    did not, and every comment after it, with the note's Sources, read as code
+    (driven in the GUI drawer, 2026-11-12)."""
+    table, _ = served
+    table["https://www.reddit.com/"] = _resp(_thread(
+        [_comment("c1", "coder", "Try:\n\n```python\nprint(1)\n"), _comment("c2", "next", "Thanks.")],
+        selftext="```\nopen post"))
+    text = sf.page("https://redd.it/abc123").text
+    assert text.index("open post") < text.index("\n```", text.index("open post")) < text.index("## Comments")
+    assert text.index("print(1)") < text.index("\n```", text.index("print(1)")) < text.index("**u/next**")
+
+
 def test_a_login_page_instead_of_the_listing_is_refused(served):
     table, _ = served
     table["https://www.reddit.com/"] = _resp(text="<html>log in</html>", ctype="text/html")

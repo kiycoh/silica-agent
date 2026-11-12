@@ -396,12 +396,18 @@ def truncate(text: str, limit: int = _MAX_CHARS) -> str:
     """Hard ceiling with a visible marker, so the model knows it saw a prefix."""
     if len(text) <= limit:
         return text
-    cut = text[:limit].rstrip()
-    # An odd fence count means the cut landed inside a code block. Close it, or
-    # the truncation marker (and, in the vault, nothing else) renders as code.
-    if sum(1 for ln in cut.splitlines() if ln.strip() == _FENCE) % 2:
-        cut = f"{cut}\n{_FENCE}"
-    return f"{cut}\n\n[truncated at {limit} characters]"
+    # A cut inside a code block closes it, or the truncation marker (and, in
+    # the vault, everything after it) renders as code.
+    return f"{close_fence(text[:limit].rstrip())}\n\n[truncated at {limit} characters]"
+
+
+def close_fence(text: str) -> str:
+    """`text` with a code fence it left open closed at its end. Lines that
+    start with a fence are counted, not lines that are one: an opening fence
+    names its language (```bash) and only the closing one is bare."""
+    if sum(1 for ln in text.splitlines() if ln.lstrip().startswith(_FENCE)) % 2:
+        return f"{text}\n{_FENCE}"
+    return text
 
 
 _MAX_TITLE = 120
