@@ -357,3 +357,19 @@ def test_a_model_changed_in_settings_brings_its_window(client, env_file, monkeyp
     monkeypatch.setattr(CONFIG, "max_context_tokens", 8192)   # what a narrow model left
     assert tc.post("/settings", json={"key": "SILICA_MODEL", "value": "openrouter/x/other"}).status_code == 200
     assert CONFIG.max_context_tokens == 65536
+
+
+def test_the_general_knowledge_switch_rebuilds_the_new_chat_seed(client, env_file, monkeypatch):
+    """ADR-0169: the rule is in the seed's prompt, which the last turn built."""
+    c, _server = client
+    rebuilt: list[bool] = []
+    monkeypatch.setattr("silica.ui.web.session.prewarm_seed", lambda: rebuilt.append(True))
+    monkeypatch.setattr(st, "SHELL_ENV", frozenset())
+    monkeypatch.setattr(CONFIG, "general_knowledge", True)
+    r = c.post("/settings", json={"key": "SILICA_GENERAL_KNOWLEDGE", "value": "false"})
+    assert r.status_code == 200 and rebuilt == [True]
+    assert CONFIG.general_knowledge is False
+    from silica.prompts import GENERAL_HEAD
+    from silica.ui.web.session import build_seed
+
+    assert GENERAL_HEAD not in build_seed()[0][0]["content"]
