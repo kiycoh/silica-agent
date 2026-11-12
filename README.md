@@ -42,6 +42,8 @@ silica init       # pick a model: a hosted API key, or a local LM Studio / Ollam
 silica --gui      # serves http://localhost:8765, open it in your browser; plain `silica` opens the terminal instead
 ```
 
+Skipped `silica init`? With no model set, the web app walks you through choosing one: paste an OpenRouter key, or use LM Studio or Ollama found running on this computer.
+
 Then type `/report`. It is read-only: it writes one file, `GRAPH_REPORT.md`, and shows the hubs, bridges and orphans already in your vault. Search and the graph work with no model at all.
 
 <p align="center">

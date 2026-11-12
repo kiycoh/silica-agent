@@ -198,7 +198,7 @@ function injectorSummaryLine(label, s) {
     bits.push(`${s.failed_chunks.length} of ${s.committed + s.failed_chunks.length} chunks failed`);
   }
   const mark = SUMMARY_MARK[s.kind] || "✓";
-  return `${mark} injector · ${label}${bits.length ? "   " + bits.join(" · ") : ""}`;
+  return `${mark} into notes · ${label}${bits.length ? "   " + bits.join(" · ") : ""}`;
 }
 
 function makePipelineBlock(label, tracks) {
@@ -211,7 +211,7 @@ function makePipelineBlock(label, tracks) {
   const pos = el.querySelector(".pipe-pos");
   const bar = progressBar(0, "nucleation");
   el.querySelector(".pipe-head").after(bar);
-  head.textContent = `» injector · ${label}`;
+  head.textContent = `» into notes · ${label}`;
 
   // Both tracks are drawn once, greyed out, so the pipeline reads as a known
   // sequence with a position in it rather than a list that grows as it goes.
@@ -305,7 +305,7 @@ function makePipelineBlock(label, tracks) {
       running = null;
       bar.remove();
       const s = summary || { kind: "failed", reason: "", notes: 0, links: 0, files: 0, committed: 0, failed_chunks: [] };
-      const name = (head.textContent || "").replace(/^» injector · /, "");
+      const name = (head.textContent || "").replace(/^» into notes · /, "");
       el.classList.remove("running");
       el.classList.add(s.kind);
       head.textContent = injectorSummaryLine(name, s);
@@ -1173,6 +1173,9 @@ function setCtxTokens(m) {
 
 // Who answers in this session, filled by loadConfig (app-boot.js).
 let chatModels = null;
+// No model can answer yet (ADR-0172 point 1), as GET /config says; the setup
+// card (app-boot.js) shows while it holds.
+let setupNeeded = false;
 function renderCtxPanel() {
   const panel = $("#ctx-panel");
   const { used, max, parts, compactAt } = ctxMeter;
@@ -2398,6 +2401,10 @@ function autoGrow(el) {
 $("#composer").addEventListener("submit", (e) => {
   e.preventDefault();
   const t = input.value;
+  // A question with no model to answer it would fail: the card says what to do,
+  // and what was typed stays in the box. A /command still runs: /decide, /undo
+  // and /status need no model, and one that does says so in its own failure.
+  if (setupNeeded && !t.trim().startsWith("/")) { pointToSetup(); return; }
   // Files ride the turn they were attached to and cannot wait in a text
   // queue, so an attach during a turn keeps the box as it is.
   if (streaming && staged.length) return;
@@ -2701,6 +2708,7 @@ $("#dock-composer").addEventListener("submit", (e) => {
   e.preventDefault();
   const t = dockInput.value;
   if (!t.trim()) return;
+  if (setupNeeded && !t.trim().startsWith("/")) { showTab("chat"); pointToSetup(); return; }
   dockInput.value = "";
   autoGrow(dockInput);
   if (streaming) { queueMessage(t); return; } // the same queue as the chat composer (P20)

@@ -462,6 +462,11 @@ html:not([data-hosted]) .hp-hosted {
   display: none;
 }
 
+/* ...and one about what only a laptop has, /council and the setup card (ADR-0172). */
+html[data-hosted] .hp-local {
+  display: none;
+}
+
 /* What a demo refuses has no control (ADR-0139 point 6): the composer's +, the
    mics, the vault's +, the vault switch and Settings; again and edit, which
    ask a question through a route the door does not count; and a note's check
@@ -1165,6 +1170,15 @@ body.sidebar-collapsed #sidebar {
 
 .notice details > summary:hover {
   color: var(--frost);
+}
+
+/* a plain notice's remedy (ADR-0172 point 2), in the words' own face; the
+   doctor's text under it stays in the grid font */
+.notice-fix {
+  margin-top: 0.3rem;
+  color: var(--text);
+  font-size: var(--fs-meta);
+  line-height: 1.45;
 }
 
 /* the fix is usually a config blob: keep it selectable, cap how much it takes */

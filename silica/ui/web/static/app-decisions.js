@@ -111,7 +111,8 @@ async function renderDecisions(main) {
     d.decisions.length ? `${d.decisions.length} open` + (due ? `, ${due} due for review` : "") : "Decisions"));
   if (!d.decisions.length) {
     panel.appendChild(mkEl("p", "dec-empty",
-      "No open decisions. Write one with /decide in the chat, or give any note decision: true."));
+      "No open decisions. A decision you log sits here, what you expected beside what happened: "
+      + "type /decide and the decision in the chat to log your first."));
   }
   for (const x of d.decisions) panel.appendChild(decCard(x));
   main.replaceChildren(panel);

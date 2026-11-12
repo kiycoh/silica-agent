@@ -305,7 +305,7 @@ function calRenderTitle() {
   if (calMode === "month" || calMode === "decisions") {
     t.textContent = calMode === "decisions" ? "Decisions"
       : calAnchor.toLocaleString("en-US", { month: "long", year: "numeric" });
-    sub.textContent = "";
+    sub.textContent = calMode === "month" && calNothing() ? "nothing yet: click a day to add an event" : "";
     return;
   }
   const w = calWindow();
@@ -314,6 +314,15 @@ function calRenderTitle() {
   t.textContent = calMode === "agenda" ? "Agenda"
     : w.start.toLocaleString("en-US", { month: "long", year: "numeric" });
   sub.textContent = `${fmtDay(w.start)} to ${fmtDay(b)}`;
+  if (calMode !== "agenda" && calNothing()) sub.textContent += " · nothing yet: click or drag a time to add an event";
+}
+
+// Nothing at all in the days fetched, on any layer that is on by default: the
+// empty grid then says what it is for and the one first step (ADR-0172 point 3).
+function calNothing() {
+  const rows = Object.values(calDays);
+  return !!rows.length && !calPlans.length && rows.every((r) => !r.daily
+    && ["events", "notes", "tasks", "review", "plans", "decisions"].every((k) => !(r[k] || []).length));
 }
 
 // The month the side column jumps with. Its arrows page the small month alone;

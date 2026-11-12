@@ -2938,3 +2938,170 @@ body.demo-card :is(#dock-composer, #vh-ideas) {
   color: var(--frost);
   white-space: nowrap;
 }
+
+/* --- the first run without a terminal (ADR-0172 point 1) -------------------
+   The setup card stands over the box on the composer's measure and inset, in
+   the box's own border and the app's tokens: teal only on what can be pressed.
+   While it shows, the greeting and the ways to start go, since each is a
+   question nothing can answer yet. Important for the :has() rules of three
+   ids' weight that show them on an empty chat. */
+#view-chat:has(#setup-card:not([hidden])) :is(#vault-hero, #vh-ideas) {
+  display: none !important;
+}
+
+#setup-card {
+  box-sizing: border-box;
+  width: calc(100% - 4rem);
+  max-width: var(--measure);
+  margin: 0 auto 0.6rem;
+  padding: 1rem 1.1rem 1.05rem;
+  background: var(--glass);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+#setup-card h2 {
+  margin: 0 0 0.25rem;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--frost);
+}
+
+#setup-card h3 {
+  margin: 0 0 0.3rem;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+#setup-card p {
+  margin: 0 0 0.6rem;
+}
+
+#setup-card a {
+  color: var(--frost);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+.setup-lead {
+  color: var(--ash);
+}
+
+/* two columns while each keeps 18rem, one above the other under that */
+.setup-opts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+}
+
+.setup-opts[hidden] {
+  display: none;
+}
+
+.setup-opt {
+  min-width: 0;
+  padding: 0.75rem 0.85rem 0.8rem;
+  background: var(--slate-2);
+  border-radius: var(--r-sm);
+}
+
+.setup-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+#setup-key {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  background: var(--sheet);
+  color: var(--frost);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.45rem 0.55rem;
+}
+
+#setup-key:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.setup-rt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.6rem;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.setup-rt p {
+  flex: 1 1 14rem;
+  min-width: 0;
+  margin: 0 !important;
+}
+
+.setup-rt b {
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.setup-dim {
+  color: var(--ash-dim);
+}
+
+#setup-again {
+  margin-top: 0.35rem;
+  font-size: var(--fs-meta);
+}
+
+#setup-done p {
+  color: var(--frost);
+}
+
+#setup-said {
+  margin: 0.7rem 0 0 !important;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+#setup-said.failed {
+  color: var(--warn);
+}
+
+.setup-detail summary {
+  cursor: pointer;
+  color: var(--ash-dim);
+}
+
+.setup-detail pre {
+  margin: 0.3rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: var(--ash);
+}
+
+/* Explore on an empty vault (ADR-0172 point 3): the loading overlay's frame,
+   holding a sentence and the one first step instead of a wait */
+#graph-empty p {
+  max-width: 28rem;
+  margin: 0;
+  padding: 0 1.5rem;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1.55;
+  letter-spacing: normal;
+  color: var(--text);
+}

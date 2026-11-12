@@ -335,7 +335,7 @@ const vaultImportBox = $("#vault-import");
 // write. A saved note's build is a second, so the line waits that long before it
 // shows: a line at every save would be a flicker. A failure shows at once.
 const vectorsLine = $("#vectors-line");
-const VECTORS_SAY = { waiting: "Waiting for the embedder", index: "Reading the vault", vectors: "Reading for meaning" };
+const VECTORS_SAY = { waiting: "Waiting for the search model", index: "Reading the vault", vectors: "Reading for meaning" };
 let vectorsLast = { state: "idle" };
 let vectorsSoon = 0;
 
@@ -663,8 +663,8 @@ function renderVaultImport({ progress = "", step = 0, of = 0, rows = [], skipped
     const go = document.createElement("button");
     go.type = "button";
     go.className = "linklike";
-    go.textContent = "nucleate them";
-    go.title = "prefill /nucleate in the chat with what was imported";
+    go.textContent = "turn them into notes";
+    go.title = "write /nucleate in the chat with what was imported, to send when you are ready";
     go.addEventListener("click", () => {
       const target = folder ? where : done.flatMap((r) => r.notes || []).join(" ");
       showTab("chat");
@@ -1438,7 +1438,7 @@ function syncFileView() {
   const line = mkEl("span", "");
   line.append(mkEl("b", "", name), " " + fileSays(f, name));
   text.append(line);
-  const act = f.state === "unread" && !page ? { ocr: "OCR this", convert: "Convert this" }[f.act] : "";
+  const act = f.state === "unread" && !page ? { ocr: "Read the pages", convert: "Convert this" }[f.act] : "";
   if (act) {
     const b = mkEl("button", "wk-paper-a", act);
     b.type = "button";

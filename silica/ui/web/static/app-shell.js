@@ -182,6 +182,9 @@ async function loadVaultInfo() {
       add.addEventListener("click", (e) => { e.stopPropagation(); $("#vault-add").click(); });
       $("#tree").append(p);
     }
+    const empty = !$("#tree .tree-note, #tree .tree-file");
+    if (empty !== vaultEmpty) { vaultEmpty = empty; greet(); }
+    $("#graph-empty").hidden = !empty;
     loadWorkspaces();                 // the members follow the files (ADR-0112)
     loadTrash();                      // a delete or a restore moved notes across
     renderVaultHealth(data);          // the chip's dot, the panel's link count
@@ -411,13 +414,17 @@ $("#note-pin").addEventListener("click", () => togglePin(lastViewedPath));
 // a name guessed from one greets somebody else.
 let greeted = ""; // the sentence on the landing, so a second call writes nothing
 let greetTimer = 0;
+// No note and no file in the tree (loadVaultInfo): the landing's one step is to
+// add some (ADR-0172 point 3), since a question about an empty vault finds nothing.
+let vaultEmpty = false;
 
 function greet(again = false) {
   const who = (document.documentElement.dataset.name || "").trim();
   const vault = $("#vp-name").textContent.trim();
   // [words, whether they are the person's or the vault's own]
   const parts = who ? [["Hi ", false], [who, true], [". ", false]] : [];
-  if (vault) parts.push(["What do you want to know about ", false], [vault, true], ["?", false]);
+  if (vaultEmpty) parts.push(["Add your first files", false], ...(vault ? [[" to ", false], [vault, true]] : []), [", then ask about them.", false]);
+  else if (vault) parts.push(["What do you want to know about ", false], [vault, true], ["?", false]);
   else parts.push(["What do you want to know?", false]);
   const said = parts.map((p) => p[0]).join("");
   if (said === greeted && !again) return;
@@ -469,6 +476,15 @@ const LANDING_IDEAS = [
 function renderLandingIdeas(data) {
   const box = $("#vh-ideas");
   box.replaceChildren();
+  if (vaultEmpty) {
+    // The vault's + menu, opened from here: files, a folder, a link or a note.
+    const b = mkEl("button", "vh-idea");
+    b.type = "button";
+    b.append(mkEl("span", "vh-say", "Add files, a folder or a link"), mkEl("span", "vh-cmd", "+"));
+    b.addEventListener("click", (e) => { e.stopPropagation(); tourOpenDrawer(); $("#vault-add").click(); });
+    box.append(b);
+    return;
+  }
   const hubs = (data.hubs || []).filter((h) => !/^\d{4}-\d{2}-\d{2}/.test(h.name));
   hubs.slice(0, LANDING_IDEAS.length).forEach((h, i) => {
     const [verb, cmd, line] = LANDING_IDEAS[i];
@@ -485,6 +501,8 @@ function renderLandingIdeas(data) {
     box.append(b);
   });
 }
+
+$("#graph-empty button").addEventListener("click", (e) => { e.stopPropagation(); tourOpenDrawer(); $("#vault-add").click(); });
 
 // The sentence the worker writes about the vault left the landing with the
 // greeting, and is still asked for: silica_vaults hands it to the agent when

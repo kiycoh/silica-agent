@@ -76,6 +76,14 @@ def ready(base_url: str) -> bool:
         return False
 
 
+def chat_model_ids(ids: list[str]) -> list[str]:
+    """The ids of `ids` that can be a chat model. An embedder or reranker on the
+    same port is none, yet it headed the list and became SILICA_MODEL
+    (2026-10-09: a llama-server embedder on :1234). One test for the wizard, the
+    Settings provider switch and the web setup card, which each took the head."""
+    return [m for m in ids if not any(t in m.lower() for t in ("embed", "rerank"))]
+
+
 # The ids the wizard offers and the Settings panel suggests beside what an
 # endpoint advertises: here with the probe, so the panel does not read them
 # through the wizard's prompts.

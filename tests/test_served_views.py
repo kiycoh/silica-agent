@@ -138,7 +138,8 @@ SHARED_ROUTES = {
     "/note/history/diff", "/note/history/restore", "/note/let-go", "/note/link-title", "/note/new", "/note/raw", "/note/similar",
     "/note/render", "/note/save", "/nucleate", "/page/{path:path}",
     "/openapi.json", "/path", "/phone/new", "/phone/turn", "/raw", "/raw/cover", "/redoc", "/reset", "/session/delete",
-    "/session/load", "/session/rename", "/sessions", "/settings", "/settings/confirm", "/skills",
+    "/session/load", "/session/rename", "/sessions", "/settings", "/settings/confirm",
+    "/settings/setup", "/settings/setup/test", "/skills",
     "/skills/proposed/{name}/dismiss", "/skills/proposed/{name}/install", "/skills/{name}", "/static",
     "/stop", "/stt", "/supported_types", "/trash", "/trash/erase", "/trash/restore", "/tree/delete",
     "/tree/move", "/tree/undo", "/turn/redo", "/vault/export", "/vault/export/added",
@@ -232,7 +233,10 @@ def test_every_route_a_help_row_names_is_a_route_of_the_app():
 
     html = (STATIC_SRC / "index.html").read_text(encoding="utf-8")
     named = set(re.findall(r'data-route="([^"]+)"', html))
-    assert named and named <= set(_paths(server.app.routes))
+    # a route or the prefix of one, as the refusal reads it (security.withheld_views):
+    # "/page" names /page/{path:path}
+    paths = set(_paths(server.app.routes))
+    assert named and all(r in paths or any(p.startswith(r + "/") for p in paths) for r in named), named
 
 
 def test_each_address_the_chat_is_told_is_a_view_the_help_panel_names():
@@ -296,7 +300,8 @@ def test_the_catalog_tab_reads_through_the_apps_server_and_sets_its_words_as_tex
     js = _read("app-public.js")
     cat = js[js.index("// --- Wikis, the catalog"):js.index("// --- the cover (ADR-0146")]
     assert '"/wikis/catalog"' in cat and "/wikis/graph?handle=" in cat
-    assert '"Wikis could not be read."' in cat and '"No wiki is in Wikis yet."' in cat
+    assert '"Wikis could not be reached. Check your connection, then open Wikis again."' in cat
+    assert '"No wiki is in Wikis yet. ' in cat
     assert '"Search Wikis"' in cat and '"Open ↗"' in cat and '"Save to Silica"' in cat
     assert "IntersectionObserver" in cat
     assert "openSaveSheet({ url: wikiAddr(w)" in cat

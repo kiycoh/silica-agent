@@ -375,10 +375,9 @@ def _ask_local_model(
     first served id. When the endpoint returned nothing — server down or no
     model loaded — warn that the id is being entered blind (`silica doctor`
     verifies reachability) and let Enter take `recommended`."""
-    # An embedder or reranker on the same port is no chat model, yet it headed
-    # the list and Enter took it (2026-10-09: a llama-server embedder on :1234
-    # became SILICA_MODEL). Same "embed" substring test step_embeddings uses.
-    ids = [m for m in ids if not any(t in m.lower() for t in ("embed", "rerank"))]
+    from silica.onboarding.serve import chat_model_ids
+
+    ids = chat_model_ids(ids)
     if ids:
         return _pick(
             input_fn, f"{label} model — pick a number or type an id", ids,

@@ -67,7 +67,7 @@ def test_the_area_list_is_the_answer_to_the_row_that_counts_it():
     shows it and compare is measured against it."""
     hud = _hud(_areas_render())
     fold = hud[hud.index('<details id="areas-fold">'):hud.index("</details>")]
-    assert "structural areas" in fold
+    assert "</span>areas<span class=\"ct\">" in fold  # the plain word since ADR-0172
     assert 'id="legend-box"' in fold and 'id="legend-all"' not in fold
     assert 'id="sort-communities"' in fold and "toggleCommunitySort()" in fold
     assert 'onclick="scopeArea(0)"' in fold and "filterCommunity" not in hud
