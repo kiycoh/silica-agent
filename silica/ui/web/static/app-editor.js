@@ -281,6 +281,7 @@
     input.className = "cm-grid-input";
     input.value = was;
     input.spellcheck = true;
+    input.size = 1; // the column keeps its width: a field's default 20 characters widened it
     input.setAttribute("aria-label", `${r ? `row ${r}` : "header"}, column ${c + 1}`);
     td.classList.add("cm-grid-editing");
     td.append(input);
