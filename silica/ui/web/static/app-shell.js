@@ -237,7 +237,8 @@ function renderVaultHealth(data) {
 // The dot is amber while anything needs answering: a notice, or links that
 // point nowhere. Both surfaces set their half and this derives the colour.
 function syncVaultDot() {
-  const warn = vaultBroken > 0 || noticeCount > 0;
+  // contraOpen: the open contradictions (app-contra.js, ADR-0166), which load after this script
+  const warn = vaultBroken > 0 || noticeCount > 0 || (typeof contraOpen !== "undefined" && contraOpen > 0);
   const label = "vault " + ($("#vp-name").textContent || "") + (warn ? ", needs attention" : ", healthy");
   // The drawer's head and the rail's dot are one vault said twice, and the
   // panel colours its count by the same state.

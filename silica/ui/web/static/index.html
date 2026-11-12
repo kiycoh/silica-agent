@@ -54,6 +54,7 @@
   <link rel="stylesheet" href="/static/app-workspaces.css" />
   <link rel="stylesheet" href="/static/app-public.css" />
   <link rel="stylesheet" href="/static/app-write.css" />
+  <link rel="stylesheet" href="/static/app-ledger.css" />
   <link rel="stylesheet" href="/static/app-motion.css" />
 </head>
 <body>
@@ -494,6 +495,7 @@
           <button type="button" data-calmode="week" class="active" aria-pressed="true" title="week (W)">Week</button>
           <button type="button" data-calmode="month" aria-pressed="false" title="month (M)">Month</button>
           <button type="button" data-calmode="agenda" aria-pressed="false" title="agenda (A)">Agenda</button>
+          <button type="button" data-calmode="decisions" aria-pressed="false" title="open decisions, expected beside outcomes">Decisions</button>
         </div>
         <!-- the side column's New event, for when the view is too narrow to hold it -->
         <button type="button" id="cal-new-bar" class="cal-new sm" title="new event (C)">New event</button>
@@ -587,6 +589,8 @@
            read once: this one opens the view that lists what it counts. -->
       <button type="button" class="vp-row" id="top-broken" hidden></button>
     </div>
+    <!-- The open contradictions and the checks' proposals, each opening its note (ADR-0166); app-contra.js. -->
+    <div id="vault-contra" hidden></div>
     <!-- The vault's two downloads (ADR-0142), the server's only: on a laptop
          the vault is the person's own folder. Each says what it would give,
          asked when the menu opens, so "nothing new" is read before a click. -->
@@ -728,6 +732,8 @@
     <!-- A source check's counts and progress (ADR-0110 point 11), over the
          text it marks; drawn by app-notes.js, shown only on a checked note. -->
     <div id="note-check" role="status" hidden></div>
+    <!-- The note's contradictions side by side, and the four ways to settle one (ADR-0166); app-contra.js. -->
+    <div id="note-contra" aria-label="contradictions" hidden></div>
     <div id="note-edit" hidden></div>
     <!-- The foot line (ADR-0155 point 10): the save state, the counts, History. -->
     <div id="note-foot" class="nv-foot" hidden><div class="nv-st"></div><div class="nv-ct"></div></div>
@@ -940,6 +946,8 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
   <script src="/static/app-public.js"></script>
   <script src="/static/app-mail.js"></script>
   <script src="/static/app-calendar.js"></script>
+  <script src="/static/app-decisions.js"></script>
+  <script src="/static/app-contra.js"></script>
   <script src="/static/work.js"></script>
 </body>
 </html>
