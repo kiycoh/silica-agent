@@ -266,3 +266,18 @@ def test_the_notes_the_parts_became_are_found_by_their_sources(tmp_vault, monkey
     tmp_vault.note("Notes/Mine, patched.md", f'---\nAI: partial\nsources:\n  - "{part}"\n---\nC.\n')
     tmp_vault.note("Notes/Notes.md", f'---\nsources:\n  - "{part}"\n---\nhub\n')
     assert dr.admitted(rec["id"]) == ["Notes/Born of it.md"]
+
+
+def test_the_local_model_is_the_provider_not_a_base_url_pinned_beside_a_hosted_one(monkeypatch):
+    """ADR-0158 point 6. The first live run had openrouter with a local
+    llama-server URL pinned as its fallback, and was refused as local."""
+    from silica.config import CONFIG
+    from silica.ui.web.research_routes import local_model
+
+    monkeypatch.setattr(CONFIG, "provider", "openrouter")
+    monkeypatch.setattr(CONFIG, "provider_base_url", "http://127.0.0.1:1237/v1")
+    assert not local_model()
+    monkeypatch.setattr(CONFIG, "provider", "custom")
+    assert local_model()
+    monkeypatch.setattr(CONFIG, "provider", "ollama")
+    assert local_model()

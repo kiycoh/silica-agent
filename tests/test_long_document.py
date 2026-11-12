@@ -275,10 +275,10 @@ def client(tmp_vault):
 
 
 def test_the_local_model_is_refused_and_the_form_gets_its_types(client, tmp_vault, monkeypatch):
-    from silica.onboarding import settings_ops
+    from silica.config import CONFIG
 
     tmp_vault.note("Notes/Bridge.md", BRIDGE)
-    monkeypatch.setattr(settings_ops, "base_urls", lambda: {"chat": "http://localhost:1234/v1"})
+    monkeypatch.setattr(CONFIG, "provider", "ollama")
     r = client.post("/document/start", json={"type": "speech", "selection": {"folders": ["Notes"]}, "params": {}})
     assert r.status_code == 409 and "hosted model" in r.json()["error"]
     listed = client.get("/document").json()

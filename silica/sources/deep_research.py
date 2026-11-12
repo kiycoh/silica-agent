@@ -229,7 +229,8 @@ def _clean_plan(p: dict) -> dict:
     question = re.sub(r"\s+", " ", str(p.get("question") or "")).strip()[:QUESTION_CHARS]
     if not question:
         raise Refused("write the question first")
-    depth = p.get("depth") if p.get("depth") in DEPTHS else "standard"
+    depth = str(p.get("depth") or "")
+    depth = depth if depth in DEPTHS else "standard"
     caps = DEPTHS[depth]
     parts: list[dict] = []
     for item in p.get("parts") or []:

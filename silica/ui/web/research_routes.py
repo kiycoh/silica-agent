@@ -21,20 +21,25 @@ from silica.ui.web.failures import Refused
 router = APIRouter(prefix="/research")
 
 
-def _hosted_model_only() -> None:
-    """ADR-0158 point 6: the local model gets no deep research until a probe
-    on it passes (Open 2). Local the way `silica doctor` says it: a provider
-    row that is a local server, or a custom endpoint on this machine. A
-    hosted provider's calls go to its own address whatever base URL is pinned
-    beside it (llm.py's api_base), so that pin says nothing here."""
+def local_model() -> bool:
+    """Whether the chat's calls go to a model on this machine, judged the way
+    `silica doctor` does: a provider row that is a local server, or a custom
+    endpoint here. A hosted provider's calls go to its own address whatever
+    base URL is pinned beside it (llm.py's api_base), so that pin says nothing:
+    reading it refused a deep research on OpenRouter (first live run)."""
     from silica.config import CONFIG
     from silica.onboarding.serve import is_local
     from silica.provider_table import PROVIDERS
 
     row = PROVIDERS.get(CONFIG.provider)
-    local = bool(row and row.fixed_key) or (
+    return bool(row and row.fixed_key) or (
         CONFIG.provider == "custom" and is_local(CONFIG.provider_base_url or ""))
-    if local:
+
+
+def _hosted_model_only() -> None:
+    """ADR-0158 point 6: the local model gets no deep research until a probe
+    on it passes (Open 2)."""
+    if local_model():
         raise Refused(409, "a deep research runs on the hosted model; the local one has not been measured on it")
 
 

@@ -20,12 +20,10 @@ router = APIRouter(prefix="/document")
 
 def _hosted_model_only() -> None:
     """ADR-0158 point 6: the local model gets no long documents until a probe
-    on it passes (Open 2). The chat's base URL says which one this is."""
-    from silica.onboarding.serve import is_local
-    from silica.onboarding.settings_ops import base_urls
+    on it passes (Open 2); local as the deep research judges it."""
+    from silica.ui.web.research_routes import local_model
 
-    url = base_urls().get("chat", "")
-    if url and is_local(url):
+    if local_model():
         raise Refused(409, "a long document is written on the hosted model; the local one has not been measured on it")
 
 
