@@ -78,7 +78,7 @@ def test_markup_hides_away_from_the_caret_and_shows_under_it(tmp_path):
     assert ["Bullet", "-"] in rendered
     assert ["mark", "==hi=="] in rendered and ["hide", "=="] in rendered
     assert ["Rendered:block", "> [!note] T\n> body"] in rendered  # callout
-    assert ["Rendered:block", "| a | b |\n|---|---|\n| 1 | 2 |"] in rendered
+    assert ["Grid:block", "| a | b |\n|---|---|\n| 1 | 2 |"] in rendered  # a table is a grid (ADR-0160)
     assert ["hide", "[[Wiki|"] in rendered and ["a.cm-link.cm-link-live.note-link", "al"] in rendered
     assert ["hide", "](https://e.com)"] in rendered and ["a.cm-link.cm-link-live", "x"] in rendered
     assert ["tag", "#tag"] in rendered
