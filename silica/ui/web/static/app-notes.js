@@ -3270,7 +3270,8 @@ document.addEventListener("click", (e) => {
       // pointer that had just reached for it.
       // And the note at the centre: the drawer is the source beside it (ADR-0155
       // point 3), and a click in the text must not take the source away.
-      !e.target.closest("#dock, #composer, #graph-side, #view-note")) closeNote();
+      // A linked note's preview box (ADR-0161) floats over whatever it was pointed from.
+      !e.target.closest("#dock, #composer, #graph-side, #view-note, .hv-pop")) closeNote();
 });
 $("#note-close").addEventListener("click", () => closeNote()); // not as the handler: the click would pass as `force`
 // (Escape is handled once, at the bottom of this file, in priority order.)
