@@ -87,10 +87,12 @@ def test_sub_areas_split_an_area_along_its_own_links():
 
 
 def test_a_file_slug_is_a_title_made_of_parts_and_a_number():
-    for slug in ("Goodfellow-38-15-2-transfer-learning.md", "src/2026-10-28.md", "slide_cap_03.md"):
+    for slug in ("Goodfellow-38-15-2-transfer-learning.md", "src/2026-10-28.md", "slide_cap_03.md",
+                 # a converted segment: its file's own name, then the part (2026-11-11)
+                 "sources/You Only Look Once/You Only Look Once-1-you-only-look-once-unified.md"):
         assert _is_file_slug(slug), slug
     for name in ("GPT-4.md", "Cross-validation.md", "Machine Learning (corso).md", "RNN-RBM.md",
-                 "Lezione 30.md"):
+                 "Lezione 30.md", "Notes/GPT-4-turbo 2024.md", "Meeting/Meeting 2026-10-28.md"):
         assert not _is_file_slug(name), name
 
 

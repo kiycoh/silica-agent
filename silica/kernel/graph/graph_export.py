@@ -29,7 +29,7 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from silica.kernel.base import notekey
 from silica.kernel.base.layout import is_vault_artifact
 from silica.kernel.base.noteshape import NATIVE_TYPES
@@ -819,8 +819,14 @@ def area_tally(nodes: list[dict], edges: list[dict]) -> AreaTally:
 def _is_file_slug(note_id: str) -> bool:
     """A title that is a file name and not a name: no space, three or more
     parts joined by - or _, one of them a number (`Goodfellow-38-15-2-...`,
-    a daily `2026-10-28`). "GPT-4" and "Cross-validation" are names."""
+    a daily `2026-10-28`). "GPT-4" and "Cross-validation" are names. A
+    converted segment is one too, `<file>/<file>-<n>-<slug>` (sources/convert.py),
+    whose stem keeps the file's spaces: three areas of a papers vault were
+    named "You Only Look Once-1-you-only-look-once-unified-..." (2026-11-11)."""
     stem = notekey.stem(note_id)
+    folder = PurePosixPath(note_id.replace("\\", "/")).parent.name
+    if folder and re.fullmatch(re.escape(folder) + r"-\d+-[a-z0-9-]+", stem):
+        return True
     parts = re.split(r"[-_]", stem)
     return not re.search(r"\s", stem) and len(parts) >= 3 and any(p.isdigit() for p in parts)
 

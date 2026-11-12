@@ -765,6 +765,19 @@
   font: 5pt Archivo, ui-sans-serif, system-ui, sans-serif;
 }
 
+/* The source waits unseen until its diagram lands: the bundle's first load
+   showed `graph LR n0["(root)"] --> ...` for 0.6s before the drawing
+   (2026-11-11). Not data-processed, which mermaid sets before it draws. Unseen
+   3s at most, so a bundle that never loads or a fence that never draws leaves
+   its source to read, not a blank well. */
+:is(.msg, #peek-body, #note-edit, #nv-edit) pre.mermaid:not(:has(> svg)) {
+  animation: mermaid-wait 0s 3s backwards;
+}
+
+@keyframes mermaid-wait {
+  from { color: transparent; }
+}
+
 /* A fence mermaid could not parse (ADR-0082): one quiet line in the answer or
    the note, the source behind it for whoever wants to see what was written. */
 :is(.msg, #peek-body, #note-edit, #nv-edit) details.diagram-failed > summary {

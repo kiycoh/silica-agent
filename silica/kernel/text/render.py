@@ -32,6 +32,13 @@ from silica.kernel.base.syntax import (
 from silica.kernel.text import note_parts
 
 _TRAIL = ".,;:!?)"  # sentence punctuation to peel off a bare path token
+# A markdown link CommonMark refused for the space in its destination, which is
+# how a model cites a vault path: "[p. 2](Inbox/BERT, Pre-training of Deep
+# Bidirectional Transformers.pdf)" came out as raw brackets (2026-11-11). No
+# colon before the space, so a URL is never read as a vault path.
+_LINK_FORMS_RE = re.compile(WIKILINK_WHOLE_RE.pattern
+                             + r"|(?<!!)\[([^\[\]\n]+)\]\(([^()\[\]<>:\n]*\s[^()\[\]<>\n]*)\)")
+_RAW_EXT_RE = re.compile(r"\.\w+$")
 # Inline data never leaves the page. A surface names what else stays on its origin in `own`.
 _DATA_IMAGE = "data:image/"
 
@@ -283,7 +290,8 @@ def _mentions(reads) -> tuple[re.Pattern, dict[str, str]] | None:
 def _linkify_text(text: str, resolve, link, asset, mentions=None) -> str:
     """Turn resolvable note refs in one plain-text run into `.note-link` anchors.
 
-    Three layers: wikilinks first (explicit `[[...]]` delimiters), then bare
+    Three layers: wikilinks first (explicit `[[...]]` delimiters, and the
+    markdown links CommonMark refused for a spaced destination), then bare
     path-like tokens in the surviving prose, then, for an answer, the bare
     titles of the notes its turn read (`mentions`). Unresolved wikilinks render
     like resolved ones but tagged `.broken` (no data-path — the click is a
@@ -324,8 +332,16 @@ def _linkify_text(text: str, resolve, link, asset, mentions=None) -> str:
         return "".join(out)
 
     out, pos = [], 0
-    for m in WIKILINK_WHOLE_RE.finditer(text):
+    for m in _LINK_FORMS_RE.finditer(text):
         out.append(link_prose(text[pos:m.start()]))
+        pos = m.end()
+        if m.group(3) is not None:
+            # A raw file's own note sits beside it under its stem, the one the
+            # drawer opens it from; a link nothing answers stays as written.
+            dest = m.group(4).strip()
+            hit = resolve(dest) or resolve(_RAW_EXT_RE.sub("", dest))
+            out.append(link(hit, m.group(3)) if hit else _html.escape(m.group(0)))
+            continue
         bang, inner = m.group(1), m.group(2)
         target, _, alias = inner.partition("|")
         target, alias = target.strip(), alias.strip()
@@ -345,7 +361,6 @@ def _linkify_text(text: str, resolve, link, asset, mentions=None) -> str:
                 out.append(_html.escape(display))
             else:
                 out.append(f'<a class="note-link broken">{_html.escape(display)}</a>')
-        pos = m.end()
     out.append(link_prose(text[pos:]))
     return "".join(out)
 

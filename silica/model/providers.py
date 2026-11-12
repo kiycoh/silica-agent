@@ -9,7 +9,7 @@ import threading
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import Any, Callable
 import httpx
 import openai
 from pydantic import BaseModel
@@ -53,10 +53,12 @@ class Provider:
         temperature: float | None = None,
         reasoning: bool | None = None,
         cancel: "threading.Event | None" = None,
+        on_delta: "Callable[[str, str], None] | None" = None,
     ) -> LLMResponse:
         """`cancel` marks the call abandoned: a caller that bounds this with its
         own wall-clock deadline sets it when that deadline fires, so retry_transient
-        stops rescheduling instead of issuing requests nobody is waiting for."""
+        stops rescheduling instead of issuing requests nobody is waiting for.
+        `on_delta` streams the call, as in llm.call_llm."""
         # Structured decoding defaults to greedy: this path exists to extract a
         # fixed shape, and sampling at the provider default (0.8 on Ollama, 1.0
         # on OpenAI) buys variety nobody wants in an extraction. Ollama's
@@ -80,6 +82,7 @@ class Provider:
             # lane's: the distiller's output is prose the trace may improve.
             reasoning=reasoning,
             cancel=cancel,
+            on_delta=on_delta,
             sdk_retries=self.sdk_retries,
         )
 

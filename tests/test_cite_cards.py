@@ -81,6 +81,18 @@ def test_an_answer_in_another_language_mostly_marks_nothing(tmp_path):
     assert _eval(tmp_path, f"bestLine(proseLines({json.dumps(NOTE)}), citeWords({json.dumps(words)}))") is None
 
 
+def test_a_sources_list_is_never_the_cited_line(tmp_path):
+    # The answer's own "Sources:" line names the paper, and so does only the
+    # note's Sources row: the drawer marked that row (2026-11-11).
+    note = ("The bias correction divides each moment estimate by one minus beta to the power t.\n\n"
+            "## Sources\n[[sources/Adam, A Method for Stochastic Optimization/Adam, A Method for "
+            "Stochastic Optimization-1-adam-a-method-for-stochastic-optimization]]\n\n"
+            "[^1]: Adam, A Method for Stochastic Optimization, section 3, page 2 of the paper.\n")
+    words = "Sources: Bias Correction and Adam, A Method for Stochastic Optimization (section 3)"
+    got = _eval(tmp_path, f"bestLine(proseLines({json.dumps(note)}), citeWords({json.dumps(words)}))")
+    assert got is None or got["line"] == 1
+
+
 def test_one_shared_word_is_not_a_match(tmp_path):
     # "margine" alone: the note opens at its top, no line is marked on a guess
     got = _eval(tmp_path, f"bestLine(proseLines({json.dumps(NOTE)}), citeWords('a different margine'))")

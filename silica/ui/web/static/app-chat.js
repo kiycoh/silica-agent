@@ -379,7 +379,12 @@ function claimRefs(t, touched, failed) {
     if (effect !== "read") for (const r of refs) if (why.refused || !touched.has(r)) failed.set(r, why);
     return;
   }
-  for (const r of refs) if (effect !== "read" || !touched.has(r)) touched.set(r, effect);
+  // A mutation moves its note to the end: the map keeps notes in the order of
+  // their last change, which is the order the bulk revert takes back in reverse.
+  for (const r of refs) {
+    if (effect !== "read") touched.delete(r);
+    if (!touched.has(r)) touched.set(r, effect);
+  }
 }
 
 // The footer of a turn: a card per mutation, a disabled-with-reason card per
@@ -406,9 +411,11 @@ function turnFooter(touched, failed) {
       u.title = "run /undo for every note this turn touched";
       // One /undo per note, each once the last has ended: a bare /undo takes
       // back only the newest action, so the button reverted one change of N,
-      // and send() refuses while a turn runs.
+      // and send() refuses while a turn runs. Newest first: a note written where
+      // a move left blocks the move back until it is gone, and a note created
+      // then moved has to come back before its creation is undone.
       armThenRun(u, label, `click again to revert ${mutations.length}`, async () => {
-        for (const [ref] of mutations) {
+        for (const [ref] of [...mutations].reverse()) {
           const card = [...w.querySelectorAll(".wcard")].find((c) => c.dataset.ref === ref);
           if (card) {
             card.classList.add("reverting");
@@ -2108,7 +2115,7 @@ function proseLines(md) {
     const end = rows.findIndex((r, k) => k > 0 && r.trimEnd() === "---");
     if (end > 0) i = end + 1;
   }
-  let fence = false, comment = false;
+  let fence = false, comment = false, refs = false;
   for (; i < rows.length; i++) {
     let l = rows[i].trim();
     if (l.startsWith("```")) { fence = !fence; continue; }
@@ -2119,7 +2126,12 @@ function proseLines(md) {
     // A quote's or a callout's body is the note's own prose; a callout's head
     // is only its type.
     l = l.replace(/^(>\s*)+/, "");
-    if (!l || /^(#|\||!\[|\$\$|\[!)/.test(l)) continue;
+    // A Sources section and a footnote's definition say where the note came
+    // from, not what it says: an answer's "Sources:" line shares a paper's
+    // title with them first, and the citation marked the sources/ row
+    // (2026-11-11).
+    if (/^#{1,6}\s/.test(l)) refs = /^#{1,6}\s+(sources|references)\s*$/i.test(l);
+    if (!l || refs || /^(#|\||!\[|\$\$|\[!|\[\^)/.test(l)) continue;
     const plain = l.replace(/^([-*+]|\d+\.)\s+/, "")
       .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1")
       .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[*_`=]+/g, "");

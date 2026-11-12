@@ -95,3 +95,24 @@ def test_a_note_that_cannot_be_read_is_not_deleted_and_leaves_no_restore_point(v
     res = _delete("Missing note")
     assert "error" in res
     assert get_undo_journal().last_chat_delete(CONFIG.vault_path) is None
+
+
+def test_a_rewrite_replaces_the_body_in_place_and_undo_gives_it_back(vault):
+    # "Rewrite my note so it only talks about X" had no tool: the chat renamed
+    # the note away and created a new one at its path (2026-11-11).
+    from silica.tools.notes import silica_patch_note
+
+    note = vault / "Corso" / "Other.md"
+    # typed, as the floor would stamp a type on the restore of an untyped one
+    note.write_text("---\ntype: note\ntags: [kept]\n---\n# Other\n\nold body\n", encoding="utf-8")
+    before = note.read_bytes()
+    res = silica_patch_note("Other", "Other", "---\ntags: [model]\n---\n# Other\n\nnew body\n",
+                            "chat", replace=True)
+    assert res.get("success"), res
+    text = note.read_text(encoding="utf-8")
+    assert "new body" in text and "old body" not in text
+    assert "tags: [kept]" in text and "model" not in text
+    assert sorted(p.name for p in (vault / "Corso").iterdir()) == ["Autoencoders.md", "Other.md"]
+
+    assert direct("/undo Other", []) is True
+    assert note.read_bytes() == before

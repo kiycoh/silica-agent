@@ -196,9 +196,12 @@ def undo(c: Call) -> Result:
                 note_path = resolved
         if not _on_disk(note_path):
             deleted = journal.last_delete(vault, note_path)
-        # A patch the note took after it landed is undone before the move.
+        # A patch the note took after it landed is undone before the move, and
+        # so is a note written since at the asked path, the one the move freed:
+        # moved back first, the move was refused for that note holding its path
+        # (a rewrite that renamed the note, 2026-11-11).
         move = None if deleted else journal.last_chat_move(vault, note_path)
-        if move and not _written_since(move[2], move[3]):
+        if move and not any(_written_since(p, move[3]) for p in (move[2], note_path)):
             moved = move
     else:
         # The newest action wins, a write, a delete or a move: a delete and a

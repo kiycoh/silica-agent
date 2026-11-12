@@ -105,9 +105,10 @@ def silica_patch_note(
     source_basename: Annotated[str, Field(description='Provenance: source filename this snippet derives from')],
     hub: Annotated[str | None, Field(description='Optional [[Hub]] to link in frontmatter if missing')] = None,
     documents: Annotated[list[str] | None, Field(description=_DOCUMENTS_DESC)] = None,
+    replace: Annotated[bool, Field(description="True when the user asked to rewrite the note: the snippet becomes its whole body, the frontmatter stays")] = False,
 ) -> dict[str, Any]:
-    """Append a snippet under a heading in a single EXISTING note — the fast path
-    for interactive edits.
+    """Append a snippet under a heading in a single EXISTING note, the fast path
+    for interactive edits; with replace, rewrite its body in place.
 
     To create a new note use silica_write_note<<; for nucleating whole documents
     into many notes use silica_run_injector>>. Every successful patch is
@@ -116,6 +117,7 @@ def silica_patch_note(
     from pathlib import Path
 
     from silica.config import CONFIG
+    from silica.kernel.base import frontmatter
     from silica.kernel.base.layout import contain_in_vault
     from silica.kernel.write import templates as tpl
     from silica.kernel.write.bulk import execute_one
@@ -159,17 +161,23 @@ def silica_patch_note(
     # name, not the text under the first. Merge via templates.append_under
     # when a run shows a duplicated section.
     note_name = Path(path).stem
-    if (heading.strip() and heading.strip().casefold() != note_name.casefold()
+    if (not replace and heading.strip() and heading.strip().casefold() != note_name.casefold()
             and not re.match(r"#{1,6}\s", snippet.lstrip())):
         snippet = f"## {heading.strip()}\n\n{snippet.lstrip()}"
         heading = note_name
 
+    # With no tool that rewrites a body, "rewrite my note so it only talks about
+    # Adam" took 13 steps: the chat renamed the note away, created a new one at
+    # its path, and rewrote every link to it (2026-11-11). The overwrite op keeps
+    # the note's identity; a leading YAML block is dropped so the floor puts the
+    # note's own frontmatter back, as silica_write_note does with a raw block.
     op = Op(
-        op=OpType.patch,
+        op=OpType.overwrite if replace else OpType.patch,
         heading=heading,
         source_basename=source_basename,
         path=path,
         snippet=snippet,
+        content=frontmatter.split(snippet)[2] if replace else None,
         hub=hub,
     )
 
@@ -363,8 +371,9 @@ def silica_write_note(
     `props`), never raw YAML in `body` (a leading YAML block is stripped).
     Skeleton from the vault template (explicit `template` > vault default >
     built-in); `template="none"` writes the body as-is. Fails if the note
-    exists: append with silica_patch_note<<; multi-note nucleation with gates
-    and rollback: silica_run_injector>>. Checkpointed, revertible with /undo.
+    exists: append or rewrite with silica_patch_note<<; multi-note nucleation
+    with gates and rollback: silica_run_injector>>. Checkpointed, revertible
+    with /undo.
     """
     bound: list[str] = []
 

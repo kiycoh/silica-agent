@@ -105,3 +105,22 @@ console.log(JSON.stringify({touched: [...touched], failed: [...failed]}));
                                      "path": "Corso/Autoencoders.md"}},
         "Third": {"verb": "write", "refused": None},
     }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_claim_refs_keeps_notes_in_the_order_of_their_last_change(tmp_path):
+    # The bulk revert walks this order backwards: the rewrite that moved a note
+    # and wrote a new one where it was has to undo the new note first.
+    src = (STATIC / "app-chat.js").read_text(encoding="utf-8")
+    start = src.index("function claimRefs(")
+    script = tmp_path / "order.js"
+    script.write_text(src[start:src.index("\n}\n", start) + 3] + """
+const touched = new Map(), failed = new Map();
+claimRefs({notes: ["Notes/A.md", "Notes/B.md"], effect: "moved"}, touched, failed);
+claimRefs({notes: ["Notes/A.md"], effect: "written"}, touched, failed);
+claimRefs({notes: ["Notes/B.md"], effect: "read"}, touched, failed);
+console.log(JSON.stringify([...touched]));
+""", encoding="utf-8")
+    run = subprocess.run(["node", str(script)], capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    assert json.loads(run.stdout) == [["Notes/B.md", "moved"], ["Notes/A.md", "written"]]
