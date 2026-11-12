@@ -85,9 +85,11 @@ def vault_scope() -> str:
     )
 
 
-def seed_messages(math: bool = False, app: str = "") -> list[dict]:
+def seed_messages(math: bool = False, app: str = "", general: bool | None = None) -> list[dict]:
     """The system context a fresh conversation starts from: prompt, date, vault
     scope, vault map, and the restated language rule (`reply_language`).
+    `general` is the general-knowledge rule (ADR-0169), the setting's when None;
+    the phone passes False, since it draws no labelled block and checks no turn.
 
     Shared by the TUI and the GUI (`ui/web/session.build_seed`, which passes
     math=True for the MathML renderer and in `app` the help panel the chat
@@ -97,7 +99,8 @@ def seed_messages(math: bool = False, app: str = "") -> list[dict]:
     93b6d2d shipped here and never carried across. One builder, no drift.
     """
     reply = reply_language()
-    messages: list[dict] = [{"role": "system", "content": system_prompt(reply, math=math)}]
+    general = CONFIG.general_knowledge if general is None else general
+    messages: list[dict] = [{"role": "system", "content": system_prompt(reply, math=math, general=general)}]
     messages.append({"role": "system", "content": today_line()})
     messages.append({"role": "system", "content": vault_scope()})
     if app:

@@ -287,7 +287,7 @@ def test_vault_origin_is_never_the_file():
 # Spelled out here rather than read off HOSTED_ROWS, so a key added to the
 # tuple by accident fails a test instead of reaching every tenant.
 _HOSTED_TABLE = {
-    "Session": ["SILICA_MODEL", "context", "SILICA_SHOW_THINKING"],
+    "Session": ["SILICA_MODEL", "context", "SILICA_SHOW_THINKING", "SILICA_GENERAL_KNOWLEDGE"],
     "Language": ["SILICA_STT_LANG", "SILICA_STT_BROWSER"],
     # the name the new chat greets with is the tenant's own to set
     "Display": ["SILICA_USER_NAME", "SILICA_THEME", "SILICA_SHOW_THINKING",

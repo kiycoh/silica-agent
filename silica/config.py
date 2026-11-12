@@ -817,6 +817,11 @@ class SilicaConfig:
     # reset still work, because erasing must not depend on this switch.
     user_memory: bool = from_env("SILICA_MEMORY", True, true_word, doc=True)
 
+    # ADR-0169: when the notes hold nothing on a question, the chat answers from
+    # the model's own knowledge in a block labelled as such. On by the owner's
+    # choice; False is the strict prompt of before, cited or refused.
+    general_knowledge: bool = from_env("SILICA_GENERAL_KNOWLEDGE", True, true_word, doc=True)
+
     # Episodic memory lane (kernel/recall/episodic.py, ADR-0057): TTL in LIVED
     # days (days the lane captured or delivered a fact) since a chain head was
     # last captured or used, 0 = never expire; and the distinct-day count at

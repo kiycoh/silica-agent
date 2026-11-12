@@ -511,7 +511,7 @@ def phone_turn(text: str, cancel: threading.Event) -> dict:
     line = UsageLine()
     try:
         if not SESSION.phone.messages:
-            head = seed.seed_messages()
+            head = seed.seed_messages(general=False)
             system_lines.insert(head, {"role": "system", "content": _PHONE_LINE})
             SESSION.phone.messages[:] = head
         t = Turn(SESSION.phone, text, origin="telegram", shown=False, watch=line)
