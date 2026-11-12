@@ -127,7 +127,11 @@ def test_a_shaped_prompt_retries_with_the_shaped_schema_and_any_other_with_its_o
     ol._default_ask(plain, "src", max_tokens=100)
     ol._default_ask(plain + ol.shape_rule("investigation"), "src", max_tokens=100)
 
-    assert sent == [None, ol.OutlineReply, None, ol.ShapedOutlineReply]
+    assert sent == [None, ol.OutlineReply, None, ol.InvestigationOutline]
+    # A closed object per shape, never an open map a strict schema refuses.
+    fields = ol.InvestigationOutline.model_json_schema()["$defs"]["InvestigationFields"]
+    assert set(fields["properties"]) == {"asserted_by", "source_kind", "status", "status_as_of", "about"}
+    assert "retracted" not in ol.LiteratureFields.model_fields  # the join is code's
 
 
 # ---------------------------------------------------------------- investigation
@@ -211,9 +215,33 @@ def test_a_later_status_files_the_old_one_under_superseded(tmp_vault, monkeypatc
     data = _fm("Research/Fraud charge against John Doe.md")
     assert (data["status"], data["status_as_of"], data["asserted_by"]) == (
         "convicted-not-final", "2026-01-15", "The trial court")
-    superseded = note.split("## Superseded", 1)[1]
+    live, superseded = note.split("## Superseded", 1)
     assert ("- Status: charged, as of 2025-03-01, asserted by The indictment (primary). "
             "Followed by: convicted-not-final, as of 2026-01-15.") in superseded
+    # The later part's claim is live text, above the history, and keyed to its leaf.
+    assert "found John Doe guilty of fraud[^probe2-Who-was-convicted-Q1]" in live
+
+
+def test_an_older_status_arriving_later_is_filed_as_history_not_made_current(tmp_vault, monkeypatch):
+    """Parts run in sub-question order, not in the order things happened."""
+    later = {"lesson_title": "T", "spine": ["Fraud charge against John Doe"],
+             "ideas": [json.loads(json.dumps(INV_OUTLINE["ideas"][0]))]}
+    later["ideas"][0]["fields"].update(status="convicted-not-final", status_as_of="2026-01-15",
+                                       asserted_by="The trial court")
+    bank = {"Q1": wr.Quote(url="https://court.example/verdict", quote="The jury found John Doe guilty.", why="w")}
+    two = _part("Who was convicted", "## The filing\n\nA jury found John Doe guilty of fraud [Q1].\n", bank,
+                ["Source: https://court.example/verdict\nThe jury found John Doe guilty."],
+                shape="investigation", folder="probe2")
+    _nucleate(monkeypatch, [two], _ask(later, {"Fraud charge against John Doe": "A jury found John Doe guilty of fraud [Q1]."}, []))
+    first = {"lesson_title": "T", "spine": ["Fraud charge against John Doe"], "ideas": [INV_OUTLINE["ideas"][0]]}
+    one = _part("Who is charged", INV_BODY, INV_BANK, INV_TRACE, shape="investigation")
+    _nucleate(monkeypatch, [one], _ask(first, INV_BODIES, []))
+
+    data = _fm("Research/Fraud charge against John Doe.md")
+    assert (data["status"], data["status_as_of"]) == ("convicted-not-final", "2026-01-15")
+    assert ("- Status: charged, as of 2025-03-01, asserted by The indictment (primary). "
+            "Followed by: convicted-not-final, as of 2026-01-15.") in _read(
+        "Research/Fraud charge against John Doe.md").split("## Superseded", 1)[1]
 
 
 def test_a_status_is_never_replaced_by_nothing_and_survives_a_repeated_claim():
@@ -225,6 +253,45 @@ def test_a_status_is_never_replaced_by_nothing_and_survives_a_repeated_claim():
     moved = apply_shape_props(note, {**blank, "status": "dismissed", "status_as_of": "2026-02-01"})
     assert "status: dismissed" in moved and "## Superseded" in moved
     assert apply_shape_props(moved, {**blank, "status": "dismissed"}) == moved  # once filed, a rerun adds nothing
+    older = apply_shape_props(moved, {**blank, "status": "alleged", "status_as_of": "2024-12-01"})
+    assert "status: dismissed" in older and "- Status: alleged, as of 2024-12-01" in older
+    assert apply_shape_props(older, {**blank, "status": "alleged", "status_as_of": "2024-12-01"}) == older
+
+
+def test_a_plans_status_is_never_superseded_by_a_claims():
+    from silica.kernel.write.contested import apply_shape_props
+
+    plan = "---\nstatus: todo\n---\n\n# Plan\n\nSteps.\n"
+    out = apply_shape_props(plan, {"status": "charged", "asserted_by": "X", "status_as_of": "", "source_kind": "",
+                                   "about": ""})
+    assert "status: todo" in out and "## Superseded" not in out
+
+
+def test_the_preservation_rule_lets_a_status_change_only_for_the_keys_it_names():
+    from silica.kernel.base.noteshape import SUPERSEDABLE
+    from silica.kernel.write.contested import apply_shape_props
+    from silica.kernel.write.preserve import lost
+
+    before = "---\nstatus: charged\nstatus_as_of: '2025-03-01'\nasserted_by: X\nsource_kind: primary\nabout: Y\n---\n\n# C\n\nBody.\n"
+    after = apply_shape_props(before, {"status": "dismissed", "status_as_of": "2026-02-01", "asserted_by": "Court",
+                                       "source_kind": "primary", "about": "Y"})
+    assert lost(before, after) is not None
+    assert lost(before, after, free=SUPERSEDABLE) is None
+
+
+def test_a_steer_retry_keeps_the_fields_on_the_bodies_it_regenerates(monkeypatch):
+    monkeypatch.delenv("SILICA_OUTLINE_BODIES", raising=False)
+    src = INV_BODY
+    first = ol.run_outliner(source_text=src, source_basename="p.md", target="T", hub="H", language="English",
+                            vault_outline=[], ask=_ask(INV_OUTLINE, INV_BODIES, []), quote_ids=True,
+                            shape="investigation")
+    prior = ol.parse_outline(first["outline"])
+    retry = ol.run_outliner(source_text=src, source_basename="p.md", target="T", hub="H", language="English",
+                            vault_outline=[], ask=_ask(INV_OUTLINE, INV_BODIES, []), quote_ids=True,
+                            shape="investigation", outline=prior, only_titles={"Fraud charge against John Doe"},
+                            steer_context="too short")
+    [op] = retry["updates"]
+    assert op["props"]["status"] == "charged" and op["props"]["about"] == "John Doe"
 
 
 # ------------------------------------------------------------------- literature
@@ -285,6 +352,6 @@ def test_a_shape_without_fields_writes_none_and_asks_for_none(tmp_vault, monkeyp
     calls: list = []
     _nucleate(monkeypatch, [rel], _ask(LIT_OUTLINE, LIT_BODIES, calls))
 
-    assert ol.FIELDS_TAG not in calls[0]
+    assert "[silica outline: fields" not in calls[0]
     assert "identifier" not in _fm("Research/LNP delivery trial.md")
     assert Path(CONFIG.vault_path, "Research/LNP delivery trial.md").exists()

@@ -143,7 +143,7 @@ QUOTE_IDS_CLAIM = """- The source cites its evidence inline as [Q3] or [Q3, Q7].
 # model names each value in a typed `fields` object per idea, and code keeps a
 # value only when it is one the key allows. The rule opens on its own tag so
 # the constrained retry asks for the same object (SHAPED_SCHEMA_BY_TAG).
-FIELDS_TAG = "[silica outline: fields]"
+FIELDS_TAG = "[silica outline: fields {shape}]"
 SHAPE_RULES = {
     "investigation": FIELDS_TAG + """
 - This source investigates a contested matter. Each idea is ONE claim as the source reports it, titled by what is claimed, never by a person's name alone; a person is never an idea of their own.
@@ -154,6 +154,13 @@ SHAPE_RULES = {
 - This source reviews research. An idea is either a concept or one study. A study idea carries "fields": {{"identifier": "<the URL its quotes cite, exactly as the source shows it beside them>", "version": "preprint" or "published", "design": "<the study design>", "population": "<who or what was studied>", "outcome": "<what was measured>"}}. A concept idea carries no fields. Leave a field "" when the source does not say it.
 """,
 }
+# An investigation's note is one claim and a literature's one study (point
+# 10). A looked-up body is the whole source section, and partition_bodies folds
+# two ideas naming one section into one note, so for these shapes the bodies
+# stage writes each idea's own. That gives up, for them, the lookup measured on
+# 2026-10-15 (3% of the prose left out against 15%, a third of the calls):
+# dropping "literature" here brings it back at the cost of one study per note.
+ONE_IDEA_PER_NOTE = ("investigation", "literature")
 INVESTIGATION_BODY = """
 Each idea is one claim: write its body as the source reports that claim, saying who asserts it, and leave out what the source says about anyone the claim is not about.
 """
@@ -274,22 +281,56 @@ SCHEMA_BY_TAG: dict[str, type[BaseModel]] = {STAGE_A_TAG: OutlineReply, STAGE_GA
                  STAGE_BODIES_TAG: BodiesReply, STAGE_B_TAG: EdgesReply}
 
 
-class ShapedIdeaReply(IdeaReply):
-    fields: dict[str, str] = Field(default_factory=dict)
+# A shape's fields as a closed object, one key per field the model fills:
+# an open map is what a strict json_schema refuses, and `retracted` is never
+# the model's (shape_ideas joins it).
+class InvestigationFields(BaseModel):
+    asserted_by: str = ""
+    source_kind: str = ""
+    status: str = ""
+    status_as_of: str = ""
+    about: str = ""
 
 
-class ShapedOutlineReply(OutlineReply):
-    ideas: list[ShapedIdeaReply]  # type: ignore[assignment]
+class LiteratureFields(BaseModel):
+    identifier: str = ""
+    version: str = ""
+    design: str = ""
+    population: str = ""
+    outcome: str = ""
 
 
-class ShapedGapReply(GapReply):
-    ideas: list[ShapedIdeaReply] = Field(default_factory=list)  # type: ignore[assignment]
+class InvestigationIdea(IdeaReply):
+    fields: InvestigationFields = Field(default_factory=InvestigationFields)
 
 
-# Only for a prompt carrying a shape's rule: every other request sends the
-# schema it always did.
-SHAPED_SCHEMA_BY_TAG: dict[str, type[BaseModel]] = {STAGE_A_TAG: ShapedOutlineReply,
-                                                     STAGE_GAP_TAG: ShapedGapReply}
+class LiteratureIdea(IdeaReply):
+    fields: LiteratureFields = Field(default_factory=LiteratureFields)
+
+
+class InvestigationOutline(OutlineReply):
+    ideas: list[InvestigationIdea]  # type: ignore[assignment]
+
+
+class LiteratureOutline(OutlineReply):
+    ideas: list[LiteratureIdea]  # type: ignore[assignment]
+
+
+class InvestigationGap(GapReply):
+    ideas: list[InvestigationIdea] = Field(default_factory=list)  # type: ignore[assignment]
+
+
+class LiteratureGap(GapReply):
+    ideas: list[LiteratureIdea] = Field(default_factory=list)  # type: ignore[assignment]
+
+
+# Only for a prompt carrying a shape's rule (FIELDS_TAG names the shape):
+# every other request sends the schema it always did.
+SHAPED_SCHEMAS: dict[str, dict[str, type[BaseModel]]] = {
+    "investigation": {STAGE_A_TAG: InvestigationOutline, STAGE_GAP_TAG: InvestigationGap},
+    "literature": {STAGE_A_TAG: LiteratureOutline, STAGE_GAP_TAG: LiteratureGap},
+}
+_FIELDS_TAG_RE = re.compile(r"\[silica outline: fields (\w+)\]")
 
 
 @dataclass
@@ -980,9 +1021,9 @@ def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False,
     from silica.config import CONFIG
     provider = get_provider(CONFIG, role="outline")
     schema_for_retry = next((m for tag, m in SCHEMA_BY_TAG.items() if system.startswith(tag)), None)
-    if FIELDS_TAG in system:
-        schema_for_retry = next((m for tag, m in SHAPED_SCHEMA_BY_TAG.items() if system.startswith(tag)),
-                                schema_for_retry)
+    if shaped := _FIELDS_TAG_RE.search(system):
+        schema_for_retry = next((m for tag, m in SHAPED_SCHEMAS.get(shaped.group(1), {}).items()
+                                 if system.startswith(tag)), schema_for_retry)
     last = ""
     for attempt in range(2):
         # Free JSON first, constrained decode only on the retry: measured
@@ -1129,10 +1170,16 @@ def shape_ideas(outline: Outline, shape: str, src: str, evidence: dict) -> None:
             idea.fields = {}
             continue
         hit = hits.get(idea.fields["identifier"])
-        if hit and hit.get("type"):
-            # OpenAlex's own taxonomy says "preprint"; its Crossref one
-            # "posted-content". Every other type is a published work.
-            idea.fields["version"] = "preprint" if hit["type"] in ("preprint", "posted-content") else "published"
+        # shortcut: the types read here are recalled, not seen: "article" is
+        # the one a fixture of a real OpenAlex record shows; "preprint" (its
+        # own taxonomy) and "posted-content" (Crossref's) are from memory. Any
+        # other type keeps the model's reading. Check against the first live
+        # literature run's leaf, by 2026-12-31.
+        kind = (hit or {}).get("type", "")
+        if kind in ("preprint", "posted-content"):
+            idea.fields["version"] = "preprint"
+        elif kind == "article":
+            idea.fields["version"] = "published"
         idea.fields["retracted"] = ("true" if hit["retracted"] else "false") if hit else ""
 
 
@@ -1142,7 +1189,7 @@ def shape_rule(shape: str) -> str:
     from silica.kernel.base.noteshape import CLAIM_STATUSES
 
     rule = SHAPE_RULES.get(shape, "")
-    return rule.format(statuses=", ".join(f'"{x}"' for x in CLAIM_STATUSES)) if rule else ""
+    return rule.format(shape=shape, statuses=", ".join(f'"{x}"' for x in CLAIM_STATUSES)) if rule else ""
 
 
 def skeleton(src: str, *, language: str, ask: Callable[..., dict], cover: bool = True,
@@ -1259,11 +1306,7 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     # Sized only for the real worker: an injected `ask` is a test or a probe.
     workers = BODIES_WORKERS if ask else bodies_workers_for(src)
     ask = ask or _default_ask
-    # An investigation's note is one claim and a literature's one study
-    # (point 10). A looked-up body is the whole source section, and
-    # partition_bodies folds two ideas naming one section into one note, so
-    # for these shapes the bodies stage writes each idea's own.
-    verbatim = verbatim_bodies() and not translates(src) and shape not in ("investigation", "literature")
+    verbatim = verbatim_bodies() and not translates(src) and shape not in ONE_IDEA_PER_NOTE
     if outline is None:
         outline = skeleton(src, language=language, ask=ask, cover=not verbatim, quote_ids=quote_ids,
                            shape=shape)
