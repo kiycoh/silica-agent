@@ -281,3 +281,19 @@ def test_the_local_model_is_the_provider_not_a_base_url_pinned_beside_a_hosted_o
     assert local_model()
     monkeypatch.setattr(CONFIG, "provider", "ollama")
     assert local_model()
+
+
+def test_learn_grounds_a_reworded_research_claim_on_the_quote_its_footnote_names(tmp_vault):
+    """ADR-0158 point 9 through Memorize: a part's claim is reworded by
+    /nucleate, so its words are not in the leaf; the banked quote is."""
+    from silica.kernel.learn import items
+
+    tmp_vault.note("sources/Mito/Part one.md", "---\nsource_id: x\n---\n\n## Evidence bank\n\n"
+                   "[Q1] https://a.test\n> Mitochondria produce most of the cell's ATP.\nwhy: energy\n")
+    note = ("---\ntitle: Energy\n---\n# Energy\n\nThe cell's energy comes mostly from mitochondria."
+            "[^Mito-Part-one-Q1]\n\n## Sources\n\n[^Mito-Part-one-Q1]: [[sources/Mito/Part one]] "
+            "\"Mitochondria produce most of the cell's ATP.\" <https://a.test>\n")
+    tmp_vault.note("Notes/Energy.md", note)
+    [claim] = items.claims_of("Notes/Energy.md", note)
+    assert claim["leaf"] == "sources/Mito/Part one.md"
+    assert claim["line"] > 0 and "Mitochondria produce most" in claim["span"]
