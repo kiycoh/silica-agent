@@ -301,4 +301,12 @@ def silica_run_organizer(
         llm_arbiter=llm_arbiter,
         move_uncategorized=move_uncategorized,
     )
-    return fsm.run()
+    result = fsm.run()
+    if dry_run and "plan_summary" in result:
+        # The moves the classifier (and its arbiter's model call) settled wait
+        # in the review queue (ADR-0165): accepting one moves it, nothing else.
+        from silica.config import CONFIG
+        from silica.tools.review.organize import offer_moves
+
+        offer_moves(CONFIG.vault_path or "", result["plan_summary"].get("plan") or [])
+    return result

@@ -150,7 +150,7 @@
   // module: the drawer and Learn's write view are two editors of one kind
   // (ADR-0134 point 6), and module state let the second create() take the
   // first one's hooks. Every reader has a view or a state in hand.
-  const NO_INST = { hooks: {}, top: null };
+  const NO_INST = { hooks: {}, top: null, foot: null };
   const instField = StateField.define({ create: () => NO_INST, update: (v) => v });
   const hooksOf = (view) => view.state.field(instField).hooks;
   const renderCache = new Map(); // source -> html; a block redrawn is not refetched, by either editor
@@ -808,6 +808,9 @@
       const key = label(from, to);
       if (live) add(Decoration.replace({ widget: new FootnoteLabel(String(num.get(key) || key)) }), from, to);
     }
+    // What follows the note, as `top` heads it: the similar notes (ADR-0164).
+    const foot = state.field(instField).foot;
+    if (foot) add(Decoration.widget({ widget: new Top(foot), block: true, side: 1 }), doc.length);
     return Decoration.set(out, true);
   }
 
@@ -961,7 +964,7 @@
   // save(), decorate(el, view), select(view), links(paths) -> ["[[…]]"],
   // openAt(path, line). The only caller is app-notes.js, once per editor.
   function create(parent, hooks) {
-    const inst = { hooks, top: null };
+    const inst = { hooks, top: null, foot: null };
     const view = new EditorView({ parent, state: EditorState.create({ doc: "", extensions: extensions(inst) }) });
     return {
       view,
@@ -969,9 +972,11 @@
       // A fresh state per note: the undo history of one note must not reach
       // into the next. The caret starts under the properties, on the text;
       // it does not take focus, which only a click in the text gives it
-      // (ADR-0059). `top` is what heads the note, `missing` its broken links.
-      load(text, { top = null, missing = [] } = {}) {
+      // (ADR-0059). `top` is what heads the note, `foot` what follows it,
+      // `missing` its broken links.
+      load(text, { top = null, foot = null, missing = [] } = {}) {
         inst.top = top;
+        inst.foot = foot;
         const fm = frontmatterEnd(text.slice(0, HEAD));
         const at = fm > 0 ? Math.min(fm + 1, text.length) : 0;
         const state = EditorState.create({ doc: text, selection: { anchor: at }, extensions: extensions(inst) });

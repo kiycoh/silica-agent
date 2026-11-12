@@ -435,8 +435,10 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/review",
         group="direct",
-        usage="[--flush=HASH]",
-        summary="inspect the async review queue (deferred ops)",
+        usage="[apply <id…|kind|all> | dismiss <id…|kind>]",
+        summary="the review queue: refused writes, /curate, /aliases and /organize proposals and stale notes, "
+                "accepted as one revertible run or dismissed for good",
+        examples=("/review", "/review apply autolink", "/review dismiss 3fa9c1d2"),
         handler="silica.commands.review:review",
     ),
     Command(

@@ -100,6 +100,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 
 - On the graph, a click makes a note the centre of its own map. In 2D the areas are an atlas: each note owns the ground nearest it, and zooming in names the sub-areas, then the notes.
 - In Explore, Clusters gathers each area in one place on a ring, Flow puts one note in its reading order inside the graph, and Folders shades each folder by how much it mixes areas. Click a link to read the line it is written on. Read gives the whole vault a reading order from its hubs.
+- Under a note's last line, the five notes nearest it by what they say, each with its similarity as a percentage: the cosine of the two notes' embeddings, not a probability. A similar note found only through shared concepts says so instead of showing a number.
 - Compare one folder or area with another: the panel says what characterises each and quotes the links that join them.
 - Click a concept to light the notes that treat it; a second concept narrows them to the notes that treat both, and the panel quotes the lines.
 
@@ -125,6 +126,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 - The Calendar holds events, deadlines and the day each study plan is due; click or drag an empty time to add an event, with a reminder if you want one. `/agenda` lists a day or a week.
 - A request you make in 3 separate chats, never undone, becomes a proposed skill drafted from your own words. It runs only once you install it from Settings › Skills.
 - `/curate` plans links, orphans and duplicates, and `/aliases` proposes other names for note titles; both write only with `--apply`.
+- What they propose waits in `/review`, with `/organize`'s dry runs, the writes the check refused and the notes whose code moved on. `/review apply` lands a selection as one run `/revert` takes back, `/review dismiss` forgets a proposal for good; Examine's Review row does the same with buttons.
 
 ## How a write is checked
 
@@ -216,7 +218,7 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/undo [note-path]` | undo the last patch on a note |
 | `/delete <path>` | delete a note, even one other notes link to; says which links it left pointing nowhere, /undo brings it back |
 | `/trash [restore <path> | erase <path> | empty]` | the notes deleted from this vault: bring one back, or delete for good |
-| `/review [--flush=HASH]` | inspect the async review queue (deferred ops) |
+| `/review [apply <id…\|kind\|all> \| dismiss <id…\|kind>]` | the review queue: refused writes, /curate, /aliases and /organize proposals and stale notes, accepted as one revertible run or dismissed for good |
 | `/anneal [--steer] [--limit=N]` | retry every deferred bundle against the current vault; --steer escalates what still fails |
 | `/revert [run-id | --source <file>]` | revert a whole run (bare: the newest; or the RUN id /status prints, whole or its first characters), or every run derived from one source |
 | `/zotero [file|group|unlink|grant] [--apply|--yes]` | the linked Zotero library: status, file the inbox, write groups, unlink |

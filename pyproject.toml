@@ -249,7 +249,7 @@ layers = [
   # the kernel lanes, a tier a line; a lane may import its own tier
   "silica.kernel.analyst_plan",
   "silica.kernel.report : silica.kernel.organize",
-  "silica.kernel.vault : silica.kernel.progress : silica.kernel.learn : silica.kernel.link : silica.kernel.public_site : silica.kernel.check : silica.kernel.user_memory : silica.kernel.vault_language : silica.kernel.graph : silica.kernel.outline",
+  "silica.kernel.vault : silica.kernel.progress : silica.kernel.learn : silica.kernel.link : silica.kernel.review : silica.kernel.public_site : silica.kernel.check : silica.kernel.user_memory : silica.kernel.vault_language : silica.kernel.graph : silica.kernel.outline",
   "silica.kernel.recall : silica.kernel.rights",
   "silica.kernel.code : silica.kernel.calendar : silica.kernel.prep_delegation : silica.kernel.publish : silica.kernel.account_link : silica.kernel.run_context : silica.kernel.vault_files",
   "silica.kernel.write : silica.kernel.proposed_skills",

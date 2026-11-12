@@ -117,6 +117,21 @@ class RelatedNote:
     # write through it.
     origin: str = "vault"
 
+    @property
+    def similarity(self) -> int | None:
+        """The percentage a surface prints, None when the embedding leg did not
+        propose this note (ADR-0164)."""
+        return similarity_percent(self.embed_score)
+
+
+def similarity_percent(cos: float | None) -> int | None:
+    """A cosine as the whole percentage every surface prints (ADR-0164 point 1):
+    the raw cosine, not a calibrated probability, floored at 0 because a negative
+    cosine says "unlike" and no list of similar notes means that. None stays None:
+    a pair the embedding leg did not propose has no cosine to state, and shows its
+    reason instead."""
+    return None if cos is None else max(0, round(100 * cos))
+
 
 def _rrf_fuse(rankings: list[list[tuple[str, float]]]) -> dict[str, float]:
     """Reciprocal Rank Fusion over several ranked lists of (key, _score).
@@ -590,6 +605,63 @@ def neighbours_above(query_path: str, floor: float) -> list[str] | None:
         for h in hits
         if h.get("score", 0.0) >= floor and h.get("path")
     ]
+
+
+# The floor a note's similar notes clear when its embedder's row names none
+# (config.EMBEDDER_DEFAULTS `similar_at`, ADR-0164 point 3). Read off pairs under
+# jina on 2026-11-12, on the 94-note test vault and on the owner's 2,083-note
+# one: from 0.60 up a pair is one subject seen twice, under it a sibling topic
+# (two poets of one century, two importers). 0.60 cuts 0.42% of all
+# pairs of the 729-note vault under jina; the same share cuts 0.60 under pplx,
+# 0.84 under EmbeddingGemma 2 and 0.64 under the store whose all-pairs median
+# is Qwen's, which is this default.
+SIMILAR_AT = 0.64
+
+
+def similar_at(model: str) -> float:
+    """The floor on the embedder's row; SIMILAR_AT for a model nobody measured."""
+    from silica.config import embedder_defaults
+
+    return float(embedder_defaults(model).get("similar_at", SIMILAR_AT))
+
+
+def similar_notes(query_path: str, k: int = 5) -> list[RelatedNote] | None:
+    """The `k` notes nearest an INDEXED note by cosine, those over its
+    embedder's floor: the list at a note's foot (ADR-0164 point 2). None when
+    the vault holds no vectors or this note has none, which hides the list;
+    [] when nothing clears the floor.
+
+    The embedding leg alone, beside `neighbours_above` and not through fusion:
+    every row prints its cosine, so a row the cosine did not rank has no place
+    here, and the reranker `related()` calls is a model call a note's opening
+    must not make."""
+    from silica.config import CONFIG
+    from silica.kernel.recall.embed import get_store
+
+    try:
+        store = get_store()
+        if len(store) == 0:
+            return None
+        key = store_key(query_path)
+        vec = store.get_vec(key)
+        if not vec:
+            return None
+        # A few more than k: an artifact or a mirror's shadow cut below must
+        # not leave the list short of notes that cleared the floor.
+        hits = store.cosine_top_k(vec, k=k + 5, exclude={key})
+    except Exception as exc:
+        # The list is a courtesy under the text: an unreadable index hides it,
+        # and the note opens as it did before the list existed.
+        logger.debug("similar_notes: abstaining for '%s' (%s)", query_path, exc)
+        return None
+    floor = similar_at(str(CONFIG.embedding_model or ""))
+    near = [
+        RelatedNote(path=h["path"], name=h.get("name") or _basename(h["path"]), score=h["score"],
+                    evidence=[f"embed:{h['score']:.2f}"], embed_score=h["score"])
+        for h in hits
+        if h.get("path") and h.get("score", 0.0) >= floor and not is_vault_artifact(h["path"])
+    ]
+    return dedupe_mirror_shadows(near)[:k]
 
 
 def related_notes(

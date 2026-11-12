@@ -11,32 +11,60 @@ from silica.session.words import int_flag, positional, str_flag
 
 
 def review(c: Call) -> Result:
-    """/review [--flush=<hash>] — the deferred store: write bundles parked
-    by a gate, listed or flushed. Not the study queue: that is /learn."""
+    """/review [apply <id…|kind|all> | dismiss <id…|kind>]: the one review
+    queue (ADR-0165): every proposal waiting for a yes or a no, by kind. The
+    deferred store's refused writes are one kind; /curate, /aliases and
+    /organize's dry runs and /stale's code lane are the others. A yes lands as
+    one revertible run. Not the study queue: that is /learn."""
     args, out = c.args, c.out
-    from silica.kernel.write.deferred import get_deferred_store
-    store = get_deferred_store()
-    flush_hash = str_flag(args, "--flush")
-    if flush_hash:
-        removed = store.remove(flush_hash)
-        if removed:
-            out.print(f"  Flushed bundle [bold]{flush_hash[:12]}[/] from review queue.")
-        else:
-            out.print(f"  [yellow]No bundle with hash {flush_hash[:12]} found.[/]")
+    from rich.markup import escape
+
+    from silica.config import CONFIG, demo
+    from silica.kernel import review as queue
+    from silica.tools.review import load
+
+    kinds = load()
+    vault = CONFIG.vault_path or ""
+    if not vault:
+        return out.refused("no vault is open")
+    verb, words = (args[0], list(args[1:])) if args and args[0] in ("apply", "dismiss") else ("", [])
+    if verb:
+        if demo():
+            # A yes writes the demo's vault and may run the worker model,
+            # neither of which the door counts (ADR-0139 point 6).
+            return out.refused(f"'/review {verb}' is not part of the demo")
+        chosen = queue.pick(vault, words)
+        if not chosen:
+            out.print(f"  Nothing pending answers to {escape(' '.join(words)) or 'that'}.")
+            return out
+        if verb == "dismiss":
+            queue.dismiss(vault, chosen)
+            out.print(f"  Dismissed {len(chosen)}: they will not be proposed again.")
+            return out
+        res = queue.accept(vault, chosen)
+        run = res["run"]
+        tail = f" (run {run[:8]}; [bold]/revert {run[:8]}[/] takes the batch back)" if run else ""
+        out.print(f"  Accepted {len(res['applied'])} of {len(chosen)}{tail}.")
+        for p, why in res["failed"]:
+            out.print(f"  · [bold]{p.id[:8]}[/]  {escape(p.title)}  [yellow]{escape(why)}[/]")
         return out
-    items = store.list_all()
-    if not items:
-        out.print("  Review queue is empty.")
-    else:
-        out.print(f"  [bold]Review queue — {len(items)} bundle(s):[/]")
-        for item in items:
-            import datetime as _dt
-            ts = _dt.datetime.fromtimestamp(item["timestamp"]).strftime("%Y-%m-%d %H:%M")
-            out.print(
-                f"  · [bold]{item['content_hash'][:12]}[/]  {item['source_path']}  "
-                f"({item['rejected_count']} op(s))  {ts}"
-            )
-        out.print("  Use [bold]/review --flush=<hash>[/] to discard a bundle.")
+    pending = queue.listing(vault)
+    if not pending:
+        out.print("  Nothing waits for review. The dry runs of /curate, /aliases and "
+                  "/organize fill it; refused writes and stale notes arrive by themselves.")
+        return out
+    out.print(f"  [bold]Review queue, {len(pending)} proposal(s):[/]")
+    for name, kind in kinds.items():
+        rows = [p for p in pending if p.kind == name]
+        if not rows:
+            continue
+        note = (": a yes runs the worker model" if kind.spends_model
+                else ": accepted by id or name, never by all" if not kind.in_all else "")
+        out.print(f"  [bold]{kind.label}[/] ({len(rows)}){note}")
+        for p in rows:
+            out.print(f"    · [bold]{p.id[:8]}[/]  {escape(p.title)}  [dim]{escape(p.why)}[/]")
+    out.print("  [bold]/review apply <id…|kind|all>[/] lands them as one revertible run; "
+              "[bold]/review dismiss <id…|kind>[/] forgets them.")
     return out
 
 
@@ -119,10 +147,15 @@ def curate(c: Call) -> Result:
         outcome_breakdown = ", ".join(f"{v} {k}" for k, v in outcome.items()) or "no changes"
         out.print(f"  Applied — dispatched [bold]{dispatched}[/] → outcomes: {outcome_breakdown}")
     else:
+        from rich.markup import escape
+
         out.print(f"  Plan — [bold]{total}[/] item(s): {breakdown}")
         for it in res.get("items", []):
-            pair = f" ↔ {it['partner']}" if it.get("partner") else ""
-            out.print(f"  · [bold]{it['kind']}[/]  {it['target']}{pair}")
+            pair = f" ↔ {escape(it['partner'])}" if it.get("partner") else ""
+            # The reason each pair was proposed: a duplicate's percentage, an
+            # autolink's shared concepts (ADR-0164).
+            why = f"  [dim]{escape(it['reason'])}[/]" if it.get("reason") else ""
+            out.print(f"  · [bold]{it['kind']}[/]  {escape(it['target'])}{pair}{why}")
         out.print('  Run [bold]/curate --apply[/] to execute, or ask e.g. "apply only dedup".')
     return out
 

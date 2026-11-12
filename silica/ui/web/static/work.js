@@ -370,6 +370,9 @@ function neighbourRows(d) {
   for (const r of d.similar) {
     const row = put(r, "similar", 3);
     row.unreachable = String(r.why || "").startsWith("unreachable");
+    // ADR-0164: the cosine as a percentage, or null where only shared concepts
+    // proposed the note, which the row then says in words.
+    row.similarity = r.similarity == null ? null : r.similarity;
   }
   for (const r of d.missing) { put(r, "unwritten", 4).why = r.why || ""; }
   const behind = new Set((d.structure && d.structure.behind) || []);
@@ -1040,7 +1043,9 @@ function neighbourRows(d) {
     // The folder only where it is news, and "not connected" for a relative the
     // graph cannot reach at all: two notes called Cell stay two notes.
     const fold = folderOf(r.path);
-    const meta = [fold && fold !== folderOf(d.path) ? fold : "", r.unreachable ? "not connected" : ""]
+    const alike = !r.tags.includes("similar") ? ""
+      : r.similarity != null ? r.similarity + "% similar" : "shares concepts";
+    const meta = [alike, fold && fold !== folderOf(d.path) ? fold : "", r.unreachable ? "not connected" : ""]
       .filter(Boolean).join(" · ");
     if (meta) n.appendChild(mkEl("span", "nb-m", meta));
     row.appendChild(n);

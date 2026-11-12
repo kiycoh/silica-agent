@@ -168,15 +168,31 @@ def silica_aliases(apply: Annotated[bool, Field(description='If True, write the 
         "dropped": proposed - accepted,
         "groups": groups,
     }
+    path_by_title = {r.name.lower(): r.path for r in scoped_refs if getattr(r, "name", "")}
+    if not apply:
+        # The model's work is done: the gated groups wait in the review queue
+        # (ADR-0165), where accepting them makes no second call.
+        from silica.tools.review.aliases import offer_groups
+
+        offer_groups(CONFIG.vault_path or "", groups, path_by_title)
     if not apply or not groups:
         return result
 
+    result["written"], result["skipped"] = write_aliases(groups, path_by_title)
+    return result
+
+
+def write_aliases(groups: dict[str, list[str]],
+                  path_by_title: dict[str, str]) -> tuple[dict[str, int], list[dict]]:
+    """Write each canonical note's gated variants into its `aliases:` through
+    the write gate: ({path: variants written}, [{note, reason} skipped]). Shared
+    by `--apply` and the review queue's yes, which so makes no model call."""
     from silica.capabilities import alias_consolidation_bounds
+    from silica.driver import DRIVER
     from silica.kernel.write.gate import commit_ops
     from silica.kernel.base.frontmatter import add_alias
     from silica.kernel.write.ops import Op, OpType
 
-    path_by_title = {r.name.lower(): r.path for r in scoped_refs if getattr(r, "name", "")}
     written: dict[str, int] = {}
     skipped: list[dict] = []
     for canonical, variants in sorted(groups.items()):
@@ -211,7 +227,4 @@ def silica_aliases(apply: Annotated[bool, Field(description='If True, write the 
             written[path] = len(variants)
         else:
             skipped.append({"note": canonical, "reason": str(res.get("status", "refused"))})
-
-    result["written"] = written
-    result["skipped"] = skipped
-    return result
+    return written, skipped

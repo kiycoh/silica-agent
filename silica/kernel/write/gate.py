@@ -103,6 +103,12 @@ def in_run(*, undo: str | None = None, ledger: str | None = None,
             var.reset(token)
 
 
+def current_run() -> str | None:
+    """The journal run the writes here belong to, if a block opened one: a pass
+    that would open its own joins it instead, so one batch stays one revert."""
+    return _current_undo_run.get()
+
+
 def open_run(source: str | None, *, vault: str | None = None,
              ledger_run_id: str | None = None) -> str:
     """A new journal run under `source`. `vault` defaults to the active one, in
@@ -1052,7 +1058,8 @@ def move_preflight(moves: list[tuple[str, str]]) -> str | None:
 
 
 def move_notes_with_restore_point(moves: list[tuple[str, str]], source: str,
-                                  prepare: Callable[[str], Any] | None = None) -> dict[str, Any]:
+                                  prepare: Callable[[str], Any] | None = None,
+                                  run: str = "") -> dict[str, Any]:
     """silica_move's restore point over several (from, to) pairs as ONE
     journal run (ADR-0126 point 3): the toast's undo and /undo bring the
     whole set back. The caller ran move_preflight; what this meets is the
@@ -1065,10 +1072,11 @@ def move_notes_with_restore_point(moves: list[tuple[str, str]], source: str,
     move torn after the rename, with the file at the destination and the
     referrers half rewritten, keeps it, or the note could not be brought
     back (silica_move marked the run reverted on any exception, which was
-    wrong for that case)."""
+    wrong for that case). `run` joins an open run, a review batch's
+    (ADR-0165), which this then never closes: other writes may sit in it."""
     try:
         journal = undo_journal.get_undo_journal()
-        run_id = open_run(source)
+        run_id = run or open_run(source)
     except Exception as e:
         return {"run": None, "moved": [], "error": f"not moved: no restore point could be recorded ({e})"}
     moved: list[tuple[str, str]] = []
@@ -1096,7 +1104,7 @@ def move_notes_with_restore_point(moves: list[tuple[str, str]], source: str,
                     logger.warning("move: could not drop the inverse of %s: %s", src, drop_error)
             break
         moved.append((src, dst))
-    if not journal.inverses_for(run_id):
+    if not run and not journal.inverses_for(run_id):
         journal.mark_reverted(run_id)  # nothing moved: nothing to move back later
     return {"run": run_id, "moved": moved, "error": error}
 

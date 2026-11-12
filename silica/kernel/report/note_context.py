@@ -242,15 +242,19 @@ def suggested(canon: str, related: list[dict], linked: set[str], resolve) -> lis
         rpath = resolve(r["path"]) or r["path"]
         if rpath in linked or rpath == canon or (dist is not None and dist < _SUGGEST_MIN_DIST):
             continue
+        # The cosine as a percentage where the embedding leg proposed the note,
+        # its reason where only the concepts did (ADR-0164 point 1): the fused or
+        # reranked `score` this printed is an order, and on a reranked pool a
+        # relevance on another scale, never how alike the two notes are.
+        pct = r.get("similarity")
         out.append({
             "name": r.get("name") or note_parts.clean_name(rpath), "path": rpath, "kind": "note",
             "why": ("unreachable" if dist is None else f"{dist} hops away")
-                   + f" · score {r.get('score', 0):.2f}",
-            # The same score the sentence above states in words. The explore
-            # panel draws it as a meter, and parsing it back out of `why` is how
-            # a display string becomes an accidental API: reword the sentence
-            # and the bar goes blank.
-            "score": float(r.get("score", 0) or 0),
+                   + (f" · {pct}% similar" if pct is not None else " · shares concepts"),
+            # The figure the sentence states, for a surface that draws it:
+            # parsing it back out of `why` is how a display string becomes an
+            # accidental API.
+            "similarity": pct,
         })
         if len(out) >= 8:
             break

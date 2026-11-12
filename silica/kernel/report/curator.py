@@ -28,6 +28,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from silica.kernel.base.layout import is_vault_artifact as _is_vault_artifact
+from silica.kernel.recall.relatedness import similarity_percent
 from silica.kernel.report.graph_report import VaultReport
 
 # The three item kinds the curator can emit. "autolink" is the mechanical,
@@ -250,7 +251,10 @@ def compose_curation_plan(report: VaultReport) -> CurationPlan:
             target=dp.source,
             partner=dp.target,
             score=dp.score,
-            reason=f"similarity {dp.score:.3f}",
+            # The percentage every surface prints for a cosine (ADR-0164); a
+            # MinHash pair's score is the wording's overlap, said in words.
+            reason=(f"{similarity_percent(dp.score)}% similar" if dp.cosine
+                    else "shares most of its wording"),
         ))
 
     return CurationPlan(items=items)

@@ -70,5 +70,7 @@ DEMO_OFF: dict[str, tuple[str, ...]] = {
         "/jobs",
         # ADR-0142's two downloads: the owner has not decided (2026-10-31)
         "/vault/export",
+        # the review queue's yes writes the vault outside a turn (ADR-0165)
+        "/metrics/review",
     ),
 }

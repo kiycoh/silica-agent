@@ -290,6 +290,7 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
     """
     from silica.kernel.base.notekey import store_key
     from silica.kernel.recall.embed import get_store
+    from silica.kernel.recall.relatedness import similarity_percent
 
     store = get_store()
     if len(store) == 0:
@@ -324,7 +325,11 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
             if p in seen:
                 continue
             seen.add(p)
-            edges.append(palette.similar_edge(f"s{idx}", p[0], p[1], float(cand["score"])))
+            score = float(cand["score"])
+            # The percentage a clicked similar link states (ADR-0164), beside the
+            # look palette gives it, which stays colours and widths only.
+            edges.append({**palette.similar_edge(f"s{idx}", p[0], p[1], score),
+                          "similarity": similarity_percent(score)})
             idx += 1
     # A daily note's relations come from its blocks (ADR-0062), here and not in
     # the export, so /shape's zones are drawn over the same edges the graph is.

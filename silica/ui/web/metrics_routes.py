@@ -8,11 +8,14 @@ import json
 import logging
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from silica.config import CONFIG
+from silica.kernel.recall.relatedness import similarity_percent
 from silica.kernel.report import brief, vault_shape
 from silica.kernel.text import note_parts
+from silica.ui.web import session
+from silica.ui.web.failures import Refused
 from silica.ui.web.failures import explain as _failure
 
 logger = logging.getLogger(__name__)
@@ -342,13 +345,17 @@ def metrics(proposals: bool = False):
         # Confirmed first — those are the merge candidates; the borderline band
         # is only "link, don't merge". Neither list is capped by the report, and
         # on a real vault they run to the hundreds, so the slice happens here.
+        # `similarity` is the cosine as the card prints it, None for a pair the
+        # MinHash leg proposed, whose score is no cosine (ADR-0164).
         "duplicates": ([
             {"a": short(d.source), "b": short(d.target), "a_path": d.source,
-             "b_path": d.target, "score": d.score, "confirmed": True}
+             "b_path": d.target, "score": d.score, "confirmed": True,
+             "similarity": similarity_percent(d.score) if d.cosine else None}
             for d in report.confirmed_duplicate_pairs
         ] + [
             {"a": short(d.source), "b": short(d.target), "a_path": d.source,
-             "b_path": d.target, "score": d.score, "confirmed": False}
+             "b_path": d.target, "score": d.score, "confirmed": False,
+             "similarity": similarity_percent(d.score) if d.cosine else None}
             for d in report.duplicate_pairs
         ])[:_METRICS_ROWS],
         # Sliced like every other uncapped list: the report caps the
@@ -417,7 +424,101 @@ def metrics(proposals: bool = False):
         ),
     }
     payload["report"] = _report_head(report, payload, elapsed_s, started)
+    payload["review"] = _review_count()
     return payload
+
+
+# --- the review queue (ADR-0165) ----------------------------------------------
+# Under /metrics because the Review row is Examine's: a process that does not
+# serve the view loses these with it, and a demo refuses them (DEMO_OFF).
+
+def _review_count() -> int:
+    """How many proposals wait, for the worklist's Review row. Best-effort, as
+    the history beside it: a queue that cannot be read costs a row, not the view."""
+    from silica.config import demo
+    from silica.kernel import review
+    from silica.tools.review import load
+
+    if demo() or not CONFIG.vault_path:
+        return 0
+    try:
+        load()
+        return len(review.listing(CONFIG.vault_path))
+    except Exception as exc:
+        logger.debug("metrics: review queue unreadable (%s)", exc)
+        return 0
+
+
+def _review_pick(payload: dict) -> list:
+    """The pending proposals a request names, by whole id only: the page sends
+    what it was given, and a prefix is a person's typing, not a button's."""
+    from silica.kernel import review
+
+    ids = {str(i) for i in payload.get("ids") or [] if i}
+    return [p for p in review.listing(CONFIG.vault_path or "") if p.id in ids]
+
+
+@router.get("/metrics/review")
+def review_queue():
+    """Each kind's pending proposals and the accepted batches. A listing calls
+    no model: what a model proposed waits in the store its command filled."""
+    from silica.kernel import review
+    from silica.tools.review import load
+
+    kinds = load()
+    vault = CONFIG.vault_path or ""
+    pending = review.listing(vault) if vault else []
+    return {
+        "kinds": [{"name": k.name, "label": k.label, "spends_model": k.spends_model, "in_all": k.in_all,
+                   "items": [{"id": p.id, "title": p.title, "why": p.why, "notes": list(p.notes),
+                              "preview": p.preview} for p in pending if p.kind == k.name]}
+                  for k in kinds.values()],
+        "batches": review.batches(vault) if vault else [],
+    }
+
+
+@router.post("/metrics/review/apply")
+def review_apply(payload: dict):
+    """A yes from the panel, as one revertible run, under the write lock a tree
+    move takes. Never a kind whose yes runs the worker model: that is a turn,
+    which the page sends through the chat, where a turn is counted."""
+    from silica.kernel import review
+    from silica.tools.review import load
+
+    kinds = load()
+    props = _review_pick(payload)
+    if not props:
+        raise HTTPException(404, "nothing pending by those ids")
+    if any(kinds[p.kind].spends_model for p in props):
+        raise Refused(409, "this yes runs the worker model: send it from the chat", code="in_chat")
+    with session.turn_slot("a turn is running: accept when it ends"):
+        res = review.accept(CONFIG.vault_path or "", props)
+    return {"run": res["run"], "applied": [p.id for p in res["applied"]],
+            "failed": [{"id": p.id, "title": p.title, "why": why} for p, why in res["failed"]]}
+
+
+@router.post("/metrics/review/dismiss")
+def review_dismiss(payload: dict):
+    """A no, remembered: the proposal is not offered again."""
+    from silica.kernel import review
+    from silica.tools.review import load
+
+    load()
+    props = _review_pick(payload)
+    review.dismiss(CONFIG.vault_path or "", props)
+    return {"dismissed": [p.id for p in props]}
+
+
+@router.post("/metrics/review/revert")
+def review_revert(payload: dict):
+    """An accepted batch taken back, every note of it, as /revert <run> would."""
+    from silica.kernel import review
+
+    with session.turn_slot("a turn is running: revert when it ends"):
+        res = review.revert(CONFIG.vault_path or "", str(payload.get("run") or ""))
+    if res is None:
+        raise HTTPException(404, "no accepted batch by that run")
+    return {"restored": res["reverted"], "skipped": [s["path"] for s in res["skipped"] + res["errors"]]}
 
 
 @router.get("/limits")
