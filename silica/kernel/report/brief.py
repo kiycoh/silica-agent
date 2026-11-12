@@ -80,6 +80,10 @@ def write_brief(notes: int, topics: list[str], hubs: list[str]) -> str:
             tools=None,
             response_schema=None,
             max_tokens=200,
+            # A thinking pass bills against the 200 tokens: DeepSeek V4 Flash
+            # returned finish=length with no text, and an empty brief is never
+            # cached, so every page load paid for another one (2026-11-13).
+            reasoning=False,
         )
         out = (reply.text or "").strip().strip('"').split("\n")[0].strip()
     except Exception as exc:

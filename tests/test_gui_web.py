@@ -2629,6 +2629,26 @@ def test_vault_brief_survives_a_provider_that_is_not_there(
     assert not (tmp_path / "brief.json").exists(), "an empty brief was cached"
 
 
+def test_the_vault_brief_asks_with_thinking_off(monkeypatch):
+    """Measured 2026-11-13 on DeepSeek V4 Flash: 126 to 165 of the 200 tokens
+    went to thinking on a two-cluster vault, and a larger one ended at the
+    budget with no text, which is never cached, so each page load paid again."""
+    from types import SimpleNamespace
+
+    from silica.kernel.report import brief
+
+    seen = {}
+
+    def _call(**kw):
+        seen.update(kw)
+        return SimpleNamespace(text="A vault about Stoicism.")
+
+    monkeypatch.setattr("silica.model.providers.get_provider",
+                        lambda *_a, **_k: SimpleNamespace(call_llm=_call))
+    assert brief.write_brief(2, ["Stoicism"], ["Home"]) == "A vault about Stoicism."
+    assert seen["reasoning"] is False
+
+
 def _mark_drawing(svg: str) -> str:
     """The four pieces of one inline copy of the 2D mark, without its class."""
     return svg[svg.index("<path"):svg.index("</svg>")]
