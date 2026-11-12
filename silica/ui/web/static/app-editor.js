@@ -958,11 +958,25 @@
             if (live) hide(n.from, n.from + 1); // `\*` reads as `*`
             return false;
           case "Link": {
-            const marks = node.getChildren("LinkMark"), url = node.getChild("URL");
-            if (!url || marks.length < 2) return; // `[x][ref]` and `[x]` stay text
+            const marks = node.getChildren("LinkMark");
+            if (marks.length < 2) return; // `[x][ref]` and `[x]` stay text
             const textFrom = marks[0].to, textTo = marks[1].from;
-            if (textTo > textFrom) add(linkMark({ "data-href": doc.sliceString(url.from, url.to) }, live), textFrom, textTo);
-            if (live) { hide(n.from, textFrom); hide(textTo, n.to); }
+            // The destination is the URL after `](`: GFM also finds an address in the words,
+            // and a pasted one's words are that address (ADR-0161), so the first URL child
+            // opened `a/_b` for `[a\_b](a_b)`. `<…>` is the syntax around an address with
+            // a parenthesis, not part of it.
+            const urls = node.getChildren("URL"), url = urls.find((u) => u.from > textTo);
+            if (!url) return;
+            const href = doc.sliceString(url.from, url.to).replace(/^<([^]*)>$/, "$1");
+            if (textTo > textFrom) add(linkMark({ "data-href": href }, live), textFrom, textTo);
+            if (live) {
+              hide(n.from, textFrom); hide(textTo, n.to);
+              // an address in the words is one node, with no Escape of its own to hide
+              for (const u of urls) {
+                if (u.to > textTo) continue;
+                for (const m of doc.sliceString(u.from, u.to).matchAll(/\\(?=[!-/:-@[-`{-~])/g)) hide(u.from + m.index, u.from + m.index + 1);
+              }
+            }
             return;
           }
           case "URL": {
