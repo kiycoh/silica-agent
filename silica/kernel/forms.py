@@ -144,10 +144,10 @@ def stamped_form(text: str) -> str:
 
 # A deep research's part cites the quote each sentence stands on, [Q3], where a
 # /web-search note cites the page, [1] (ADR-0158 point 9). The ingress says so
-# under a key of its own and not as a `form:` value: the citations change what
-# /nucleate keeps on a line and how CLEANUP resolves it, never the lens or the
-# lane, and a form value would also be counted by the wizard's census and steer
-# the lane through `form_origin == "stamp"`.
+# under a key of its own, because the citations are not a register: they change
+# what /nucleate keeps on a line and how CLEANUP resolves it. The part's form
+# is stamped beside it (`form: study`, web_research.build_note), so no sniff
+# and no folder vote picks its lens or files it as a draft.
 CITATIONS_KEY = "citations"
 QUOTE_CITATIONS = "quotes"
 
@@ -158,6 +158,19 @@ def cites_quotes(text: str) -> bool:
 
     data, _, _ = frontmatter.split(text)
     return isinstance(data, dict) and str(data.get(CITATIONS_KEY) or "").strip().lower() == QUOTE_CITATIONS
+
+
+def stamped_shape(text: str) -> str:
+    """A deep research's shape, as its part was stamped (`shape:`, ADR-0158
+    point 10); "" for any other source or a shape this code does not know."""
+    from silica.kernel.base import frontmatter
+    from silica.kernel.base.noteshape import RESEARCH_SHAPES
+
+    data, _, _ = frontmatter.split(text)
+    if not (isinstance(data, dict) and cites_quotes(text)):
+        return ""
+    shape = str(data.get("shape") or "").strip().lower()
+    return shape if shape in RESEARCH_SHAPES else ""
 
 
 # Dispatch (draft filing) and PAYLOAD (profile pin) both resolve the same

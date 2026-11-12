@@ -1159,6 +1159,25 @@ def evidence_bank(leaf_body: str) -> dict[str, tuple[str, str]]:
     return bank
 
 
+def scholarly_hits(leaf_body: str) -> dict[str, dict]:
+    """{url: {"retracted": bool, "type": str}} from the scholarly_search
+    results in a leaf's raw trace (ADR-0158 point 10: the retraction join by
+    identifier, done by code). Each result is one JSON line, as json.dumps
+    writes it; a web hit carries no `retracted` and is not one of these."""
+    hits: dict[str, dict] = {}
+    for line in leaf_body.splitlines():
+        if not line.startswith("[{"):
+            continue
+        try:
+            items = json.loads(line)
+        except ValueError:
+            continue  # a page line that only looks like JSON: not a result
+        for it in items if isinstance(items, list) else []:
+            if isinstance(it, dict) and it.get("url") and "retracted" in it:
+                hits[str(it["url"])] = {"retracted": bool(it["retracted"]), "type": str(it.get("type") or "")}
+    return hits
+
+
 def attribute_quotes(note: str, bank: dict[str, tuple[str, str]], key: str, link: str,
                      settled: frozenset[str] = frozenset()) -> tuple[str, list[str], int]:
     """Key every `[Qk]` on a claim line of *note* to the leaf: `[^<key>-Qk]`.

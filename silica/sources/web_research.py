@@ -833,6 +833,7 @@ def web_research(
     name: str = "",
     quote_ids: bool = False,
     scholarly: bool = False,
+    shape: str = "",
     cancel_token=None,
 ) -> str:
     """Run the constrained web-research loop and write one findings note to the
@@ -843,6 +844,8 @@ def web_research(
     `quote_ids` keeps each citation as the quote it names (point 9) instead of
     the page's number. `name` names the file when the concept is a long
     sub-question, and `scholarly` adds the literature lane (point 10).
+    `shape` is the research's, stamped on the note so /nucleate gives its
+    notes that shape's fields (point 10).
 
     Raises ValueError if the loop produced no findings (sentinel return — no
     note is written).
@@ -910,7 +913,7 @@ def web_research(
         # down; the block below regenerates what the cut removed.
         bound = SOURCES_TAIL_RE.split(bound, maxsplit=1)[0].rstrip()
     provenance = "\n".join(line for line in (_lane_line(), audit) if line)
-    note = build_note(concept, bound, sources, lanes=provenance, cites_quotes=quote_ids)
+    note = build_note(concept, bound, sources, lanes=provenance, cites_quotes=quote_ids, shape=shape)
     note_rel = unique_inbox_path(name or concept, folder=folder)
     from silica.driver import DRIVER
 
@@ -1632,6 +1635,7 @@ def build_note(
     lanes: str = "",
     form: str = "",
     cites_quotes: bool = False,
+    shape: str = "",
 ) -> str:
     """Deterministic frontmatter + body + guaranteed ## Sources.
 
@@ -1649,14 +1653,22 @@ def build_note(
     # `form:` is the ingress stamp of docs/specs/nucleation-forms.md: clipped
     # external content declares itself so nucleation picks the clip lens
     # without sniffing.
-    form_line = f"form: {form}\n" if form else ""
     # A deep research's part keeps its markers as quote ids (ADR-0158 point 9)
     # and says so, so /nucleate keeps them on the lines it writes and CLEANUP
-    # resolves them against the leaf. Read by forms.cites_quotes, nowhere else.
+    # resolves them against the leaf. It is study material by construction,
+    # stamped as such: unstamped, the sniff and the folder vote gave two parts
+    # of one live run the clip lens (2026-11-12), and a `draft` vote would
+    # have filed them intact, never distilled. A /web-search note stays
+    # unstamped and sniffed, as point 12's arm A was measured.
+    if cites_quotes:
+        form = form or "study"
+    form_line = f"form: {form}\n" if form else ""
     if cites_quotes:
         from silica.kernel.forms import CITATIONS_KEY, QUOTE_CITATIONS
 
         form_line += f"{CITATIONS_KEY}: {QUOTE_CITATIONS}\n"
+        if shape:
+            form_line += f"shape: {shape}\n"
     front = (
         "---\n"
         f"title: {json.dumps(concept)}\n"

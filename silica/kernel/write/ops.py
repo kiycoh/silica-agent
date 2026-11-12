@@ -51,6 +51,7 @@ class Op(BaseModel):
     contested_by: str | None = None     # patch only: contradiction ref → mark_contested on the target
     relation: bool = False              # patch only: snippet is typed-relation bullets → joins ## Relations (outline lane)
     valid_from: str | None = None       # write/patch: source event clock, stamped on the claim; None → no stamp
+    props: dict[str, Any] | None = None  # write/patch: a research shape's frontmatter fields (noteshape.SHAPE_FIELDS)
     from_path: str | None = None        # move op: current vault-relative path
     to_path: str | None = None          # move op: destination vault-relative path
 
@@ -78,6 +79,12 @@ class Op(BaseModel):
             v = getattr(self, f)
             if v and "\x00" in v:
                 setattr(self, f, v.replace("\x00", ""))
+        # 3. `props` reaches the frontmatter, and a distiller's reply parses
+        #    into this model too: only a shape's own keys survive, each value
+        #    checked, so no reply can write `publish:` or `AI:` through it.
+        if self.props is not None:
+            from silica.kernel.base.noteshape import SHAPE_KEYS, shape_value
+            self.props = {k: shape_value(k, v) for k, v in self.props.items() if k in SHAPE_KEYS} or None
         return self
 
     def touched_ref(self) -> str | None:

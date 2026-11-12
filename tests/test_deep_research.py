@@ -70,7 +70,12 @@ def _started(plan: dict) -> tuple[dict, threading.Event]:
     """start() with its thread doing nothing, so the test runs the job itself."""
     got: dict = {}
     ready = threading.Event()
-    dr.start(plan, run=lambda rec, stop: (got.update(rec=rec, stop=stop), ready.set()))
+
+    def run(rec, stop) -> None:
+        got.update(rec=rec, stop=stop)
+        ready.set()
+
+    dr.start(plan, run=run)
     assert ready.wait(5)
     return got["rec"], got["stop"]
 
@@ -81,9 +86,9 @@ def _fake_loop(found: dict[str, int], calls: list):
     from silica.driver import DRIVER
 
     def run(concept, max_searches=0, tool_progress_callback=None, *, folder="", name="",
-            quote_ids=False, scholarly=False, cancel_token=None):
+            quote_ids=False, scholarly=False, shape="", cancel_token=None):
         calls.append({"q": concept, "folder": folder, "quote_ids": quote_ids, "cap": max_searches,
-                      "own": wr._OWN.get() is not None})
+                      "own": wr._OWN.get() is not None, "shape": shape})
         wr._reset_turn()
         if not found.get(concept):
             raise ValueError("no findings")
@@ -113,6 +118,7 @@ def test_the_job_runs_a_loop_per_sub_question_in_its_own_state_and_writes_the_pa
     # one loop per sub-question not held, each in a state of its own, citing quotes
     assert [c["q"] for c in calls] == ["Sub-question 0?", "Sub-question 1?", "Sub-question 2?"]
     assert all(c["own"] and c["quote_ids"] and c["cap"] == dr.DEPTHS["standard"]["searches"] for c in calls)
+    assert {c["shape"] for c in calls} == {rec["shape"]}  # each part is stamped with the run's shape
     # the chat's bank was never touched by the job's loops
     assert list(wr._SHARED.bank) == ["Q9"]
     parent = (Path(dr.CONFIG.vault_path) / rec["parent"]).read_text()

@@ -22,6 +22,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -46,6 +47,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -70,6 +72,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -94,6 +97,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -118,6 +122,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -142,6 +147,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -166,6 +172,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -190,6 +197,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       }
@@ -226,6 +234,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -250,6 +259,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -274,6 +284,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       }
@@ -301,6 +312,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -328,6 +340,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -355,6 +368,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -382,6 +396,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -448,6 +463,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -472,6 +488,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -496,6 +513,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -520,6 +538,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       }
@@ -547,6 +566,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -618,6 +638,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -642,6 +663,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -666,6 +688,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -690,6 +713,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       }
@@ -717,6 +741,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -754,6 +779,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -778,6 +804,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       }
@@ -805,6 +832,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -832,6 +860,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": "Notes/Course/A.md",
           "to_path": "Outside/A.md"
         },
@@ -859,6 +888,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -886,6 +916,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -923,6 +954,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -947,6 +979,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -971,6 +1004,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -995,6 +1029,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       }
@@ -1069,6 +1104,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -1093,6 +1129,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       }
@@ -1120,6 +1157,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -1147,6 +1185,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -1206,6 +1245,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -1230,6 +1270,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       }
@@ -1257,6 +1298,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -1284,6 +1326,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -1343,6 +1386,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -1380,6 +1424,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -1419,6 +1464,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       },
@@ -1452,6 +1498,7 @@
         "contested_by": null,
         "relation": false,
         "valid_from": null,
+        "props": null,
         "from_path": null,
         "to_path": null
       }
@@ -1519,6 +1566,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -1546,6 +1594,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -1573,6 +1622,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },
@@ -1600,6 +1650,7 @@
           "contested_by": null,
           "relation": false,
           "valid_from": null,
+          "props": null,
           "from_path": null,
           "to_path": null
         },

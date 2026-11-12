@@ -429,7 +429,7 @@ def _run(rec: dict, stop: threading.Event) -> None:
                         part["note"] = web_research(
                             part["q"], max_searches=rec["searches"], tool_progress_callback=step,
                             folder=sub, name=_part_name(part["q"]), quote_ids=True,
-                            scholarly=bool(rec.get("scholarly")), cancel_token=stop,
+                            scholarly=bool(rec.get("scholarly")), shape=rec["shape"], cancel_token=stop,
                         )
                         part["state"] = "done"
                     except UsageLimited:
