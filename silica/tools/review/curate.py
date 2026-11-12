@@ -106,15 +106,22 @@ _VERDICT = {"no_link": "the worker found no link worth writing",
             "skipped": "the worker skipped it"}
 
 
-def _landed(r: dict) -> str | None:
+def _landed(r: dict, notes: tuple[str, ...]) -> str | None:
     """None when the worker wrote, else what it decided. A duplicate family is
     `partial` when its members' verdicts differ: one merge written is a yes
     that landed. A contradiction is filed as a contested patch, `committed`."""
+    from silica.kernel.write.contested import follow_superseded
+
     status = str(r.get("status") or "")
     if status == "committed" or (status == "partial" and any(
             x.get("status") == "committed" for x in r.get("results") or [])):
         return None
     if status == "no_merge":
+        # A pure duplicate merges no text, so it answers no_merge, yet the
+        # worker points the other note at the winner (superseded_by) and keeps
+        # its name as an alias (dedup._route_verdict): that is the yes landing.
+        if r.get("verdict") == "duplicate" and any(follow_superseded(n) != n for n in notes):
+            return None
         return f"judged {r.get('verdict') or 'distinct'}: nothing merged"
     return _VERDICT.get(status, f"not written ({status or 'no answer'})")
 
@@ -133,12 +140,24 @@ def _apply_judged(vault: str, props: list[Proposal]) -> dict[str, str | None]:
     for r in (res.get("batch") or {}).get("results") or []:
         for p in props:
             if _md(str(r.get("target") or "")) in p.notes:
-                out[p.id] = _landed(r)
+                out[p.id] = _landed(r, p.notes)
     return out
 
 
+def _orphans(vault: str) -> list[Proposal]:
+    """The last /curate's orphans that still are: a link written since (a yes
+    on a link of this queue, an edit) or a note moved away answers the
+    proposal, and a yes on it would spend the worker on a note that needs
+    nothing. The driver's graph, so a listing still reads no model."""
+    from pathlib import Path
+
+    from silica.driver import DRIVER
+
+    return [p for p in offered(vault, "orphan")
+            if (Path(vault) / p.notes[0]).is_file() and not DRIVER.backlinks(p.notes[0])]
+
+
 register(Kind("autolink", "Links to add", lambda vault: offered(vault, "autolink"), _apply_links))
-register(Kind("orphan", "Orphans to connect", lambda vault: offered(vault, "orphan"), _apply_judged,
-              spends_model=True))
+register(Kind("orphan", "Orphans to connect", _orphans, _apply_judged, spends_model=True))
 register(Kind("duplicate", "Possible duplicates", lambda vault: offered(vault, "duplicate"), _apply_judged,
               spends_model=True))
