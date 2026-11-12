@@ -1710,6 +1710,7 @@ function applyThemePref(pref) {
 // this from needing a second call site every time a new one appears.
 new MutationObserver(() => {
   repaintMermaid();
+  repaintSmiles();
   graphStale = true;
   if (activeTab === "graph") setGraphMode(graphMode);
 }).observe(document.documentElement, { attributeFilter: ["data-theme"] });

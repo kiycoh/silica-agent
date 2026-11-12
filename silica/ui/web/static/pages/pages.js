@@ -975,10 +975,55 @@
       try { await drawOne(d, i); } catch { d.textContent = d.dataset.src; }
     }
   }
+  // ---- a note's molecules: smiles-drawer from this same folder, as mermaid (ADR-0159) ------------
+  // A ```smiles fence is <pre class="smiles"> with its source, which a reader without the script
+  // keeps. smiles-drawer places each label with a style attribute, which the host's policy refuses:
+  // for the draw, and only then, that attribute goes through the CSSOM instead. Its <style> names
+  // two classes bare; pages.css sets them, at the sizes measured here, so it is dropped.
+  let molecules = [], molFetching = false;
+  function drawMolecules() {
+    if (!window.SmilesDrawer) return;
+    const drawer = new window.SmilesDrawer.SvgDrawer({ scale: 1, bondLength: 24, padding: 6, fontFamily: css("--sans"),
+      fontSizeLarge: 8, fontSizeSmall: 5, themes: { ink: { C: css("--frost"), BACKGROUND: "transparent" } } });
+    const set = Element.prototype.setAttributeNS;
+    for (const m of molecules) {
+      window.SmilesDrawer.parse(m.dataset.src.trim(), (tree) => {
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        Element.prototype.setAttributeNS = function (ns, name, value) {
+          if (name === "style") this.style.cssText = value; else set.call(this, ns, name, value);
+        };
+        try { drawer.draw(tree, svg, "ink"); } finally { Element.prototype.setAttributeNS = set; }
+        for (const st of $$("style", svg)) st.remove();
+        const w = parseFloat(svg.style.width), h = parseFloat(svg.style.height);
+        svg.style.cssText = "";
+        svg.setAttribute("width", String(Math.round(w)));
+        svg.setAttribute("height", String(Math.round(h)));
+        svg.setAttribute("role", "img");
+        svg.setAttribute("aria-label", `molecule ${m.dataset.src.trim()}`);
+        m.replaceChildren(svg);
+      }, () => { m.textContent = m.dataset.src; }); // not SMILES it reads: the source, as written
+    }
+  }
+  function readMolecules(scope) {
+    molecules = $$("pre.smiles", scope);
+    for (const m of molecules) m.dataset.src ||= m.textContent;
+    if (!molecules.length || !here) return;
+    if (window.SmilesDrawer) { drawMolecules(); return; }
+    if (molFetching) return;
+    molFetching = true;
+    const s = document.createElement("script");
+    s.src = new URL("smiles-drawer.min.js", here).href;
+    s.onload = drawMolecules;
+    document.head.append(s);
+  }
+  for (const b of $$("[data-theme-btn]")) b.addEventListener("click", drawMolecules);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", drawMolecules);
+
   let fetching = false;
   // The page's diagrams when it loads, then the drawer's at each note: the host's policy allows no
   // other way in, and most notes hold none, so mermaid's file is read at the first that does.
   function readDiagrams(scope) {
+    readMolecules(scope);
     diagrams = $$("pre.mermaid", scope);
     for (const d of diagrams) d.dataset.src ||= d.textContent;
     if (!diagrams.length || !here) return;

@@ -443,6 +443,23 @@ def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(mart
     assert '/_s/pages.js"' in page
 
 
+def test_a_molecule_is_printed_as_its_source_and_its_drawer_ships_beside_pages_js(marta, tmp_vault):
+    from silica.kernel.public_site import build, build_file, static_files
+
+    tmp_vault.note("Memory/Forgetting curve.md", "Aspirin:\n\n```smiles\nCC(=O)Oc1ccccc1C(=O)O\n```\n")
+    build("memory")
+    page = (_live(marta) / "memory" / "forgetting-curve.html").read_text(encoding="utf-8")
+    assert '<pre class="smiles">CC(=O)Oc1ccccc1C(=O)O\n</pre>' in page and page.count("<script") == 1
+    # the host fills /_s/ from static_files(), so the drawer is there for pages.js to read (ADR-0159)
+    assert "smiles-drawer.min.js" in static_files()
+    zipped, _ = build_file("memory")
+    import zipfile
+    with zipfile.ZipFile(zipped) as z:
+        names = z.namelist()
+    assert any(n.endswith("_s/smiles-drawer.min.js") for n in names)
+    assert not any(n.endswith("_s/mermaid.min.js") for n in names), "no diagram, no 3.4 MB of mermaid"
+
+
 # --- the renderer's contract ----------------------------------------------------
 
 def test_a_surface_writes_its_own_links_and_images_and_the_grammar_names_no_route():

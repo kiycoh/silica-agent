@@ -931,7 +931,57 @@ function loadMermaid() {
   }));
 }
 
+// A ```smiles fence (ADR-0159) draws as a skeletal formula with smiles-drawer, a
+// 197 KB file read at the first molecule, as mermaid is. Every atom is the theme's
+// frost: the CPK colours would be a second palette on the reading plane, and teal is
+// what can be pressed. A string it cannot parse stays its source, as code.
+let smilesLoad = null;
+function loadSmiles() {
+  return (smilesLoad ||= new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "/static/smiles-drawer.min.js";
+    s.onload = resolve;
+    s.onerror = () => { smilesLoad = null; reject(new Error("smiles-drawer did not load")); };
+    document.head.appendChild(s);
+  }));
+}
+// The sizes app-chat.css sets on `.element` and `.sub`: smiles-drawer measures its
+// labels on a canvas in this font, and draws them by those two classes.
+const SMILES_FONT = { fontFamily: "Archivo, ui-sans-serif, system-ui, sans-serif", fontSizeLarge: 8, fontSizeSmall: 5 };
+function drawSmiles(b) {
+  const src = b.dataset.smiles.trim(), ink = getComputedStyle(document.documentElement).getPropertyValue("--frost").trim();
+  // Unknown elements take C's colour, so one entry inks them all.
+  const drawer = new SmilesDrawer.SvgDrawer({ scale: 1, bondLength: 24, padding: 6, ...SMILES_FONT, themes: { ink: { C: ink, BACKGROUND: "transparent" } } });
+  SmilesDrawer.parse(src, (tree) => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    drawer.draw(tree, svg, "ink");
+    // Its <style> names `.element` and `.sub` bare, and an inline SVG's sheet is the
+    // whole page's: the chart's `.num.sub` took a molecule's 5pt. Scoped in CSS instead.
+    svg.querySelectorAll("style").forEach((st) => st.remove());
+    const w = parseFloat(svg.style.width), h = parseFloat(svg.style.height);
+    svg.removeAttribute("style");
+    svg.setAttribute("width", String(Math.round(w)));
+    svg.setAttribute("height", String(Math.round(h)));
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `molecule ${src}`);
+    b.replaceChildren(svg);
+    b.classList.remove("smiles-failed");
+  }, () => { b.textContent = b.dataset.smiles; b.classList.add("smiles-failed"); });
+}
+function renderSmiles(root) {
+  const blocks = [...root.querySelectorAll("pre.smiles:not([data-smiles])")];
+  if (!blocks.length) return Promise.resolve();
+  // Marked before the load, so a second pass while the file arrives takes none twice;
+  // and the source is kept, since drawing replaces it, for the theme's repaint.
+  blocks.forEach((b) => { b.dataset.smiles = b.textContent; });
+  return loadSmiles().then(() => blocks.forEach(drawSmiles), () => {}); // not loaded: the source stays, as code
+}
+function repaintSmiles() {
+  if (smilesLoad) smilesLoad.then(() => document.querySelectorAll("pre.smiles[data-smiles]").forEach(drawSmiles), () => {});
+}
+
 function renderMermaid(root) {
+  renderSmiles(root); // every surface that draws a diagram draws a molecule
   const blocks = root.querySelectorAll("pre.mermaid");
   if (!blocks.length) return Promise.resolve();
   // Keep the source: mermaid.run() replaces the fence's text with an <svg>, so

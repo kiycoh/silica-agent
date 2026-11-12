@@ -889,7 +889,7 @@ $("#flag-sheet").addEventListener("click", (e) => { if (e.target === e.currentTa
 // second call landing mid-draw would have taken a pending block for a failed one.
 async function drawDiagrams(root, { keepStyles = false } = {}) {
   const pending = [...root.querySelectorAll("pre.mermaid:not([data-processed])")];
-  if (!pending.length) return;
+  if (!pending.length) return renderSmiles(root); // a molecule needs no diagram beside it (ADR-0159)
   await loadMermaid();
   for (const b of pending) {
     // A model's own `style A fill:#f9f` paints over the theme (ADR-0069) and,
@@ -1072,11 +1072,11 @@ function mdLite(src) {
       closeList();
       const buf = []; i++;
       while (i < lines.length && !/^```\s*$/.test(lines[i])) buf.push(lines[i++]);
-      // Only a closed mermaid fence becomes the server's <pre class="mermaid">:
+      // Only a closed mermaid or smiles fence becomes the server's <pre class="…">:
       // drawDiagrams() runs it once the turn ends, and half a diagram is not one.
-      const diagram = i < lines.length && line.slice(3).trim() === "mermaid";
+      const kind = line.slice(3).trim(), diagram = i < lines.length && (kind === "mermaid" || kind === "smiles");
       i++; // closing fence (or EOF while still streaming)
-      out.push(diagram ? `<pre class="mermaid">${escapeHtml(buf.join("\n"))}</pre>` : `<pre><code>${escapeHtml(buf.join("\n"))}</code></pre>`);
+      out.push(diagram ? `<pre class="${kind}">${escapeHtml(buf.join("\n"))}</pre>` : `<pre><code>${escapeHtml(buf.join("\n"))}</code></pre>`);
       continue;
     }
     const h = line.match(/^(#{1,6})\s+(.*)$/);

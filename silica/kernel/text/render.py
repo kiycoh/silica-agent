@@ -366,17 +366,19 @@ def _inline_ofm(text: str, resolve, link, asset, mentions=None) -> str:
 
 
 def _ofm_blocks(tokens) -> None:
-    """OFM block sugar, rewriting the token stream in place: ```mermaid fences
-    become client-rendered <pre class="mermaid">, `> [!kind] title` blockquotes
+    """OFM block sugar, rewriting the token stream in place: ```mermaid and ```smiles
+    fences become client-rendered <pre class="mermaid|smiles">, `> [!kind] title` blockquotes
     become callouts, and `- [ ]` list items become checkbox tasks."""
     from markdown_it.token import Token
 
     i = 0
     while i < len(tokens):
         tok = tokens[i]
-        if tok.type == "fence" and tok.info.strip() == "mermaid":
+        # A ```smiles fence (Obsidian Chem's syntax) is a molecule the page draws
+        # with smiles-drawer, as it draws mermaid (ADR-0159); unread, it is its source.
+        if tok.type == "fence" and tok.info.strip() in ("mermaid", "smiles"):
             raw = Token("html_block", "", 0)
-            raw.content = f'<pre class="mermaid">{_html.escape(tok.content)}</pre>\n'
+            raw.content = f'<pre class="{tok.info.strip()}">{_html.escape(tok.content)}</pre>\n'
             tokens[i] = raw
         elif tok.type == "math_block":
             raw = Token("html_block", "", 0)
@@ -486,7 +488,12 @@ def mathml(tex: str, display: bool) -> str:
     try:
         from latex2mathml.converter import convert
 
-        out = convert(tex, display="block" if display else "inline")
+        from silica.kernel.text import mhchem
+
+        # `\ce{}` and `\pu{}` become plain LaTeX first (ADR-0159); one the grammar
+        # cannot read raises here, and the whole formula shows as its source.
+        out = convert(mhchem.expand(tex) if "\\ce" in tex or "\\pu" in tex else tex,
+                      display="block" if display else "inline")
         probe = _MathMLProbe()
         probe.feed(out)
         probe.close()
