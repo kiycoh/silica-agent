@@ -64,15 +64,19 @@ def test_a_step_that_waits_on_a_turn_has_a_link_out():
             assert "link:" in body, name
 
 
-def test_the_numbers_run_one_to_four_in_order_after_the_welcome():
+def test_the_numbers_run_in_order_after_the_welcome_and_stop_at_eight_bubbles():
+    # ADR-0172 point 4: at most 8 stops, the welcome counted; a link's step
+    # (fetch) stands in for the one it shares a number with.
     ns = [int(re.search(r"\bn: (\d)", body).group(1)) for body in _steps().values()]
-    assert ns == sorted(ns) and set(ns) == {0, 1, 2, 3, 4}
+    assert ns == sorted(ns) and set(ns) == set(range(max(ns) + 1))
+    assert len(set(ns)) <= 8
 
 
 def test_the_controls_the_tour_lights_exist():
     for mark in ('id="vault-add"', 'id="composer"', 'class="composer-shell"',
                  'class="tab" data-tab="graph"', 'class="tab" data-tab="learn"',
-                 'id="tree"', 'id="log"', 'id="tour-start"', 'id="vault-files"'):
+                 'id="tree"', 'id="log"', 'id="tour-start"', 'id="vault-files"',
+                 'id="views"', 'id="write-note"', 'id="rail-write"', 'id="attach"', 'data-tab="metrics"'):
         assert mark in INDEX, mark
 
 
