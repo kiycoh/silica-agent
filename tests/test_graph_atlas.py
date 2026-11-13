@@ -232,7 +232,33 @@ def test_the_renderer_and_the_layout_cache_start_over_once():
     # and a hit would show it for good (ADR-0152, amendment 2026-11-13)
     # -6: a crowded vault is spread by areas, and a hit would show the forces'
     # pile for good (ADR-0152, amendment 2026-11-13)
-    assert 'const LAYOUT_KEY = "silica-graph-layout-6";' in FRAME_JS
+    # -7: an area spreads its provinces too, and a hit would show them in pieces
+    # under a toned ground (ADR-0152, amendment 2026-11-14)
+    assert 'const LAYOUT_KEY = "silica-graph-layout-7";' in FRAME_JS
+
+
+@needs_node
+def test_provinces_that_touch_take_different_tones(tmp_path):
+    """provinceTones (ADR-0136, amendment 2026-11-14): the largest province
+    first, each at the lowest level its neighbours left free; a neighbour is a
+    province of the same country whose ground meets it; a one-note province
+    keeps level 0."""
+    out = _pure(tmp_path, """
+      const pts = [], country = [], prov = [];
+      const put = (x, y, c, p) => { pts.push(x, y); country.push(c); prov.push(p); };
+      for (const x of [0, 1, 2]) for (const y of [0, 1]) put(x, y, 0, 10);    // A, 6 notes
+      for (const x of [3, 4]) for (const y of [0, 1]) put(x, y, 0, 11);       // B, beside A
+      for (const x of [5, 6]) for (const y of [0, 1]) put(x, y, 0, 12);       // C, beside B
+      put(7, 0, 0, 13); put(7, 1, 0, 13);                                     // D, beside C
+      put(8, 0, 0, 14);                                                       // E, one note
+      for (const x of [-1, -2]) for (const y of [0, 1]) put(x, y, 1, 15);     // F, beside A, another country
+      put(-3, 0, 1, 15);
+      put(30, 0, 0, 16); put(30, 1, 0, 16);                                   // G, alone
+      const P = new Float64Array(pts), del = new d3Delaunay.Delaunay(P);
+      const t = provinceTones(P, Int32Array.from(country), Int32Array.from(prov), 1, del, 4);
+      console.log(JSON.stringify(Object.fromEntries(t)));
+    """)
+    assert out == {"10": 0, "11": 1, "12": 0, "13": 1, "14": 0, "15": 0, "16": 0}
 
 
 def test_with_the_atlas_on_a_line_shows_for_the_note_in_hand_only():

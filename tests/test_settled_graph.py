@@ -111,6 +111,46 @@ def test_a_crowded_vault_is_spread_by_areas():
     body = body[:body.index("\n}\n")]
     areas = body.index("if (DISC_SCALE < 1) spreadAreas(x, y, r, adoptAreas(")
     assert areas < body.index("nearFolder(") < body.index("spreadDiscs(x, y, r, gap);")
+    # the provinces ride along, adopted like the areas (ADR-0152, amendment 2026-11-14)
+    assert areas < body.index("adoptAreas(notes.map(n => n.sub == null ? -1 : n.sub), pairs)") < body.index("nearFolder(")
+
+
+@needs_node
+def test_an_area_spreads_its_provinces_into_regions_and_stays_one_land():
+    """Three provinces dealt into one area like cards come out as three
+    regions, every note nearer its own province's centre than another's, and
+    the area stays one land: no note further than a touch from the rest.
+    Without the province keys the same area keeps them mixed (ADR-0152,
+    amendment 2026-11-14)."""
+    xs, ys = _spiral(120, 10.0)
+    prov = [i % 3 for i in range(120)]
+    got = _pure(f"""
+      const run = inner => {{
+        const x = {json.dumps(xs)}, y = {json.dumps(ys)}, r = x.map(() => 1);
+        spreadAreas(x, y, r, x.map(() => 0), x.map(() => true), 0.5, inner);
+        spreadDiscs(x, y, r, 0.5);
+        return [x, y];
+      }};
+      return [run({json.dumps(prov)}), run(null)];
+    """)
+
+    def nearer_own(x, y):
+        cen = [(sum(x[i] for i in range(120) if prov[i] == k) / 40, sum(y[i] for i in range(120) if prov[i] == k) / 40)
+               for k in range(3)]
+        own = [min(range(3), key=lambda k: math.hypot(x[i] - cen[k][0], y[i] - cen[k][1])) == prov[i] for i in range(120)]
+        return sum(own) / 120
+
+    (x, y), (x0, y0) = got
+    assert nearer_own(x, y) == 1.0
+    assert nearer_own(x0, y0) < 0.5
+    # one land: the longest link of the minimum spanning tree is a touch (2r + gap)
+    far, worst = {i: math.hypot(x[i] - x[0], y[i] - y[0]) for i in range(1, 120)}, 0.0
+    while far:
+        u = min(far, key=lambda i: far[i])
+        worst = max(worst, far.pop(u))
+        for v in far:
+            far[v] = min(far[v], math.hypot(x[u] - x[v], y[u] - y[v]))
+    assert worst < 3.0
 
 
 @needs_node

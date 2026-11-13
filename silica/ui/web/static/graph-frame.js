@@ -411,6 +411,36 @@ function atlasBorders(P, country, prov, R, del, cc, keep) {
   return out;
 }
 
+// Each province's strength of its area's hue, 0 to levels - 1 (ADR-0136,
+// amendment 2026-11-14): provinces whose grounds meet inside one country are
+// neighbours, and the largest takes the lowest level its neighbours left free,
+// so two that touch differ while `levels` suffice; the greedy is not a proof of
+// four. A province of one note on show keeps level 0: it is a note, not a
+// region, and a level of its own would speckle the land. P, country, prov, R
+// and del as atlasBorders reads them. Returns Map province -> level.
+function provinceTones(P, country, prov, R, del, levels) {
+  const size = new Map(), next = new Map();
+  for (const s of prov) if (s >= 0) size.set(s, (size.get(s) || 0) + 1);
+  const T = del.triangles, H = del.halfedges, nx = e => e % 3 === 2 ? e - 2 : e + 1;
+  const tie = (a, b) => (next.get(a) || next.set(a, new Set()).get(a)).add(b);
+  for (let e = 0; e < H.length; e++) {
+    if (H[e] >= 0 && H[e] < e) continue;
+    const p = T[e], q = T[nx(e)], a = prov[p], b = prov[q];
+    if (a < 0 || b < 0 || a === b || country[p] !== country[q]) continue;
+    if (Math.hypot(P[2 * q] - P[2 * p], P[2 * q + 1] - P[2 * p + 1]) >= 2 * R) continue;
+    tie(a, b); tie(b, a);
+  }
+  const level = new Map();
+  for (const s of [...size.keys()].sort((a, b) => size.get(b) - size.get(a) || a - b)) {
+    if (size.get(s) < 2) { level.set(s, 0); continue; }
+    const taken = new Set([...(next.get(s) || [])].map(t => level.get(t)));
+    let k = 0;
+    while (taken.has(k) && k < levels - 1) k++;
+    level.set(s, k);
+  }
+  return level;
+}
+
 // A note's ground: its Voronoi cell `poly` ([[x, y], ...], convex, closed or
 // not, any winding) inside the disc of radius R around its note (sx, sy), the
 // disc a regular `sides`-gon (at 24 the gon is within 0.9% of the circle).
@@ -869,8 +899,20 @@ function adoptAreas(area, pairs) {
 // with no area is a disc of one. A node outside a big part (`held` false) does
 // not move: nearFolder places it after. What still touches is left to the
 // overlap pass. In place; `area[i]` below 0 is no area (see adoptAreas).
-const AREA_PACK = 0.7;
-function spreadAreas(x, y, r, area, held, gap) {
+//
+// `inner`, when given, is each note's province (the atlas's sub-area, already
+// adopted like the areas): an area of two provinces or more spreads them inside
+// its room the same way, one level down, so a province lands as one region and
+// its ground can be toned (ADR-0136 and ADR-0152, amendments 2026-11-14). On
+// the forces' places alex_second_brain's 117 provinces of 3+ notes lay in 3.36
+// pieces each, 77% of their notes in the largest; spread this way, 1.35 and
+// 97.5%, with the area 10-NN share unchanged (0.889, 0.883). `squeeze` draws the
+// bodies toward their mean before they are pushed apart: provinces only pushed
+// apart stood as islands with sea between them, the area no longer one land
+// (draft 2026-11-13). The area is then drawn back to the room the rule above
+// gives it, never below, before its own overlap pass.
+const AREA_PACK = 0.7, PROVINCE_SQUEEZE = 0.3;
+function spreadAreas(x, y, r, area, held, gap, inner = null, squeeze = 1) {
   const groups = new Map();
   x.forEach((_, i) => {
     if (!held[i]) return;
@@ -885,8 +927,16 @@ function spreadAreas(x, y, r, area, held, gap) {
       const d = ids.map(i => Math.hypot(x[i] - cx, y[i] - cy)).sort((a, b) => a - b);
       const have = d[Math.floor(d.length * 0.95)];
       const s = have > 0 ? Math.max(1, need / have) : 1;
-      const lx = ids.map(i => cx + (x[i] - cx) * s), ly = ids.map(i => cy + (y[i] - cy) * s);
-      spreadDiscs(lx, ly, ids.map(i => r[i]), gap);
+      const lx = ids.map(i => cx + (x[i] - cx) * s), ly = ids.map(i => cy + (y[i] - cy) * s), lr = ids.map(i => r[i]);
+      const keys = inner && ids.map(i => inner[i]);
+      if (keys && new Set(keys).size > 1) {
+        spreadAreas(lx, ly, lr, keys, ids.map(() => true), gap, null, PROVINCE_SQUEEZE);
+        const qx = lx.reduce((t, v) => t + v, 0) / lx.length, qy = ly.reduce((t, v) => t + v, 0) / ly.length;
+        const q = lx.map((v, j) => Math.hypot(v - qx, ly[j] - qy)).sort((a, b) => a - b)[Math.floor(lx.length * 0.95)];
+        const k = Math.min(1, Math.max(need, have) / q);
+        lx.forEach((v, j) => { lx[j] = qx + (v - qx) * k; ly[j] = qy + (ly[j] - qy) * k; });
+      }
+      spreadDiscs(lx, ly, lr, gap);
       ids.forEach((i, j) => { x[i] = lx[j]; y[i] = ly[j]; });
     }
     const [cx, cy] = mid(ids);
@@ -894,6 +944,10 @@ function spreadAreas(x, y, r, area, held, gap) {
     return { ids, cx, cy, R: e[Math.floor((e.length - 1) * 0.95)] };
   });
   const bx = bodies.map(b => b.cx), by = bodies.map(b => b.cy);
+  if (squeeze < 1) {
+    const mx = bx.reduce((t, v) => t + v, 0) / bx.length, my = by.reduce((t, v) => t + v, 0) / by.length;
+    bx.forEach((v, k) => { bx[k] = mx + (v - mx) * squeeze; by[k] = my + (by[k] - my) * squeeze; });
+  }
   // A grid sized for every body took 0.8 s off this pass on alex_second_brain,
   // and moved the median node 226 px instead of 167: the order pairs are met in
   // decides where the areas go.
@@ -1391,7 +1445,8 @@ function spreadLayout() {
   // median note moves 189 px, the notes' circle grows from 203 to 568 px and the
   // median disc at the fit goes from 2.8 to 2.0 px. 1.2 s of the main thread,
   // once: the layout cache holds it after.
-  if (DISC_SCALE < 1) spreadAreas(x, y, r, adoptAreas(notes.map(n => n.group == null ? -1 : n.group), pairs), big, gap);
+  if (DISC_SCALE < 1) spreadAreas(x, y, r, adoptAreas(notes.map(n => n.group == null ? -1 : n.group), pairs), big, gap,
+                                  adoptAreas(notes.map(n => n.sub == null ? -1 : n.sub), pairs));
   nearFolder(x, y, r, big, notes.map(n => {
     const p = n.path || n.id;
     return p.slice(0, Math.max(0, p.lastIndexOf("/")));
@@ -1968,7 +2023,9 @@ function WARMUP_TICKS() {
 // at full disc size is a packed ball on a dense vault, shown for good on a hit.
 // -6 since a crowded vault is spread by areas (spreadAreas): a hit would show
 // the forces' pile for good.
-const LAYOUT_KEY = "silica-graph-layout-6";
+// -7 since an area spreads its provinces too (spreadAreas, inner): a hit would
+// show them in pieces for good, and the toned ground would paint a mosaic.
+const LAYOUT_KEY = "silica-graph-layout-7";
 const COLD_DECAY = 0.0228;   // d3's own: alpha 1 -> ALPHA_MIN in ~300 ticks
 const NODE_FP = (() => {
   let h = RAW_NODES.length;
@@ -4779,6 +4836,15 @@ const ATLAS_PX = 10.5;
 // The colour's share of a cell's ground, over the floor: the draft's 0.28 on
 // graphite and 0.2 on paper, where a tint reads stronger.
 const ATLAS_GROUND = LIGHT ? 0.2 : 0.28;
+// A province's ground where its area is open (atlasZoom), by provinceTones'
+// level: the area's own hue at four strengths from ATLAS_GROUND up, never a
+// shifted hue, since the areas share the 212-306 deg arc about 3 deg apart and
+// a shifted province reads as the area beside it (palette.community_color).
+// Never weaker than ATLAS_GROUND either: toward the floor a province reads as
+// unclaimed ground (ATLAS_UNCLAIMED). Where no area is open the land stays one
+// colour per area, so the fit keeps the areas' identity (ADR-0136, amendment
+// 2026-11-14, the owner's pick of the draft's A+B).
+const ATLAS_TONES = [0, 1, 2, 3].map(k => ATLAS_GROUND + k * (LIGHT ? 0.09 : 0.1));
 // An island of fewer than ATLAS_MIN_ISLAND notes whose ground meets another
 // area's, a note or two of one area standing among another's, draws under the
 // notes' zoom as unclaimed ground with no border: otherwise each is a hole
@@ -4829,8 +4895,10 @@ function atlasGeometry() {
   }
   if (atlasMemo && atlasMemo.sum === sum && atlasMemo.n === on.length && atlasMemo.R === R) return atlasMemo;
   // polys: [{c, pts}]; coast and borders: [x0, y0, x1, y1, ...]; provinces: country -> the same.
+  // tones: country -> its ground at each ATLAS_TONES level; prov: point -> province; tone: province -> level.
   const g = { sum, n: on.length, R, at: performance.now(), on, polys: [], coast: [], borders: [],
-              provinces: new Map(), ground: new Map(), hue: new Map(), countries: [], subs: [], box: null, paths: null };
+              provinces: new Map(), ground: new Map(), tones: new Map(), prov: null, tone: new Map(),
+              hue: new Map(), countries: [], subs: [], box: null, paths: null };
   atlasMemo = g;
   if (!on.length) return g;
   const P = new Float64Array(2 * on.length);
@@ -4850,6 +4918,7 @@ function atlasGeometry() {
       const hue = countryHue(c, n);
       g.hue.set(c, hue);
       g.ground.set(c, towardFloor(hue, ATLAS_GROUND));
+      g.tones.set(c, ATLAS_TONES.map(t => towardFloor(hue, t)));
     }
     (byCountry.get(c) || byCountry.set(c, []).get(c)).push(i);
     if (prov[i] >= 0) (byProv.get(prov[i]) || byProv.set(prov[i], []).get(prov[i])).push(i);
@@ -4868,6 +4937,8 @@ function atlasGeometry() {
   const b = atlasBorders(P, country, prov, R, del, vor.circumcenters);
   g.borders = b.country;
   for (const c in b.province) g.provinces.set(+c, b.province[c]);
+  g.prov = prov;
+  g.tone = provinceTones(P, country, prov, R, del, ATLAS_TONES.length);
   // The same lines less a small island's, for the zooms under the notes'.
   const isl = atlasIslands(P, country, R, del);
   g.bare = Uint8Array.from(isl.size, (s, i) => s < ATLAS_MIN_ISLAND && isl.shore[i]);
@@ -4905,11 +4976,13 @@ const ATLAS_LINES = [["coast", 1.5, 1], ["provinces", 0.8, 0.5], ["borders", 1.4
 
 // The atlas at the zoom atlasZoom read: under the notes' zoom a small island
 // is unclaimed ground with no border, and only an open area draws its
-// provinces; at the notes' zoom, every line. ground(c, i): point i's colour.
+// provinces and tones them (ATLAS_TONES); at the notes' zoom, every line and
+// every tone. ground(c, i): point i's colour.
 function atlasLayer(g) {
   const z = g.zoom, all = !z || z.notes;
   return {
-    ground: (c, i) => !all && g.bare[i] ? ATLAS_UNCLAIMED : g.ground.get(c),
+    ground: (c, i) => !all && g.bare[i] ? ATLAS_UNCLAIMED
+      : all || z.open.has(c) ? g.tones.get(c)[g.tone.get(g.prov[i]) || 0] : g.ground.get(c),
     borders: all ? g.borders : g.gBorders,
     provinces: all ? g.provinces : new Map([...g.gProvinces].filter(([c]) => z.open.has(c))),
   };
