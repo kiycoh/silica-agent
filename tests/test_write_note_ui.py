@@ -48,12 +48,16 @@ def test_the_foot_says_saved_only_on_the_servers_answer():
 
 def test_the_bundle_exports_what_the_note_view_reads():
     script = (STATIC.parent.parent.parent.parent / "scripts" / "vendor_codemirror.sh").read_text(encoding="utf-8")
-    for name in ("autocompletion", "startCompletion", "search", "searchKeymap", "SearchQuery", "setSearchQuery",
+    for name in ("autocompletion", "startCompletion", "completionKeymap", "acceptCompletion", "closeCompletion",
+                 "selectedCompletion", "search", "searchKeymap", "SearchQuery", "setSearchQuery",
                  "getSearchQuery", "findNext", "findPrevious", "replaceNext", "replaceAll", "openSearchPanel",
                  "closeSearchPanel", "showTooltip", "tooltips"):
         assert re.search(rf"\b{name}\b", script), name
     built = (STATIC / "codemirror.min.js").read_text(encoding="utf-8")
     assert "@codemirror/autocomplete@6.20.4" in built and "@codemirror/search@6.7.2" in built
+    # the prose completion's own keys (ADR-0159): the script naming them is not the bundle exporting them
+    for name in ("completionKeymap", "acceptCompletion", "closeCompletion", "selectedCompletion"):
+        assert f"{name}:()=>" in built, name
 
 
 def test_a_selection_has_both_checks_and_verify_stays_the_persons():

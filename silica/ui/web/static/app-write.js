@@ -39,15 +39,17 @@ function linkSource(cx) {
 // A word typed in math, in `\ce{`, or in a ```smiles fence offers the entries of
 // one static vocabulary (science-vocab.json, about 200 entries in English and
 // Italian), read at the first ask; picking one writes LaTeX, the `\ce` formula
-// or the SMILES in the word's place. No model, and nothing leaves the page.
-let sciVocab = null;
-const loadVocab = () => (sciVocab ||= fetch("/static/science-vocab.json").then((r) => r.json())
+// or the SMILES in the word's place. In prose a name offers its formula as inline
+// math, taken by Tab alone (sciKeys). No model, and nothing leaves the page.
+let sciVocab = null, sciData = null;
+const loadVocab = () => (sciVocab ||= fetch("/static/science-vocab.json").then((r) => r.json()).then((d) => (sciData = d))
   .catch(() => { sciVocab = null; return { molecules: [], formulas: [] }; })); // asked again at the next word
 const fold = (t) => t.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-// What the caret is in: "smiles", "ce", "math" or null. Read from the line as well as
-// the tree, since `$wat` is no InlineMath node until it closes.
+// What the caret is in: "smiles", "ce", "math", "prose" or null. Read from the line as
+// well as the tree, since `$wat` is no InlineMath node until it closes.
 function sciContext(state, pos) {
   const line = state.doc.lineAt(pos), before = line.text.slice(0, pos - line.from);
+  let table = false;
   for (let n = window.CM.syntaxTree(state).resolveInner(pos, -1); n; n = n.parent) {
     if (n.name === "FencedCode") {
       const head = state.doc.lineAt(n.from);
@@ -55,20 +57,28 @@ function sciContext(state, pos) {
     }
     if (n.name === "InlineCode" || n.name === "CodeBlock") return null;
     if (n.name === "MathBlock" || n.name === "InlineMath") return /\\ce\s*\{[^{}]*$/.test(before) ? "ce" : "math";
+    if (n.name === "Table") table = true;
   }
   // An opening `$` as dollarmath reads one: not escaped, not after a word, and not
   // before a space or a digit, so the `$5` of a price is never a formula.
-  if (!/(?:^|[^\\$\w])\$(?![\s\d$])[^$]*$/.test(before)) return null;
-  return /\\ce\s*\{[^{}]*$/.test(before) ? "ce" : "math";
+  if (/(?:^|[^\\$\w])\$(?![\s\d$])[^$]*$/.test(before)) return /\\ce\s*\{[^{}]*$/.test(before) ? "ce" : "math";
+  // Prose is what is left once a pasted address would also go in as typed (the
+  // properties, a link, HTML), an open `[` (a link's words or a note's name, no Link
+  // node until it closes) and a table's raw lines, whose cells are the grid's (ADR-0160).
+  return table || /\[[^\]]*$/.test(before) || pasteAsText(state, pos) ? null : "prose";
 }
-// The entries whose names hold `q`: the name starting with it first, then a word of it.
-function vocabHits(pool, q) {
+// The entries whose names hold `q`: the name starting with it (3), a word of it starting
+// with it (2), anywhere in it (1). In prose, only the name's first word or its last: a
+// pause after "della" opened the list on every name holding it (measured 2026-11-13),
+// and "pitagora" still finds "teorema di Pitagora".
+function vocabHits(pool, q, prose = false) {
   const hits = [];
   for (const e of pool) {
     let best = 0, label = e.en[0];
     for (const name of [...e.en, ...e.it]) {
-      const f = fold(name);
-      const s = !q ? 1 : f.startsWith(q) ? 3 : f.split(/[\s'-]+/).some((w) => w.startsWith(q)) ? 2 : f.includes(q) ? 1 : 0;
+      const f = fold(name), words = f.split(/[\s'-]+/);
+      const s = !q ? 1 : f.startsWith(q) ? 3
+        : (prose ? words.at(-1).startsWith(q) : words.some((w) => w.startsWith(q))) ? 2 : !prose && f.includes(q) ? 1 : 0;
       if (s > best) { best = s; label = name; }
     }
     if (best) hits.push([best, label, e]);
@@ -76,33 +86,72 @@ function vocabHits(pool, q) {
   // no word yet (a button's list): the file's order, formulas before molecules in math
   return q ? hits.sort((x, y) => y[0] - x[0] || x[1].localeCompare(y[1])) : hits;
 }
-async function scienceSource(cx) {
-  const kind = sciContext(cx.state, cx.pos);
+// The words before the caret, as CodeMirror's matchBefore reads them (250 characters at most).
+function wordBefore(state, pos) {
+  const line = state.doc.lineAt(pos), start = Math.max(line.from, pos - 250);
+  const text = line.text.slice(start - line.from, pos - line.from), at = text.search(/[\p{L}][\p{L}\p{N}' -]*$/u);
+  return at < 0 ? null : { from: start + at, text: text.slice(at) };
+}
+const scienceSource = async (cx) => sciResult(cx.state, cx.pos, cx.explicit, sciData || await loadVocab());
+// The list for the caret at `pos` from the vocabulary `v`; synchronous, so a Tab can ask it too.
+function sciResult(state, pos, explicit, v) {
+  const kind = sciContext(state, pos);
   if (!kind) return null;
-  const word = cx.matchBefore(/[\p{L}][\p{L}\p{N}' -]*$/u);
-  if (!cx.explicit && (!word || word.text.trim().length < 3)) return null; // `$x$` is a variable, not a name
-  const v = await loadVocab();
-  const pool = kind === "math" ? [...v.formulas, ...v.molecules] : v.molecules;
+  const prose = kind === "prose";
+  const word = wordBefore(state, pos);
+  // `$x$` is a variable, not a name; a sentence is mostly words, so prose waits for four letters
+  const least = prose ? 4 : explicit ? 1 : 3;
+  if (!word ? prose || !explicit : word.text.trim().length < least) return null;
+  const pool = kind === "math" || prose ? [...v.formulas, ...v.molecules] : v.molecules;
   // `$a + acqua`: the longest run of words before the caret that names something,
-  // so "acido solforico" is one name and the `a` of `a acqua` is left alone.
-  let from = cx.pos, hits = word ? [] : vocabHits(pool, "");
+  // so "acido solforico" is one name and the `a` of `a acqua` is left alone. A run
+  // starts after a space or an elision: "dell'acido solforico" names the acid.
+  let from = pos, hits = word ? [] : vocabHits(pool, "");
   if (word) {
-    for (const m of word.text.matchAll(/\S+/g)) {
-      const q = fold(word.text.slice(m.index).trim());
-      if (q.length < (cx.explicit ? 1 : 3)) break;
-      hits = vocabHits(pool, q);
+    for (const m of word.text.matchAll(/[^\s']+/g)) {
+      const rest = word.text.slice(m.index);
+      // In prose the space typed after a name counts, so the list stays only while a
+      // longer name goes on ("acqua ossigenata").
+      const q = fold(prose ? rest : rest.trim());
+      if (q.trim().length < least) break;
+      hits = vocabHits(pool, q, prose);
       if (hits.length) { from = word.from + m.index; break; }
     }
   }
   if (!hits.length) return null;
-  const insertOf = (e) => (kind === "smiles" ? e.smiles : kind === "ce" ? e.ce : e.tex ?? `\\ce{${e.ce}}`);
+  const tex = (e) => e.tex ?? `\\ce{${e.ce}}`;
+  const insertOf = (e) => (kind === "smiles" ? e.smiles : kind === "ce" ? e.ce : prose ? `$${tex(e)}$` : tex(e));
   return {
     from, filter: false,
     options: hits.slice(0, 40).map(([, label, e]) => {
       const detail = e.ce || e.tex;
-      return { label, detail: detail.length > 36 ? detail.slice(0, 35) + "…" : detail, apply: insertOf(e) };
+      return { label, detail: detail.length > 36 ? detail.slice(0, 35) + "…" : detail, apply: insertOf(e), prose };
     }),
   };
+}
+// Enter takes a suggestion where a name is what is being written (math, `\ce{`, a smiles
+// fence, `[[`). In prose it stays a newline and Tab alone takes one: prose is typed fast,
+// and "acqua" or "water" must never become a formula by the key meant for the next line.
+// Tab is held while a prose suggestion shows, even inside the list's first 75 ms where
+// the accept is refused, or that Tab would leave the editor.
+function sciKeys() {
+  const { completionKeymap, acceptCompletion, closeCompletion, selectedCompletion } = window.CM;
+  const prose = (v) => !!selectedCompletion(v.state)?.prose;
+  // After a key the list has no selection until its sources answer, about 100 ms, so a
+  // Tab right after a letter fell through, out of the editor or indenting a list item
+  // (measured 2026-11-13): while the list shows, Tab takes what it is about to show.
+  const refreshing = (v) => {
+    if (!sciData || !v.contentDOM.hasAttribute("aria-controls")) return false; // no list on screen
+    const at = v.state.selection.main.head, r = sciResult(v.state, at, false, sciData), o = r && r.options[0];
+    if (!o || !o.prose) return false;
+    v.dispatch({ changes: { from: r.from, to: at, insert: o.apply }, selection: { anchor: r.from + o.apply.length }, userEvent: "input.complete" });
+    return true;
+  };
+  return [
+    ...completionKeymap.map((k) => (k.key !== "Enter" ? k
+      : { key: "Enter", run: (v) => (prose(v) ? (closeCompletion(v), false) : acceptCompletion(v)) })),
+    { key: "Tab", run: (v) => (prose(v) ? (acceptCompletion(v), true) : refreshing(v)) },
+  ];
 }
 
 // --- an unresolved link under the caret is a door (ADR-0155 point 9) ----------
@@ -359,7 +408,8 @@ function noteExtensions(s) {
   s.extensions = [
     // on the body: the view and the drawer clip what hangs out of them
     tooltips({ parent: document.body }),
-    autocompletion({ override: [linkSource, scienceSource], icons: false }),
+    autocompletion({ override: [linkSource, scienceSource], icons: false, defaultKeymap: false }),
+    Prec.highest(keymap.of(sciKeys())), // where the stock completion keys stood, Enter and Tab per sciKeys
     search({ top: true, createPanel: findPanel }),
     ghostField(s),
     imageDrop(s),
