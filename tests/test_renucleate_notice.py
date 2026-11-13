@@ -85,7 +85,7 @@ class TestTheCompletionLineSaysIt:
         line = _nucleate_result_line({"final_status": "Success",
                                       "renucleated": {"lec.md": 2}})
 
-        assert "2 note(s)" in line
+        assert "2 notes" in line
         assert "/revert --source lec.md" in line
 
     def test_a_plain_run_has_no_such_clause(self):

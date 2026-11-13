@@ -257,7 +257,7 @@ def test_nucleate_holds_a_document_silica_wrote_from_the_vault_back(tmp_vault):
             said.append(str(text))
 
     assert ingest.nucleate(["Documents/Book.md"], console=_Out()) == ""
-    assert "written by Silica from your notes" in said[-1] and "--anyway" in said[-1]
+    assert "Silica wrote it from your notes" in said[-1] and "--anyway" in said[-1]
     assert "written by Silica" in ingest.run_injector(["Documents/Book.md"], "Notes")["error"]
 
 

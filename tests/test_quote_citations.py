@@ -159,10 +159,10 @@ def test_a_part_resolves_by_its_stamp_whatever_the_folder_votes(tmp_vault, monke
 
     verdicts, kept = _dispatch([one, two, sibling], vote)
 
-    assert verdicts[one] == verdicts[two] == "stamp"
+    assert verdicts[one] == verdicts[two] == "as its properties say"
     assert one in kept and two in kept
     if vote == "clip":
-        assert verdicts[sibling] == "folder vote" and sibling in kept
+        assert verdicts[sibling] == "like most files in its folder" and sibling in kept
     else:
         assert sibling not in kept  # filed as the person's draft, as before
 

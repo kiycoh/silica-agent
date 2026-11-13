@@ -1065,7 +1065,7 @@ def test_fetch_failure_line_survives_a_url_that_looks_like_rich_markup(
     monkeypatch.setattr(wf, "fetch_page", boom)
 
     out = _run_cli("/fetch https://a.test/[/x]")
-    assert "fetch failed" in out
+    assert "Not saved." in out
     assert "[/x]" in out  # shown verbatim, not swallowed as a closing tag
 
 
@@ -1089,7 +1089,7 @@ def test_web_search_failure_line_survives_rich_markup(tmp_vault, monkeypatch):
     monkeypatch.setattr(wr, "web_research", boom)
 
     out = _run_cli('/web-search "x"')
-    assert "web-search failed" in out
+    assert "Not saved." in out
     assert "[/y]" in out
 
 

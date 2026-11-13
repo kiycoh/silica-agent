@@ -133,6 +133,7 @@ def _status(console) -> None:
                  f"{last.get('written', 0)} written")
     console.print(line)
     g6 = mail.gate6()
-    console.print(f"  [dim]Gate 6: {g6['nucleated']} of the first {g6['threads']} imported "
-                  f"thread(s) carry a PDF you then nucleated; attachments get their own ADR at "
-                  f"{mail.GATE6_FIRES} of {mail.GATE6_WINDOW}[/]")
+    # Gate 6's count (sources/mail.py) without the gate: whether attachments earn
+    # their own design is the maintainers' question, and the line reaches the person.
+    console.print(f"  [dim]{g6['nucleated']} of the first {g6['threads']} imported "
+                  f"thread{'s' if g6['threads'] != 1 else ''} carried a PDF you then turned into notes.[/]")

@@ -47,7 +47,7 @@ def test_gate6_is_shown_by_the_status_command(tmp_vault, capsys):
 
     _imported(tmp_vault, 0)
     direct("/mail", [])
-    assert "Gate 6: 0 of the first 1" in capsys.readouterr().out
+    assert "0 of the first 1 imported thread carried a PDF" in capsys.readouterr().out
 
 
 # --- gate 1: hygiene and the filter ------------------------------------------------

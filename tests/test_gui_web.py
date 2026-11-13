@@ -430,7 +430,7 @@ def test_inline_slash_command_reports_its_failure_too(client, monkeypatch):
     events = _read_sse(tc.post("/chat", json={"text": "/fetch https://example.test/"}))
     done = events[-1]
     assert done["type"] == "done"
-    assert "fetch failed" in done["answer"] and "bot wall" in done["answer"]
+    assert "Not saved" in done["answer"] and "bot wall" in done["answer"]
 
 
 def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypatch):
