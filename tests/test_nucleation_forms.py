@@ -563,7 +563,7 @@ class TestVisibility:
 
         run_command.expansion("/nucleate Inbox/art.md --target=Research")
 
-        assert any("clip" in p and "sniff" in p for p in printed)
+        assert any("a web clipping" in p and "from its text" in p for p in printed)
 
 
 class TestProfileFlag:

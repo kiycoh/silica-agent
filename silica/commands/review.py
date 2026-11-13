@@ -121,19 +121,39 @@ def anneal(c: Call) -> Result:
     return out
 
 
+# A curation item's kind and an applied item's outcome, as the person reads them
+# (ADR-0178): (one, many). A name not here is said as it is.
+_KIND_WORDS = {"dedup": ("possible duplicate", "possible duplicates"),
+               "autolink": ("link to add", "links to add"),
+               "orphan": ("note nothing links to", "notes nothing links to")}
+_OUTCOME_WORDS = {"committed": ("change written", "changes written"),
+                  "autolink": ("link added", "links added"),
+                  "no_merge": ("pair kept apart", "pairs kept apart"),
+                  "no_link": ("note left without a new link", "notes left without a new link"),
+                  "no_change": ("left as it was", "left as they were"),
+                  "failed": ("failed", "failed"),
+                  "cancelled": ("stopped", "stopped")}
+
+
+def _said(n: int, words: tuple[str, ...]) -> str:
+    return f"{n} {words[0] if n == 1 else words[-1]}"
+
+
 def curate(c: Call) -> Result:
     """/curate [folder] [--apply] — the curation pass over a folder."""
     args, out = c.args, c.out
     from silica.commands import answered
     from silica.tools import curate as curation
 
+    from rich.markup import escape
+
     apply = any(p == "--apply" for p in args)
     folder = " ".join(positional(args))
-    scope = folder or "(vault)"
+    where = f"[bold]{escape(folder)}[/]" if folder else "the whole vault"
     if apply:
-        out.print(f"  Curate on [bold]{scope}[/] — applying via the worker seam…")
+        out.print(f"  Tidying {where}: writing the changes…")
     else:
-        out.print(f"  Curate on [bold]{scope}[/] — dry-run (nothing is written)…")
+        out.print(f"  Looking over {where} for what to tidy (nothing is written yet)…")
     from silica.tools.review.curate import PERSON_ASKED
 
     asked = PERSON_ASKED.set(True)
@@ -142,16 +162,16 @@ def curate(c: Call) -> Result:
     finally:
         PERSON_ASKED.reset(asked)
     if "error" in res:
-        out.print(f"  [yellow]{res['error']}[/]")
+        out.print(f"  [yellow]{escape(str(res['error']))}[/]")
         return out
 
     total = res.get("total", 0)
     counts = res.get("counts", {})
     if total == 0:
-        out.print("  Nothing to do — the vault is coherent.")
+        out.print("  Nothing to tidy: the notes hold together.")
         return out
 
-    breakdown = ", ".join(f"{v} {k}" for k, v in counts.items())
+    breakdown = ", ".join(_said(v, _KIND_WORDS.get(k, (k, k))) for k, v in counts.items())
     if apply:
         # Real outcomes (execution["outcome_counts"], derived from the
         # dispatch batch's per-item status + the mechanical autolink's
@@ -160,21 +180,21 @@ def curate(c: Call) -> Result:
         # a distinct verdict and nothing was actually merged.
         outcome = res.get("execution", {}).get("outcome_counts", {})
         dispatched = sum(outcome.values())
-        outcome_breakdown = ", ".join(f"{v} {k}" for k, v in outcome.items()) or "no changes"
-        out.print(f"  Applied — dispatched [bold]{dispatched}[/] → outcomes: {outcome_breakdown}")
+        outcome_breakdown = ", ".join(_said(v, _OUTCOME_WORDS.get(k, (k, k)))
+                                      for k, v in outcome.items()) or "nothing changed"
+        out.print(f"  Done with {dispatched} item{'s' if dispatched != 1 else ''}: {outcome_breakdown}.")
     else:
-        from rich.markup import escape
-
-        out.print(f"  Plan — [bold]{total}[/] item(s): {breakdown}")
+        out.print(f"  {total} thing{'s' if total != 1 else ''} to tidy: {breakdown}.")
         for it in res.get("items", []):
-            pair = f" ↔ {escape(it['partner'])}" if it.get("partner") else ""
+            pair = f" ↔ [bold]{escape(it['partner'])}[/]" if it.get("partner") else ""
             # The reason each pair was proposed: a duplicate's percentage, an
             # autolink's shared concepts (ADR-0164).
             why = f"  [dim]{escape(it['reason'])}[/]" if it.get("reason") else ""
-            out.print(f"  · [bold]{it['kind']}[/]  {escape(it['target'])}{pair}{why}")
+            kind = _KIND_WORDS.get(it["kind"], (it["kind"],))[0]
+            out.print(f"    {kind}: [bold]{escape(it['target'])}[/]{pair}{why}")
         if judged := res.get("judged"):
             _say_judged(out, judged)
-        out.print('  Run [bold]/curate --apply[/] to execute, or ask e.g. "apply only dedup".')
+        out.print('  /curate --apply writes them, or ask for part of it, e.g. "only the duplicates".')
     return out
 
 

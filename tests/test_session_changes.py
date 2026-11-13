@@ -177,9 +177,9 @@ def test_the_repl_lists_what_the_session_wrote(tmp_vault, capsys):
     assert direct("/changes") is True
     # Rich honours FORCE_COLOR (set by some harnesses): read the text, not the codes.
     out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
-    assert "M Notes/Ada.md" in out and "+1" in out
-    assert "A Notes/New.md" in out
-    assert "2 note(s)" in out
+    assert "changed Notes/Ada.md +1" in out
+    assert "added Notes/New.md" in out
+    assert "2 notes changed" in out
 
 
 def test_the_repl_says_nothing_happened_rather_than_printing_an_empty_list(tmp_vault, capsys):

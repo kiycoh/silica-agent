@@ -430,7 +430,7 @@ def test_inline_slash_command_reports_its_failure_too(client, monkeypatch):
     events = _read_sse(tc.post("/chat", json={"text": "/fetch https://example.test/"}))
     done = events[-1]
     assert done["type"] == "done"
-    assert "fetch failed" in done["answer"] and "bot wall" in done["answer"]
+    assert "Not saved" in done["answer"] and "bot wall" in done["answer"]
 
 
 def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypatch):
@@ -1662,7 +1662,7 @@ def test_find_endpoint_requires_a_query(client):
     tc, _server = client
     r = tc.get("/find", params={"q": ""})
     assert r.status_code == 200
-    assert "usage: /find" in r.text
+    assert "Type what to look for after <code>/find</code>" in r.text
 
 
 def test_find_endpoint_reports_empty_index_gracefully(client, tmp_path, monkeypatch):
@@ -1671,7 +1671,7 @@ def test_find_endpoint_reports_empty_index_gracefully(client, tmp_path, monkeypa
     r = tc.get("/find", params={"q": "gears"})
     assert r.status_code == 200
     # Both legs empty (embed + co-occurrence) → the facade reports no index.
-    assert "No index available" in r.text
+    assert "Search has no index of this vault yet" in r.text
 
 
 def test_find_endpoint_renders_results_as_note_links(client, tmp_path, monkeypatch):

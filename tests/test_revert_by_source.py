@@ -152,4 +152,4 @@ class TestTheReplCommand:
         assert direct("/revert --source lec.md", []) is True
         assert calls["source"] == "lec.md"
         out = capsys.readouterr().out
-        assert "1 run(s)" in out and "3 note(s)" in out
+        assert "1 run of lec.md" in out and "3 notes stay as they are" in out

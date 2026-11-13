@@ -335,5 +335,5 @@ def test_cli_curate_apply_prints_real_outcomes_not_planned_counts(monkeypatch):
         handled = run_command.direct("/curate --apply", [])
     assert handled is True
     printed = "\n".join(buf)
-    assert "no_merge" in printed
+    assert "1 pair kept apart" in printed
     assert "1 dedup" not in printed

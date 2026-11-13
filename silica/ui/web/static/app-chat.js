@@ -1787,6 +1787,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         curText.raw = ev.answer;
       }
       close(""); // collapse any open thinking, end all segments
+      if (ev.said) body.dataset.said = "1";
       drawDiagrams(body);
       const notes = turnNotes(ev.notes);
       if (notes) ledger.appendChild(notes);
@@ -2024,7 +2025,9 @@ function finishLedger(msg, led, { steps, secs, reads, cited, found = [] }) {
 // One end for the live turn and the replayed one: number the citations, then
 // state the line with the reads the answer did not cite.
 function finishTurn(body, ledger, touched, meta) {
-  const cited = citeTurn(body);
+  // A command's answer (ADR-0178) links what it made or found: those are not
+  // citations, and numbering them put a "1" beside every row of /changes.
+  const cited = body.dataset.said ? new Set() : citeTurn(body);
   const reads = uniqueReads([...touched].filter(([, e]) => e === "read").map(([r]) => r));
   finishLedger(body.closest(".msg"), ledger, { ...meta, reads, cited });
 }
@@ -2296,13 +2299,13 @@ async function runFind(rest) {
     else if (part) tokens.push(part);
   }
   const query = tokens.join(" ");
-  if (!query) { body.textContent = "usage: /find <query> [--k=N]"; mirror(); return; }
+  if (!query) { body.textContent = "Type what to look for after /find, e.g. /find attention."; mirror(); return; }
   body.textContent = "searching…";
   try {
     const r = await fetch("/find?q=" + encodeURIComponent(query) + "&k=" + k);
     body.innerHTML = await r.text();
   } catch (e) {
-    body.textContent = "error: " + e;
+    body.textContent = "Search did not answer: " + e;
   }
   mirror();
 }
@@ -2691,11 +2694,15 @@ input.addEventListener("keydown", (e) => {
       updateCmdSel();
       return;
     } else if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
-      e.preventDefault();
-      if (cmdSelIdx >= 0 && cmdSelIdx < filteredCommands.length) {
-        pickCommand(filteredCommands[cmdSelIdx]);
+      const c = filteredCommands[cmdSelIdx];
+      // A command that takes nothing, typed whole, is sent by Enter: picking it
+      // again wrote the same name back and left the list open, so /contested
+      // never left the box (2026-11-13).
+      if (!(e.key === "Enter" && c && c.path === undefined && !c.usage && input.value.trim() === c.name)) {
+        e.preventDefault();
+        if (c) pickCommand(c);
+        return;
       }
-      return;
     } else if (e.key === "Escape") {
       e.preventDefault();
       box.hidden = true;

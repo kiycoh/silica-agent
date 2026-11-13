@@ -123,32 +123,21 @@ def changes(c: Call) -> Result:
     if not rows:
         out.print("  Nothing changed this session.")
         return out
-    # Single letters, not words: the point of the column is that the eye skips it
-    # unless something is unusual, and `git status`'s letters are already learned.
-    letter = {"created": "A", "modified": "M", "deleted": "D", "moved": "R"}
-    # Padding is computed on the plain text and applied by hand: rich markup adds
-    # characters that f-string alignment would count, so `:>` would stagger the
-    # columns by the length of whichever colour tag happens to be on the row.
-    width = max(len(r["path"]) for r in rows)
-    add_w = max(len(f"+{r['added']}") for r in rows)
-    del_w = max(len(f"-{r['removed']}") for r in rows)
-    total_add = total_del = 0
+    # Words, not git's A/M/D/R: the letters and the padded columns read at a glance
+    # in a terminal, and a person who is not technical met them in the chat, where
+    # the padding is lost anyway (ADR-0178). A row is an item under the count line.
+    word = {"created": "added", "modified": "changed", "deleted": "deleted", "moved": "moved"}
+    total_add = sum(r["added"] for r in rows)
+    total_del = sum(r["removed"] for r in rows)
+    out.print(f"  {len(rows)} note{'s' if len(rows) != 1 else ''} changed in this session, "
+              f"[green]+{total_add}[/] [red]-{total_del}[/] lines:")
     for r in rows:
-        total_add += r["added"]
-        total_del += r["removed"]
-        plus = f"+{r['added']}" if r["added"] else ""
-        minus = f"-{r['removed']}" if r["removed"] else ""
-        cells = (f"{' ' * (add_w - len(plus))}[green]{plus}[/] "
-                 f"[red]{minus}[/]{' ' * (del_w - len(minus))}")
-        origin = f"  [dim]← {escape(r['from'])}[/]" if r["from"] else ""
-        out.print(
-            (f"  [dim]{letter.get(r['kind'], '?')}[/] [bold]{escape(r['path'])}[/]"
-             f"{' ' * (width - len(r['path']))}  {cells}{origin}").rstrip()
-        )
-    out.print(
-        f"  [dim]{len(rows)} note(s), +{total_add} -{total_del} — "
-        f"/undo <note-path> takes one back, /revert the whole run.[/]"
-    )
+        tally = " ".join(t for t in (f"[green]+{r['added']}[/]" if r["added"] else "",
+                                     f"[red]-{r['removed']}[/]" if r["removed"] else "") if t)
+        origin = f" [dim]from {escape(r['from'])}[/]" if r["from"] else ""
+        out.print(f"    {word.get(r['kind'], r['kind'])} [bold]{escape(r['path'])}[/]"
+                  f"{origin}{' ' + tally if tally else ''}")
+    out.print("  [dim]/undo with a note's name takes that note back; /revert takes back a whole run.[/]")
     return out
 
 
@@ -230,7 +219,8 @@ def undo(c: Call) -> Result:
     if batch:
         res = revert_and_sweep(batch["run"])
         left = res["skipped"] + res["errors"]
-        out.print(f"  Took back the review batch {batch['run'][:8]}: {len(res['reverted'])} note(s) restored"
+        out.print(f"  Took back the last review batch: {len(res['reverted'])} note"
+                  f"{'s' if len(res['reverted']) != 1 else ''} restored"
                   + (f", {len(left)} left as they are" if left else "") + ".")
         return out
     if moved:
@@ -256,7 +246,9 @@ def undo(c: Call) -> Result:
                       f"({why.get('reason') or why.get('error')})")
         return out
     if not note_path:
-        out.print("  Nothing to undo — no patches recorded in this session.")
+        # Not "nothing changed": /changes also lists notes a command saved, which
+        # no undo step records (a page /fetch saved goes with /delete).
+        out.print("  Nothing to undo: no edit, deletion or move of a note is recorded.")
         return out
     from silica.kernel.write.pages import is_page, undo_page
 
@@ -312,7 +304,9 @@ def undo(c: Call) -> Result:
             pass  # the undo landed; an unsettled top only labels the next write as an outside edit
         depth = store.depth(note_path)
         remaining = max(0, depth - 1)
-        out.print(f"  Undone: [bold]{note_path}[/]{kept}  [dim]({remaining} undo step(s) remaining)[/]")
+        more = (f"{remaining} more /undo step{'s' if remaining != 1 else ''} for it" if remaining
+                else "nothing more to undo for it")
+        out.print(f"  Undone: [bold]{note_path}[/]{kept}  [dim]({more})[/]")
     except Exception as exc:
         # The note stays as it was and the undo store keeps its step: the reason
         # is all there is to say.
@@ -465,7 +459,7 @@ def revert(c: Call) -> Result:
     if not given:
         run_id = _latest_revertable(vault)
         if not run_id:
-            out.print("  Nothing to revert — no runs recorded for this vault.")
+            out.print("  Nothing to take back: no run was recorded in this vault.")
             return out
         return _revert_one(run_id, out)
     found = get_undo_journal().match_runs(given, vault)
@@ -514,14 +508,14 @@ def _revert_by_source(source: str, vault: str | None, out: Result) -> Result:
     skipped = sum(len(r["skipped"]) for r in runs)
     errors = sum(len(r["errors"]) for r in runs)
     left = sum(u["notes"] for u in res["unrevertable"])
-    line = (f"  Revert by source {source}: {len(runs)} run(s), {reverted} writes "
-            f"reverted, {skipped} skipped, {errors} errors.")
+    line = (f"  Took back {len(runs)} run{'s' if len(runs) != 1 else ''} of {escape(source)}: "
+            f"{_taken_back(reverted, skipped, failed=errors)}.")
     if res["unrevertable"]:
-        line += (f" {len(res['unrevertable'])} run(s) not in the undo journal: "
-                 f"{left} note(s) left in place (/revert <run-id> still applies "
-                 f"to journalled runs).")
+        line += (f" {len(res['unrevertable'])} older run{'s' if len(res['unrevertable']) != 1 else ''} "
+                 f"kept no record of what {'they' if len(res['unrevertable']) != 1 else 'it'} changed, "
+                 f"so {left} note{'s' if left != 1 else ''} stay as they are.")
     if not runs and not res["unrevertable"]:
-        line = f"  Nothing to revert — the ledger has no record of {source}."
+        line = f"  Nothing to take back: no run of {escape(source)} was recorded."
     out.print(line)
     try:
         from silica.kernel.write.run_log import append_log_line, format_revert_event
@@ -535,8 +529,22 @@ def _revert_by_source(source: str, vault: str | None, out: Result) -> Result:
     return out
 
 
+def _taken_back(undone: int, edited: int = 0, stale: int = 0, failed: int = 0) -> str:
+    """What a take-back did, in words, naming only the counts that are not zero."""
+    said = [f"{undone} change{'s' if undone != 1 else ''} undone"]
+    if edited:
+        said.append(f"{edited} left as they are because the note was edited since")
+    if stale:
+        said.append(f"{stale} left because the vault changed since")
+    if failed:
+        said.append(f"{failed} could not be undone")
+    return ", ".join(said)
+
+
 def _revert_one(run_id: str, out: Result) -> Result:
     """One run taken back, journal and Zotero, and the line that says what it was."""
+    from rich.markup import escape
+
     from silica.kernel.link.sweep import revert_and_sweep
     from silica.kernel.write.undo_journal import get_undo_journal
 
@@ -553,16 +561,11 @@ def _revert_one(run_id: str, out: Result) -> Result:
     if info and info.get("started_at"):
         from datetime import datetime as _dt
         when = _dt.fromtimestamp(info["started_at"]).strftime("%Y-%m-%d %H:%M")
-    label = f" ({source}, started {when})" if source and when else ""
+    what = f"the run of {source} started {when}" if source and when else f"run {run_id[:8]}"
     res = revert_and_sweep(run_id)
     _revert_zotero(run_id, out)
-    stale = len(res.get("stale", []))
-    line = (
-        f"  Revert {run_id[:8]}…{label}: {len(res['reverted'])} writes reverted, "
-        f"{len(res['skipped'])} skipped (modified), "
-        f"{stale} stale (vault changed), {len(res['errors'])} errors."
-    )
-    out.print(line)
+    out.print(f"  Took back {escape(what)}: "
+              f"{_taken_back(len(res['reverted']), len(res['skipped']), len(res.get('stale', [])), len(res['errors']))}.")
     # log.md narrated the run's writes; it must narrate the take-back too.
     try:
         from silica.kernel.write.run_log import append_log_line, format_revert_event

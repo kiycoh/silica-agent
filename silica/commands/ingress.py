@@ -65,12 +65,15 @@ def nucleate(c: Call) -> Result:
     it dispatched, or an agent-directed message when the target cannot be resolved
     from the arguments alone.
     """
+    from rich.markup import escape
+
     out = c.out
     w = read_words(c.args)
     if not w.files and not w.flags:
         return out.to_model(ingest.drain_wal(out))
     if w.bad_seen:
-        out.print(f"  [yellow]--seen ignored: {w.bad_seen!r} is not YYYY-MM-DD[/]")
+        out.print(f"  [yellow][bold]Date left out.[/bold] --seen={escape(repr(w.bad_seen))} is not a date "
+                  f"written YYYY-MM-DD.[/]")
     return out.to_model(ingest.nucleate(
         w.files, target_dir=w.target, hub=w.hub, seen=w.seen, profile=w.profile,
         keep_sources=w.keep_sources, user_input=c.raw, console=out, ask=c.ask and c.ask.text,
@@ -83,21 +86,39 @@ def promote(c: Call) -> Result:
     return c.out.to_model(ingest.promote(positional(c.args), c.out))
 
 
+# What a page saved in the Inbox waits for, said the same after /fetch, /keep and
+# /web-search (ADR-0178): the command keeps its name, the line says what it does.
+_NEXT = "Read it, then /nucleate turns it into notes."
+
+
+def _notes(n: int) -> str:
+    return "1 note" if n == 1 else f"{n} notes"
+
+
+def _sentence(e: BaseException) -> str:
+    """An exception's words as the sentence under a box's title, escaped for Rich."""
+    from rich.markup import escape
+
+    said = str(e).strip() or type(e).__name__
+    return escape(said[:1].upper() + said[1:])
+
+
 def convert(c: Call) -> Result:
     """/convert <file...> [--target=DIR] — document to inbox notes, no distillation."""
     out = c.out
     w = read_words(c.args)
     if not w.files:
         return out.refused(f"/convert requires at least one file path. Usage: {c.row.synopsis}")
+    from rich.markup import escape
+
     from silica.sources.convert import convert
     for f in w.files:
         try:
             paths = convert(f, dest_dir=w.target)
-            out.print(
-                f"  Converted {f} → [bold]{len(paths)}[/] note(s): {', '.join(paths)}"
-            )
+            notes = ", ".join(f"[bold]{escape(p)}[/]" for p in paths)
+            out.print(f"  {escape(f)} became {_notes(len(paths))}: {notes}")
         except ValueError as e:
-            out.print(f"  [yellow]Skipped {f}: {e}[/]")
+            out.print(f"  [yellow][bold]Not converted.[/bold] {escape(f)}: {escape(str(e))}[/]")
     return out
 
 
@@ -123,12 +144,9 @@ def web_search(c: Call) -> Result:
             # name), and a URL carrying `[/x]` raises MarkupError straight out
             # of the except that exists to report the failure. Escaping only the
             # interpolated value keeps the styling on the rest of the line.
-            out.print(
-                f"  Findings → [bold]{escape(note_rel)}[/]"
-                "  (review, then /nucleate to bring it in)"
-            )
+            out.print(f"  Saved the findings as [bold]{escape(note_rel)}[/] in your Inbox. {_NEXT}")
         except Exception as e:  # missing key, no findings, convergence guard, network
-            out.print(f"  [yellow]web-search failed: {escape(str(e))}[/]")
+            out.print(f"  [yellow][bold]Not saved.[/bold] {_sentence(e)}[/]")
     return out
 
 
@@ -144,12 +162,9 @@ def fetch(c: Call) -> Result:
 
     try:
         note_rel = fetch_to_inbox(url)
-        out.print(
-            f"  Fetched → [bold]{escape(note_rel)}[/]"
-            "  (review, then /nucleate to bring it in)"
-        )
+        out.print(f"  Saved [bold]{escape(note_rel)}[/] in your Inbox. {_NEXT}")
     except Exception as e:  # SSRF guard, bot wall, missing yt-dlp, network
-        out.print(f"  [yellow]fetch failed: {escape(str(e))}[/]")
+        out.print(f"  [yellow][bold]Not saved.[/bold] {_sentence(e)}[/]")
     return out
 
 
@@ -162,10 +177,7 @@ def keep(c: Call) -> Result:
 
     try:
         note_rel = keep_last()
-        out.print(
-            f"  Kept → [bold]{escape(note_rel)}[/]"
-            "  (review, then /nucleate to bring it in)"
-        )
+        out.print(f"  Saved the answer and its sources as [bold]{escape(note_rel)}[/] in your Inbox. {_NEXT}")
     except Exception as e:  # empty slot, name collision, write refused
-        out.print(f"  [yellow]keep failed: {escape(str(e))}[/]")
+        out.print(f"  [yellow][bold]Not saved.[/bold] {_sentence(e)}[/]")
     return out

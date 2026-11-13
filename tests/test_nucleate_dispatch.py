@@ -130,7 +130,7 @@ def test_a_batch_picks_every_units_folder_in_one_call(stub_coordinator, monkeypa
     assert got == {_UNITS["memo"]: "Notes", _UNITS["Adam"]: "ML/Optimization",
                    _UNITS["YOLO"]: "ML/Vision"}
     out = capsys.readouterr().out
-    assert "auto-target: 3 of 3 source(s) → 3 folder(s)" in out
+    assert "Chose a folder for 3 of 3 files, 3 folders in all:" in out
     assert "Adam → ML/Optimization" in out and "memo.md → Notes" in out
 
 
@@ -610,7 +610,7 @@ def test_convert_command_returns_sentinel_and_reports(repo_vault, monkeypatch, c
     monkeypatch.setattr(conv_mod, "convert", lambda f, dest_dir="": ["Inbox/paper.md"])
     msg = expansion("/convert paper.pdf")
     assert msg == ""  # fully handled inline
-    assert "Converted" in capsys.readouterr().out
+    assert "paper.pdf became 1 note" in capsys.readouterr().out
 
 
 def test_convert_command_no_files_errors():
@@ -638,7 +638,7 @@ def test_nucleate_renucleate_of_modified_source_warns(repo_vault, capsys, stub_c
     assert msg == ""
 
     out = capsys.readouterr().out
-    assert "re-nucleate of a modified source" in out
+    assert "Changed since last time." in out
     assert "2 note" in out
 
 
@@ -656,7 +656,7 @@ def test_nucleate_same_sha_no_warning(repo_vault, capsys, stub_coordinator):
     assert msg is not None
 
     out = capsys.readouterr().out
-    assert "re-nucleate of a modified source" not in out
+    assert "Changed since last time." not in out
 
 
 def test_nucleate_no_prior_provenance_no_warning(repo_vault, capsys, stub_coordinator):
@@ -669,7 +669,7 @@ def test_nucleate_no_prior_provenance_no_warning(repo_vault, capsys, stub_coordi
     assert msg is not None
 
     out = capsys.readouterr().out
-    assert "re-nucleate of a modified source" not in out
+    assert "Changed since last time." not in out
 
 
 def test_nucleate_missing_target_still_warns_on_renucleate(repo_vault, capsys, monkeypatch):
@@ -689,7 +689,7 @@ def test_nucleate_missing_target_still_warns_on_renucleate(repo_vault, capsys, m
 
     assert msg is not None and "silica_run_injector" in msg
     out = capsys.readouterr().out
-    assert "re-nucleate of a modified source" in out
+    assert "Changed since last time." in out
 
 
 def test_settings_sets_and_shows_vault_yaml(repo_vault, capsys):
@@ -1104,5 +1104,5 @@ def test_the_command_and_the_browsers_jobs_resume_a_batch_by_one_rule(tmp_vault)
     assert plan.ready_units == [("books/A.pdf", ["Inbox/A-1.md"])]
     assert plan.to_convert == ["books/C.pdf", "books/E.xyz", "books/gone.pdf"]
     said = [str(o) for objects, _ in out.lines for o in objects]
-    assert said == ["  books/A.pdf: reusing [bold]1[/] already-converted segment(s)",
-                    "  [dim]books/B.pdf: already nucleated (1 segment(s) in done/) — skipped[/]"]
+    assert said == ["  books/A.pdf: reusing 1 part read before",
+                    "  [dim]books/B.pdf: already turned into notes, skipped.[/]"]

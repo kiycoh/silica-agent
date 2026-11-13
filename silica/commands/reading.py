@@ -29,6 +29,8 @@ def find(c: Call) -> Result:
     if not query:
         out.print(f"  Usage: {c.row.synopsis}")
         return out
+    from rich.markup import escape
+
     from silica.kernel.recall.search import facade_search
 
     # The core and not the tool: the tool's payload drops `score` for the
@@ -46,18 +48,21 @@ def find(c: Call) -> Result:
                           f"{' ' if min_trust and life else ''}"
                           f"{'--lifecycle=' + life if life else ''}[/]")
         if results:
-            out.print(f"  Results for [bold]{query}[/] (top {len(results)}):")
+            # The path in bold, so the chat links the note (ADR-0178); the query
+            # in quotes, since a query in bold that names a note would link it too.
+            out.print(f"  {len(results)} note{'s' if len(results) != 1 else ''} for "
+                      f"\"{escape(query)}\", the closest first:")
             for r in results:
                 score = r.get("score", 0.0)
                 path = r.get("path", r.get("name", "?"))
-                out.print(f"    [{score:.3f}] {path}")
+                out.print(f"    [bold]{escape(path)}[/] [dim]{score:.2f}[/]")
         elif "error" in parsed:
-            out.print(f"  [yellow]{parsed['error']}[/]")
+            out.print(f"  [yellow]{escape(str(parsed['error']))}[/]")
         else:
-            out.print(f"  No results for '{query}'.")
+            out.print(f"  Nothing found for \"{escape(query)}\".")
     except Exception:
         # `result` is what the search answered, or "" when it raised: as it came.
-        out.print(result)
+        out.print(result, markup=False)
     return out
 
 
@@ -157,10 +162,10 @@ def contested(c: Call) -> Result:
             out.print(f"      this note: {escape(' '.join(r['mine'].split())[:140])}")
         out.print(f"      {'the other' if r['other'] else 'the flag'}: {escape(' '.join(r['their'].split())[:140])}")
         out.print(f"      conflicts with: {escape(r['ref'])}")
+    # The person's two ways, not the tool call the agent makes for the second one.
     out.print(
-        "  Settle one in the note's drawer in the app (this note holds, the other holds, both hold when, "
-        "keep it open), or ask the agent: silica_flag_note(clear=True, ref=…) with a `conflicts with` "
-        "line above files the other side under `## Superseded`."
+        "  Settle each in its note's drawer (this note holds, the other holds, both hold when, "
+        "or keep it open), or ask in the chat to settle one."
     )
     return out
 

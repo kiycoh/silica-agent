@@ -114,8 +114,8 @@ def file_drafts(
                     forms.pin_sniff(rr[0], folder_form)
                     resolved[i] = (rr[0], voted)
             console.print(
-                f"  folder vote: [bold]{folder_form}[/] "
-                f"({votes[folder_form]} of {sum(votes.values())} sniffed file(s))"
+                f"  Read every file as [bold]{_FORM_WORDS.get(folder_form, folder_form)}[/], as "
+                f"{votes[folder_form]} of the {_count(sum(votes.values()), 'file')} it looked at read"
             )
 
     for f, rr in zip(md_files, resolved):
@@ -127,7 +127,8 @@ def file_drafts(
             # Visibility is non-negotiable (nucleation-forms spec): the lens
             # verdict prints where auto-target is announced, never silently.
             console.print(
-                f"  {f}: profile [bold]{res.profile or 'default'}[/] ({res.origin})"
+                f"  {f}: read as [bold]{_FORM_WORDS.get(res.form) or res.form or 'a document'}[/] "
+                f"({_ORIGIN_WORDS.get(res.origin, res.origin)})"
             )
             kept.append(f)
             continue
@@ -142,7 +143,8 @@ def file_drafts(
         try:
             dest_dir = target_dir or pick_target_folder([f])
         except Exception:
-            console.print(f"  [yellow]{f}: draft, but no target resolved — distilling instead[/]")
+            console.print(f"  [yellow][bold]No folder.[/bold] {f} looks like a draft of yours, but no folder "
+                          f"was found for it, so it is turned into notes instead.[/]")
             kept.append(f)
             continue
         # The filed copy is a Silica write like any other: composed into the
@@ -176,9 +178,7 @@ def file_drafts(
             gate.record_landed(undo_run, gate.undo_of(note_rel, prior))
         _autolink_filed(note_rel, dest_dir, console)
         gate.archive_source(f)
-        console.print(
-            f"  filed draft ({res.origin}): [bold]{note_rel}[/] — body kept intact"
-        )
+        console.print(f"  Filed your draft as [bold]{note_rel}[/], word for word.")
     return kept
 
 
@@ -200,7 +200,7 @@ def _autolink_filed(note_rel: str, folder: str, console) -> None:
         logger.debug("filed note %s not autolinked: %s", note_rel, e)
         return
     if added:
-        console.print(f"  [dim]{note_rel}: linked {len(added)} note(s) it names[/]")
+        console.print(f"  [dim]{note_rel}: linked the {_count(len(added), 'note')} it names.[/]")
 
 
 def prior_conversions() -> dict[str, dict]:
@@ -1045,9 +1045,9 @@ def _nucleate_globs(files: list[str], console) -> tuple[list[str], bool]:
                 for h in _glob.glob(f, root_dir=CONFIG.vault_path.strip() or ".")
             )
             if hits:
-                console.print(f"  {f}: [bold]{len(hits)}[/] match(es)")
+                console.print(f"  {f}: {_count(len(hits), 'file')} match")
             else:
-                console.print(f"  [yellow]{f}: no files match[/]")
+                console.print(f"  [yellow][bold]Nothing found.[/bold] No file matches {f}.[/]")
                 glob_miss = True
             globbed.extend(hits)
         else:
@@ -1077,7 +1077,7 @@ def _nucleate_expand_folders(
         adapter = adapter_for(f, enabled=enabled)
         group = expand_folder(f, enabled) if adapter is None else []
         if group:
-            console.print(f"  {f}: [bold]{len(group)}[/] source file(s)")
+            console.print(f"  {f}: {_count(len(group), 'file')}")
             # run_root is the code lane's destination naming, so it stays
             # keyed on code files only.
             run_root.update(dict.fromkeys(group, folder_rel(f) or ""))
@@ -1108,10 +1108,9 @@ def _nucleate_expand_folders(
                 if photos:
                     pending = [p for p in pending if p not in photos]
                     console.print(
-                        f"  [dim]{f}: left {len(photos)} image(s) alone — "
-                        f"a photographed book is one artefact, not "
-                        f"{len(photos)} documents; /nucleate an image "
-                        f"explicitly to OCR it on its own[/]"
+                        f"  [dim]{f}: left out {_count(len(photos), 'image')}: a photographed "
+                        f"book is read as one document. Name an image in /nucleate to read "
+                        f"it on its own.[/]"
                     )
             # A converted document's own figures are not sources: 14 lectures
             # in Inbox/machine_learning queued the 129 images/ they embed as
@@ -1122,8 +1121,8 @@ def _nucleate_expand_folders(
                        if p in paths or Path(p).name.casefold() in names]
             if figures:
                 pending = [p for p in pending if p not in figures]
-                console.print(f"  [dim]{f}: left {len(figures)} file(s) "
-                              f"its notes embed alone[/]")
+                console.print(f"  [dim]{f}: left out {_count(len(figures), 'file')} its "
+                              f"notes show inside them.[/]")
             # A document converted earlier sits beside its notes, and those
             # notes ride the document's own unit (reused segments, in
             # plan_units). Listed here too, every lecture of a course
@@ -1132,10 +1131,10 @@ def _nucleate_expand_folders(
             if carried:
                 group = [g for g in group if g not in carried]
             if group or pending:
-                detail = f"[bold]{len(group)}[/] note(s)" if group else ""
+                detail = _count(len(group), "note") if group else ""
                 if pending:
                     detail += (", " if detail else "") + \
-                        f"[bold]{len(pending)}[/] file(s) to convert"
+                        f"{_count(len(pending), 'file')} to read"
                 console.print(f"  {f}: {detail}")
             group = group + pending
         expanded.extend(group or [f])
@@ -1320,15 +1319,13 @@ def plan_units(
             state, prior = resume_state(f, converted)
             if state == "ready" and prior:
                 console.print(
-                    f"  {f}: reusing [bold]{len(prior['inbox'])}[/] "
-                    f"already-converted segment(s)"
+                    f"  {f}: reusing {_count(len(prior['inbox']), 'part')} read before"
                 )
                 ready_units.append((f, prior["inbox"]))
                 continue
             if state == "done" and prior:
                 console.print(
-                    f"  [dim]{f}: already nucleated "
-                    f"({prior['done']} segment(s) in done/) — skipped[/]"
+                    f"  [dim]{f}: already turned into notes, skipped.[/]"
                 )
                 continue
             to_convert.append(f)  # "" too: convert() stays the authority on what it refuses
@@ -1348,7 +1345,7 @@ def plan_units(
     if staged:
         if len(files) > 10:
             console.print(f"  Wrote [bold]{staged}[/] code note(s). /wiki for prose.")
-        console.print("  [dim]/revert undoes this run.[/]")
+        console.print("  [dim]/revert takes this run back.[/]")
 
     # Loose .md arguments distill together, exactly as before the pipeline —
     # first in line: they are ready, so the first conversion overlaps them.
@@ -1393,12 +1390,12 @@ def prepare_unit(
     mfs, ref_chunks = split_apparatus(mfs)
     if ref_chunks:
         console.print(
-            f"  [dim]skipped {len(ref_chunks)} non-content file(s) "
-            f"(references, contents, venue checklists, a document's list of parts, Excalidraw drawings) — "
-            f"kept in the inbox, not distilled into notes[/]"
+            f"  [dim]Left out {_count(len(ref_chunks), 'file')} with no content of their own "
+            f"(references, contents, venue checklists, a document's list of parts, Excalidraw "
+            f"drawings): they stay in the Inbox.[/]"
         )
         if not mfs:
-            console.print("  [yellow]nothing left to nucleate: only non-content files were given[/]")
+            console.print("  [yellow][bold]Nothing to do.[/bold] Only files with no content of their own were given.[/]")
             return []
 
     # Draft filing (docs/specs/nucleation-forms.md): the owner's own
@@ -1432,16 +1429,16 @@ def prepare_unit(
             modified, prior_notes = check_renucleate(source_key(mf), incoming_sha)
             if modified:
                 console.print(
-                    f"  [yellow]re-nucleate of a modified source: {prior_notes} note(s) "
-                    f"derived from the previous version[/]"
+                    f"  [yellow][bold]Changed since last time.[/bold] This file was turned into notes "
+                    f"before: {_count(prior_notes, 'note')} came from its previous version.[/]"
                 )
         except Exception as exc:
             logger.debug("/nucleate: re-nucleate provenance check skipped for %s (non-fatal): %s", mf, exc)
         kept_md.append(mf)
     if distilled_prior:
         console.print(
-            f"  [dim]{distilled_prior} segment(s) already distilled "
-            f"(unchanged since their run) — skipped[/]"
+            f"  [dim]Skipped {_count(distilled_prior, 'part')} turned into notes before and "
+            f"unchanged since.[/]"
         )
     return kept_md
 
@@ -1465,7 +1462,7 @@ def _zotero_backlink(leaf: tuple[str, dict], run_id: str | None, console) -> Non
     if status == "edited":
         console.print("  Zotero: the back-link note was edited in Zotero, so it was left as it is")
     else:
-        console.print(f"  Zotero: back-link note {status} · in zotero.jsonl · undo: /revert")
+        console.print(f"  Zotero: the note that links the paper to Silica was {status}. /revert takes it back.")
 
 
 def _leaf_rel(name: str) -> str:
@@ -1484,43 +1481,67 @@ def _leaf_text(name: str) -> str | None:
         return None  # no leaf yet: /revert deletes the one convert creates
 
 
-def _nucleate_result_line(result: dict) -> str:
-    """The one-line outcome of a Coordinator run, ready to print after the label.
+# What a run's final_status says to the person (ADR-0178). A status not named here
+# is an error's own words, said as they came.
+_STATUS_WORDS = {
+    "success": "done",
+    "partial": "partly done",
+    "failed": "not done",
+    "no_ops": "nothing new to add to your notes",
+    "already_nucleated": "already in your notes",
+}
 
-    `label` inside the coverage comprehension is the counter's name, deliberately
-    not the caller's unit label — extracting this is what stops the two sharing
-    a name in one scope.
-    """
-    status = result.get("final_status") or result.get("error") or "done"
-    failed = result.get("failed_chunks") or []
-    extra = f" — {len(failed)} chunk(s) failed" if failed else ""
+# How a source was read (kernel.forms), in the words of the file's kind and of
+# who decided it: the verdict is printed where the folder is announced, never
+# silently (docs/specs/nucleation-forms.md).
+_FORM_WORDS = {"study": "study material", "transcript": "a transcript", "clip": "a web clipping"}
+_ORIGIN_WORDS = {"stamp": "as its properties say", "notebook": "as its notebook says",
+                 "sniff": "from its text", "fallback": "by default", "default": "by default",
+                 "folder vote": "like most files in its folder"}
+
+
+def _count(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def _nucleate_result_line(result: dict) -> str:
+    """The outcome of a Coordinator run in words, ready to print after the label:
+    the verdict, then what it wrote and anything the person has to know."""
+    raw = str(result.get("final_status") or result.get("error") or "done")
+    bits = []
+    if notes := result.get("yield_notes") or 0:
+        bits.append(f"{_count(notes, 'note')} written")
+    if links := result.get("yield_links") or 0:
+        bits.append(f"{_count(links, 'link')} added")
+    if failed := result.get("failed_chunks") or []:
+        bits.append(f"{len(failed)} of {len(failed) + (result.get('committed_chunks') or 0)} parts failed")
     sw = result.get("link_sweep") or {}
     if sw.get("links_stripped"):
-        extra += (
-            f" — {sw['links_stripped']} dangling link(s) unlinked "
-            f"in {sw['notes_edited']} note(s)"
-        )
+        bits.append(f"{_count(sw['links_stripped'], 'link')} to notes that do not exist removed")
     if sw.get("links_relinked"):
-        extra += f" — {sw['links_relinked']} spelling variant(s) repointed"
+        bits.append(f"{_count(sw['links_relinked'], 'link')} pointed at the right spelling")
     # Coverage, post-anneal. Silence here read as "everything landed",
     # and the counts that said otherwise lived in log.md and a bundle
     # under ~/.silica — neither of which anyone opens after a Success.
     cov = result.get("coverage") or {}
-    bits = [
-        f"{cov[k]} {label}" for k, label in (
-            ("recovered_ops", "deferred op(s) recovered"),
-            ("deferred_ops", "still deferred"),
-            ("flagged_notes", "note(s) landed flagged for review"),
-        ) if cov.get(k)
-    ]
-    if bits:
-        extra += " — " + ", ".join(bits)
+    if cov.get("recovered_ops"):
+        bits.append(f"{_count(cov['recovered_ops'], 'change')} held back earlier written after all")
+    if cov.get("deferred_ops"):
+        bits.append(f"{_count(cov['deferred_ops'], 'change')} waiting in /review")
+    if cov.get("flagged_notes"):
+        bits.append(f"{_count(cov['flagged_notes'], 'note')} marked for your review")
     # A re-nucleated source keeps its previous derivation beside the new one;
     # the line says so and names the way back, since no prompt stood in the way.
     for src, n in sorted((result.get("renucleated") or {}).items()):
-        extra += (f" — {src} re-nucleated: {n} note(s) from its previous version "
-                  f"kept (/revert --source {src} removes them)")
-    return f"[bold]{status}[/]{extra}"
+        bits.append(f"{src} was turned into notes before, and its {_count(n, 'note')} from then "
+                    f"are kept (/revert --source {src} removes them)")
+    said = _STATUS_WORDS.get(raw.lower(), raw)
+    return f"{said}: {', '.join(bits)}" if bits else said
+
+
+def _lead(head: str, text: str) -> str:
+    """`text` after a unit's label, or opening the line, capitalised, where there is none."""
+    return head + text if head else text[:1].upper() + text[1:]
 
 
 def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str = "",
@@ -1535,6 +1556,8 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
     from silica.sources.convert import GpuOutOfMemory, convert
     from silica.kernel.write.gate import open_run
 
+    from rich.markup import escape
+
     files, glob_miss = _nucleate_globs(files, console)
     if not files and glob_miss:
         return ""  # a miss is an answer, not a question for the agent
@@ -1542,14 +1565,12 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
     enabled = get_active_manifest().sources
     files, run_root = _nucleate_expand_folders(files, enabled, console)
     if not anyway:
-        from rich.markup import escape
-
         files, held = hold_written(files)
         for f in held:
             console.print(
-                f"  [yellow]{escape(Path(f).name)} was written by Silica from your notes: nucleated, it "
-                f"would come back as notes repeating the ones it was written from. Edit it first, or "
-                f"add {ANYWAY} to nucleate it all the same.[/]")
+                f"  [yellow][bold]Skipped.[/bold] {escape(Path(f).name)}: Silica wrote it from your notes, "
+                f"so turning it into notes would repeat them. Edit it first, or type the command again "
+                f"with {ANYWAY}.[/]")
         if held and not files:
             return ""  # a held file is an answer, not a question for the agent
 
@@ -1608,8 +1629,8 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
             # grouping, never a lost run.
             logger.debug("/nucleate: batch folder pick failed (non-fatal): %s", exc)
         if picks:
-            console.print(f"  auto-target: {len(picks)} of {total_units} source(s) → "
-                          f"{len(set(picks.values()))} folder(s)")
+            console.print(f"  Chose a folder for {len(picks)} of {_count(total_units, 'file')}, "
+                          f"{_count(len(set(picks.values())), 'folder')} in all:")
             for k, folder in sorted(picks.items()):
                 console.print(f"    {names[k]} → [bold]{_announced_target(folder)}[/]")
 
@@ -1627,7 +1648,7 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
             # call left out (or a single unit), not a full agent turn.
             try:
                 unit_target = pick_target_folder(mfs)
-                console.print(f"  auto-target: [bold]{_announced_target(unit_target)}[/]")
+                console.print(f"  Chose the folder [bold]{_announced_target(unit_target)}[/]")
             except Exception as exc:
                 logger.debug("/nucleate: auto-target pick failed (non-fatal): %s", exc)
 
@@ -1659,7 +1680,8 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
 
         head = f"{label}: " if (batch and label) else ""
         console.print(
-            f"  {_at()}{head}nucleate: {len(mfs)} file(s) → [bold]{_announced_target(unit_target)}[/]"
+            f"  {_at()}{_lead(head, 'turning')} {_count(len(mfs), 'file')} into notes in "
+            f"[bold]{_announced_target(unit_target)}[/]"
         )
         # The unit as the injector call the agent makes: the web chat drew no
         # block for it and dropped its phases, and the narration held no running
@@ -1683,7 +1705,7 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
             # A path outside the vault (or any other rejected argument) is
             # user error, not a crash: the batch moves to the next unit.
             _tell(ToolErrorEvent(name, call_id, str(exc), 0))
-            console.print(f"  [yellow]nucleate: {exc}[/]")
+            console.print(f"  [yellow][bold]Not done.[/bold] {escape(str(exc))}[/]")
             return None
         except BaseException as exc:
             _tell(ToolErrorEvent(name, call_id, str(exc) or type(exc).__name__, 0))
@@ -1692,8 +1714,7 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
                                 json.dumps(project_result(result, run_id, len(mfs)), default=str),
                                 _time.monotonic() - started, 0))
         console.print(
-            f"  {_at()}{head}nucleate finished: "
-            f"{_nucleate_result_line(result)} — details in log.md"
+            f"  {_at()}{_lead(head, _nucleate_result_line(result))}. What it did is in [bold]log.md[/]"
         )
         dispatched += 1
         return None
@@ -1715,7 +1736,7 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
             return None
         if batch:
             console.print(
-                f"  {_at()}[{i + 1}/{len(to_convert)}] converting {to_convert[i]}"
+                f"  {_at()}Reading {to_convert[i]} ({i + 1} of {len(to_convert)})"
             )
         leaf = leaf_for.get(to_convert[i])
         if leaf and undo_run:
@@ -1736,7 +1757,7 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
             try:
                 segs = pending.result()
             except (ValueError, RuntimeError) as e:
-                console.print(f"  [yellow]Skipped {src}: {e}[/]")
+                console.print(f"  [yellow][bold]Skipped.[/bold] {escape(str(src))}: {escape(str(e))}[/]")
                 if isinstance(e, GpuOutOfMemory):
                     # The GPU stays full until something else lets go of it, so
                     # every later file fails the same way: 129 in a row at ~8 s
@@ -1744,9 +1765,9 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
                     # the inbox for a run once the GPU is free.
                     left = len(to_convert) - i - 1
                     if left:
-                        console.print(f"  [yellow]GPU out of memory: left {left} "
-                                      f"file(s) unconverted; free the GPU and "
-                                      f"/nucleate again[/]")
+                        console.print(f"  [yellow][bold]Not read.[/bold] The graphics card ran out of "
+                                      f"memory, so {_count(left, 'file')} were left unread. Close what "
+                                      f"uses it and run /nucleate again.[/]")
                     break
                 segs = []
             if i in leaf_prior and segs and undo_run:  # leaf_prior fills only under an undo_run
@@ -1769,12 +1790,12 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
 
     if total_units and not dispatched:
         console.print(
-            "  [dim]nothing left to distill — everything was filed, "
-            "skipped, or already in the vault[/]"
+            "  [dim]Nothing new to turn into notes: everything was filed, "
+            "skipped or is already in your notes.[/]"
         )
     if batch and dispatched > 1:
         console.print(
-            f"  [dim]{dispatched} run(s) — /revert undoes the most recent; "
-            f"run it again for the one before[/]"
+            f"  [dim]{dispatched} runs. /revert takes back the most recent; "
+            f"type it again for the one before.[/]"
         )
     return ""
