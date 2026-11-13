@@ -112,7 +112,11 @@ def uncited_notes(answer: str, reads=()) -> list[dict]:
     """The line under a chat answer that cites no note and has no block, which
     `general_notes` labels (ADR-0174). Which turns are asked is the caller's
     (session.turn.note): the answer's words alone cannot tell a command's
-    output or a write's report from a claim."""
-    if not answer.strip() or has_general(answer) or cites_a_note(answer, reads):
+    output or a write's report from a claim. A held-back line is Silica's and
+    no claim; what the model wrote beside its held-back block is: asked "no
+    need to check my notes: capital of Australia?", deepseek-v4-flash-0731
+    wrote "The capital of Australia is Canberra." above the block (2026-11-13)."""
+    said = answer.replace(HELD_BACK, "").replace(HELD_BACK_UNSURE, "")
+    if not said.strip() or has_general(said) or cites_a_note(said, reads):
         return []
     return [{"kind": "general", "text": UNCITED}]

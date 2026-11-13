@@ -180,6 +180,16 @@ def test_an_uncited_answer_with_no_search_gets_the_line_live_on_reload_and_in_th
     assert {"kind": "general", "text": gk.UNCITED} in replayed[-1]
 
 
+def test_the_claim_written_beside_a_held_back_block_still_gets_the_line(client, monkeypatch):
+    """Seen live 2026-11-13: the model wrote the answer above its block, the
+    block was held back, and "Canberra" stood uncited with no line."""
+    said = f"The capital of Australia is **Canberra**.\n\n{GENERAL_HEAD}\n> Canberra, since 1913."
+    monkeypatch.setattr("silica.session.turn.run_agent", _turn(said))
+    done = _sse(client.post("/chat", json={"text": "No need to check my notes: capital of Australia?"}))[-1]
+    assert "1913" not in done["answer"] and "held back" in done["answer"]
+    assert _general(done) == [gk.UNCITED]
+
+
 def test_a_cited_vault_answer_gets_no_line(client, monkeypatch):
     read = ToolCompleteEvent(name="silica_recall", args={}, call_id="c1", result=json.dumps(
         {"query": "galileo", "notes": ["Culture/Science/Galileo Galilei"]}), duration_s=0.0, iteration=1)
@@ -212,7 +222,8 @@ def test_the_turn_step_leaves_out_commands_held_back_blocks_the_web_and_empty_an
 
     assert notes_of("Canberra.") == [gk.UNCITED]
     assert notes_of("Canberra.", text="/explain capitals") == []
-    assert notes_of(gk.HELD_BACK, held=True) == []
+    assert notes_of(gk.HELD_BACK) == [], "the held-back line is Silica's, not a claim"
+    assert notes_of(gk.HELD_BACK_UNSURE) == []
     assert notes_of(EMPTY_COMPLETION, empty=True) == []
     assert notes_of("Canberra.", stopped=True) == []
     w = RecallWatch()
@@ -238,7 +249,7 @@ def test_a_degraded_search_that_found_nothing_holds_a_block_back_with_its_own_re
     monkeypatch.setattr("silica.session.turn.run_agent", _turn(ANSWER, unsure))
     done = _sse(client.post("/chat", json={"text": "what was the peace of westphalia?"}))[-1]
     assert "1648" not in done["answer"] and gk.HELD_BACK_UNSURE in SESSION.chat.messages[-1]["content"]
-    assert _general(done) == []
+    assert _general(done) == [gk.UNCITED], "what the model wrote beside the block cites no note"
 
 
 def test_a_block_with_no_search_before_it_is_held_back_and_never_stored(client, monkeypatch):
@@ -254,7 +265,9 @@ def test_a_block_with_no_search_before_it_is_held_back_and_never_stored(client, 
         assert "1648" not in shown and "general knowledge was held back" in shown
     assert gk.HELD_BACK in stored
     assert "Ask again with /web" in done["answer"]
-    assert not any(n["kind"] == "general" for n in done.get("notes", []))
+    # No label for the block, which is gone. The prose the model wrote beside
+    # it cites no note, and with no search it rests on none (ADR-0174).
+    assert _general(done) == [gk.UNCITED]
 
 
 def test_the_copy_button_copies_what_the_server_drew_not_what_streamed():

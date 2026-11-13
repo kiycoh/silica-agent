@@ -60,7 +60,6 @@ class Turn:
     watch: Any = None          # what the loop calls with each event
     answer: str = ""
     empty: bool = False        # the model gave nothing, read before anything is appended to the answer
-    held: bool = False         # its general-knowledge block was held back, the line saying so stands in it
     stopped: bool = False      # the person stopped it: an outcome, not an answer
     unread: list[str] = field(default_factory=list)
     skill_note: dict | None = None
@@ -254,7 +253,7 @@ def hold_unsearched_general(t: Turn) -> None:
     held = held_back(t.answer, HELD_BACK_UNSURE if t.read.unsure else HELD_BACK)
     if held == t.answer:
         return
-    t.answer, t.held = held, True
+    t.answer = held
     messages = t.conv.messages
     if messages and messages[-1].get("role") == "assistant":
         messages[-1]["content"] = held
@@ -318,12 +317,12 @@ def note(t: Turn) -> None:
         command, refs = t.text.startswith("/"), read_refs(t.conv.messages)
         notes += general_notes(t.answer, command=command, reads=refs)
         # ADR-0174 leaves out, read off the turn and not the answer's words:
-        # a command's output, a held-back block (its line says what happened),
-        # an empty answer, a web answer (it cites its pages), a turn that
-        # wrote, whose answer reports the write, and a turn whose every search
-        # came back empty, under which the thin-coverage line already says the
-        # notes had nothing and the answer is most often the refusal saying so.
-        if not (command or t.held or t.empty or t.read.web_answer or t.read.wrote or t.read.thin):
+        # a command's output, an empty answer, a web answer (it cites its
+        # pages), a turn that wrote, whose answer reports the write, and a turn
+        # whose every search came back empty, under which the thin-coverage
+        # line already says the notes had nothing and the answer is most often
+        # the refusal saying so.
+        if not (command or t.empty or t.read.web_answer or t.read.wrote or t.read.thin):
             notes += uncited_notes(t.answer, refs)
     notes += numbers_notes(t.unread)
     if not (t.stopped or t.web):
