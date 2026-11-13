@@ -28,7 +28,8 @@ from silica.kernel.workqueue import WorkItem
 # /aliases writes under an envelope of its own and reaches it through this root,
 # as the "internals are private" contract asks of every consumer.
 from silica.capabilities._base import alias_consolidation_bounds
-from silica.capabilities.dedup import run_dedup
+# /curate asks the dedup judge for a verdict alone (ADR-0175), through this root too.
+from silica.capabilities.dedup import judge_pair, run_dedup
 from silica.capabilities.expand import run_expand
 from silica.capabilities.enrich import run_enrich
 from silica.capabilities.orphan import run_orphan
@@ -37,7 +38,7 @@ from silica.capabilities.orphan import run_orphan
 Capability = Callable[[WorkItem, Any], dict]
 
 
-__all__ = ["CAPABILITIES", "Capability", "alias_consolidation_bounds"]
+__all__ = ["CAPABILITIES", "Capability", "alias_consolidation_bounds", "judge_pair"]
 
 CAPABILITIES: dict[str, Capability] = {
     "dedup": run_dedup,

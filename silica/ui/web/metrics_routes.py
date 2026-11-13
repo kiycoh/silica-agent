@@ -212,6 +212,32 @@ def _report_head(report, payload: dict, elapsed_s: float, started) -> dict:
     return head
 
 
+def _duplicates(report) -> list[dict]:
+    """The Duplicate pairs card's rows, confirmed first. Neither list is capped
+    by the report, and on a real vault they run to the hundreds, so the slice
+    happens here. `similarity` is the cosine as the card prints it, None for a
+    pair the MinHash leg proposed, whose score is no cosine (ADR-0164).
+
+    `band` says what the review queue makes of the pair (ADR-0175): "merged"
+    once a yes landed, "dismissed" after a no, else the worker's verdict for
+    the notes as they are or "to judge", and "related" for the borderline
+    cosine band, which is never a duplicate candidate."""
+    from silica.tools.review.curate import band_of
+
+    vault = CONFIG.vault_path or ""
+    rows = ([(d, True) for d in report.confirmed_duplicate_pairs]
+            + [(d, False) for d in report.duplicate_pairs])[:_METRICS_ROWS]
+    out = []
+    for d, confirmed in rows:
+        candidate = confirmed or not d.cosine
+        out.append({
+            "a": note_parts.clean_name(d.source), "b": note_parts.clean_name(d.target),
+            "a_path": d.source, "b_path": d.target, "score": d.score, "confirmed": confirmed,
+            "similarity": similarity_percent(d.score) if d.cosine else None,
+            "band": (band_of(vault, d.source, d.target) if vault else "to judge") if candidate else "related"})
+    return out
+
+
 @router.get("/metrics")
 def metrics(proposals: bool = False):
     """Everything the L1 graph report measures, as JSON for the metrics tab.
@@ -342,22 +368,7 @@ def metrics(proposals: bool = False):
              "degree": d.degree, "score": round(d.score, 2)}
             for d in report.integration_deficits
         ],
-        # Confirmed first — those are the merge candidates; the borderline band
-        # is only "link, don't merge". Neither list is capped by the report, and
-        # on a real vault they run to the hundreds, so the slice happens here.
-        # `similarity` is the cosine as the card prints it, None for a pair the
-        # MinHash leg proposed, whose score is no cosine (ADR-0164).
-        "duplicates": ([
-            {"a": short(d.source), "b": short(d.target), "a_path": d.source,
-             "b_path": d.target, "score": d.score, "confirmed": True,
-             "similarity": similarity_percent(d.score) if d.cosine else None}
-            for d in report.confirmed_duplicate_pairs
-        ] + [
-            {"a": short(d.source), "b": short(d.target), "a_path": d.source,
-             "b_path": d.target, "score": d.score, "confirmed": False,
-             "similarity": similarity_percent(d.score) if d.cosine else None}
-            for d in report.duplicate_pairs
-        ])[:_METRICS_ROWS],
+        "duplicates": _duplicates(report),
         # Sliced like every other uncapped list: the report caps the
         # co-occurrence leg at top_k, but the import-derived candidates
         # _compute_code_signals appends are exhaustive — 13k pairs on a

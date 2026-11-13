@@ -1973,13 +1973,14 @@ function renderMetrics(d) {
     grid.appendChild(ask);
   }
   const props = [
-    ["Duplicate pairs", "embeddings propose · graph disposes", d.duplicates,
+    ["Duplicate pairs", "embeddings propose · /curate judges", d.duplicates,
      [{ key: "pair", label: "Pair" }, { key: "alike", label: "Similar", num: true },
       { key: "band", label: "Band", nowrap: true }],
      // The cosine as a percentage (ADR-0164); a pair found by its wording alone,
-     // with no vectors in the vault, says so instead of printing a number.
+     // with no vectors in the vault, says so instead of printing a number. The
+     // band is the review queue's word for the pair (ADR-0175).
      (x) => ({ pair: x.a + " ↔ " + x.b, alike: x.similarity != null ? x.similarity + "%" : "same wording",
-               band: x.confirmed ? "merge?" : "link", _path: x.a_path }),
+               band: x.band, _path: x.a_path }),
      (T.confirmed_duplicates || 0) + (T.duplicate_pairs || 0), "pairs"],
     ["Autolink candidates", "co-mentioned in text, never linked", d.autolinks,
      [{ key: "pair", label: "Pair" }, { key: "shared", label: "Shared concepts" },
