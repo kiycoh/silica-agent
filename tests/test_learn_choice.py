@@ -40,35 +40,65 @@ def test_a_wrong_option_that_repeats_the_answer_another_option_or_the_line_is_tu
     assert len(live["options"]) == 4 and "Memorize records ten kinds of question, and levels." not in live["options"]
 
 
+def test_a_set_whose_key_stands_out_by_length_is_asked_in_writing():
+    """Seen on the demo vault, 2026-11-13: the key was the grader's ANSWER, the
+    longest of the four in 23 items of 23. The cases are three of them."""
+    baroque = ("Baroque art is the style of painting, sculpture and architecture that appeared in Rome around 1600 "
+               "and dominated Europe until the mid-18th century.")
+    assert items.choices(baroque, ["It appeared in Florence around 1500.", "It appeared in Paris around 1700.",
+                                   "It appeared in Venice around 1550."], [baroque], even=True) == {}
+    logos = "The universe is ordered by a rational principle called the logos."
+    short = ["The arche.", "The nous.", "The pneuma."]
+    assert items.choices(logos, short, [logos], even=True) == {}         # three wrong ones under half the key
+    assert len(items.choices("The logos.", short, [logos], even=True)["options"]) == 4
+    # within the margin: a key a few characters longer than the longest wrong one
+    eisen = "Elizabeth Eisenstein argued that printing transformed European thought by making texts fixed and widely available."
+    near = ["She argued that printing had little effect because early books were unreliable and depended on social context.",
+            "She argued that printing caused the Reformation by directly translating the Bible into every language.",
+            "She argued that printing was merely a faster version of woodblock printing with no new consequences."]
+    assert len(items.choices(eisen, near, [eisen], even=True)["options"]) == 4
+    # by characters, as the eye takes a line's length: level by words (11 against 9, 8 and 6), 72 characters against 46
+    descartes = "Descartes adopted the Stoic maxim to master himself rather than fortune."
+    assert items.choices(descartes, ["To live in agreement with nature at all costs.", "To accept all events as fated and unavoidable.",
+                                     "To seek pleasure while avoiding pain."], [descartes], even=True) == {}
+    # a cloze's options are terms of its note, not written to a length: the check is the model's set only
+    assert len(items.choices(logos, short, [logos])["options"]) == 4
+
+
 REPLY = """ITEM 1
 PATH: ML/Margine geometrico.md
 KIND: {kind}
 LEVEL: 1
 ANCHOR: Margine geometrico
 SPAN: Il margine geometrico e' la distanza del punto piu' vicino dall'iperpiano.
-ANSWER: La distanza del punto piu' vicino dall'iperpiano.
+ANSWER: La distanza del punto piu' vicino dall'iperpiano, che il classificatore rende la piu' grande possibile.
 Q: Che cosa misura il margine geometrico di un classificatore?
 CRITERIA: the distance of the closest point
 H1: Pensa al punto piu' vicino.
-WRONG1: La distanza media dei punti dall'origine.
+{choice}WRONG1: La distanza media dei punti dall'origine.
 WRONG2: Il numero di errori sul training set.
 WRONG3: L'angolo tra due iperpiani separatori.
 END
 """
+CHOICE = "La distanza del punto piu' vicino."
 
 
-@pytest.mark.parametrize("kind,choosable", [("recall", True), ("explain", False)])
-def test_the_options_come_with_the_item_in_the_one_call_for_the_four_kinds_only(vault, monkeypatch, kind, choosable):
+@pytest.mark.parametrize("kind,choice,choosable", [("recall", f"CHOICE: {CHOICE}\n", True), ("recall", "", False),
+                                                   ("explain", f"CHOICE: {CHOICE}\n", False)])
+def test_the_options_come_with_the_item_in_the_one_call_for_the_four_kinds_only(vault, monkeypatch, kind, choice, choosable):
     calls = []
-    monkeypatch.setattr(items, "ask_model", lambda prompt, n: (calls.append(prompt), (REPLY.format(kind=kind), "stop"))[1])
+    reply = REPLY.format(kind=kind, choice=choice)
+    monkeypatch.setattr(items, "ask_model", lambda prompt, n: (calls.append(prompt), (reply, "stop"))[1])
     built = items.build_session([{"path": "ML/Margine geometrico.md", "kind": kind, "level": 1, "pool": "due"}])
-    assert len(calls) == 1 and "WRONG1" in calls[0]
+    assert len(calls) == 1 and "WRONG1" in calls[0] and "CHOICE:" in calls[0]
     it = built[0]
-    assert it["kind"] == kind and it["grader"] == "model" and "wrong" not in it
+    assert it["kind"] == kind and it["grader"] == "model" and "wrong" not in it and "choice" not in it
+    # the key is the CHOICE line, written with the wrong ones; ANSWER stays the written path's reference
+    assert it["answer"].startswith("La distanza del punto piu' vicino dall'iperpiano, che")
     if choosable:
-        assert it["options"][it["key"]] == "La distanza del punto piu' vicino dall'iperpiano." and len(it["options"]) == 4
+        assert it["options"][it["key"]] == CHOICE and len(it["options"]) == 4 and it["answer"] not in it["options"]
     else:
-        assert "options" not in it
+        assert "options" not in it   # no CHOICE line: ANSWER is never the key, the item is asked in writing
     # the page gets the four unmarked; the REPL model gets none of them (G5)
     assert "options" not in items.cue_payload(built)[0]
     page = json.dumps(items.cue_payload(built, options=True))

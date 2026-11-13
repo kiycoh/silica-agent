@@ -51,6 +51,11 @@ LEVEL_OF = {"cloze": 1, "recall": 1, "predict": 1, "structure": 3, "explain": 3,
 # answer is one fact, term or difference, so three wrong ones can stand beside
 # it. A why, a case or a relation has no single option that is the answer.
 CHOICE_KINDS = ("recall", "cloze", "contrast", "predict")
+# How far the right option may run past the longest wrong one, as a share of
+# its characters (items._even). Measured 2026-11-13 on 23 sets the CHOICE
+# prompt wrote on three demo notes: at 0.15 the key was the longest in 5 of
+# the 16 kept (31 percent, chance 25), at 0.2 in 8 of 19, unchecked in 12 of 23.
+EVEN_MARGIN = 0.15
 
 _FOOTNOTE_RE = re.compile(r"\[\^([A-Za-z0-9_-]+)\]")
 _FOOTDEF_RE = re.compile(r"^\[\^([A-Za-z0-9_-]+)\]:\s*\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
@@ -545,7 +550,7 @@ def _held(answer: str, support: list[str]) -> bool:
     """Whether the line holds the answer: half its words of four letters or
     more (all its words when it has none) are words of `support`. Written, an
     answer is graded against the span and a model's ANSWER is only the
-    grader's reference; picked, ANSWER is the key, with no grader after it.
+    grader's reference; picked, CHOICE is the key, with no grader after it.
     shortcut: words, not meaning; on 2026-12-12 read the missed picks of the
     ledger's choice lines against their lines, and check meaning if one key
     the line does not hold is among them."""
@@ -555,11 +560,26 @@ def _held(answer: str, support: list[str]) -> bool:
     return bool(long) and sum(w in said for w in long) >= len(long) / 2
 
 
-def choices(answer: str, wrong: list[str], support: list[str], why: dict[str, str] | None = None) -> dict:
+def _even(key: str, wrong: list[str]) -> bool:
+    """Whether the right option is not told apart by its length: it runs past
+    the longest wrong one by at most EVEN_MARGIN of that one's characters, and
+    no wrong one is under half its characters. Characters and not words, as
+    the eye takes a line's length: "Descartes adopted the Stoic maxim to
+    master himself rather than fortune." passed by words (11 against 9, 8
+    and 6) at 72 characters against 46 (2026-11-13, ADR-0168 amended)."""
+    sizes = [len(w) for w in wrong]
+    return len(key) <= max(sizes) * (1 + EVEN_MARGIN) and min(sizes) * 2 >= len(key)
+
+
+def choices(answer: str, wrong: list[str], support: list[str], why: dict[str, str] | None = None,
+            even: bool = False) -> dict:
     """What an item is asked with as a choice: the answer and three wrong
     options, shuffled, `key` the answer's place; {} when the line does not
     hold the answer or fewer than three wrong ones pass, and the item is then
-    asked in writing only.
+    asked in writing only. `even` turns away a set whose right option stands
+    out by its length (`_even`): a model writes the four, and the right one it
+    knows from the note came out longest in 23 items of 23 (2026-11-13). A
+    cloze's options are terms of its own note, written to no length.
 
     A wrong option passes when it is not the answer said again, nor another
     wrong option said again, nor said word for word by the line the item rests
@@ -570,9 +590,8 @@ def choices(answer: str, wrong: list[str], support: list[str], why: dict[str, st
     known without a model; it rides as `wrong_why`.
 
     shortcut: nothing checks that a wrong option is false where it stands (a
-    cloze's other bold term can fit its blank too) nor that the answer is not
-    the longest of the four; read the first 100 choice lines of a real ledger
-    by 2026-12-12 and add the check whose miss they show."""
+    cloze's other bold term can fit its blank too); read the first 100 choice
+    lines of a real ledger by 2026-12-12 and add the check whose miss they show."""
     answer = " ".join(str(answer or "").split())
     kept: list[str] = []
     for w in wrong:
@@ -580,7 +599,7 @@ def choices(answer: str, wrong: list[str], support: list[str], why: dict[str, st
         if (w and len(kept) < 3 and not _near(w, answer) and not any(_near(w, k) for k in kept)
                 and not any(t and _stated(w, t) for t in support)):
             kept.append(w)
-    if not answer or len(kept) < 3 or not _held(answer, support):
+    if not answer or len(kept) < 3 or not _held(answer, support) or (even and not _even(answer, kept)):
         return {}
     options = [answer, *kept]
     random.shuffle(options)
@@ -910,6 +929,7 @@ def parse_model_items(reply: str) -> list[dict]:
             "span": fields.get("SPAN", ""), "source": {"leaf": "", "line": 0},
             "hints": [fields["H1"]] if fields.get("H1") else [],
             "objective": fields.get("OBJECTIVE", "").strip().lower(), "point": point,
+            "choice": fields.get("CHOICE", ""),
             "wrong": [fields[k] for k in ("WRONG1", "WRONG2", "WRONG3") if fields.get(k)],
         }
         item["title"] = title_of(item["path"])
@@ -956,19 +976,20 @@ Examples of the shape, on a topic not in these notes:
   good (explain): Why does TCP need a three-way handshake instead of a single request and reply?
   good (apply): A client's SYN reaches the server but the server's SYN-ACK is lost. What does each side do next, and why?
   good (recall): What are the three segments that open a TCP connection?
-    ANSWER: SYN, then SYN-ACK, then ACK.
+    ANSWER: The client sends SYN, the server replies SYN-ACK, and the client confirms with ACK, so both sides agree on sequence numbers.
+    CHOICE: SYN, then SYN-ACK, then ACK.
     WRONG1: SYN, then ACK, then FIN.
     WRONG2: SYN, then RST, then ACK.
-    WRONG3: ACK, then SYN-ACK, then FIN.   (each read as ANSWER reads: the same opening, form and length)
+    WRONG3: ACK, then SYN-ACK, then FIN.   (ANSWER is full, for grading a written reply; each WRONG line keeps CHOICE's pattern with other content, so only knowing the POINT tells CHOICE apart)
 
 The other fields:
 - CRITERIA: the one or two propositions a full answer to Q must state, connected the way the point connects them; nothing Q does not ask for. Never a keyword list.
-- ANSWER: the reference answer to Q in one or two sentences, from the POINT only.
+- ANSWER: the reference answer to Q in one or two sentences, from the POINT only. It grades a written reply and is never shown as an option.
 - SPAN: one sentence copied verbatim, character for character, from the POINT's text (from a CLAIMS line when there are no POINTS).
 - ANCHOR: the POINT's heading, verbatim (else one of HEADINGS).
 - H1: a hint about the content that nudges toward the answer without stating it: a cue, a contrast or a case to think about. Never an instruction like "identify ..." or "recall ...", never a rewording of the question.
-- WRONG1, WRONG2, WRONG3: only when the item's KIND is recall, contrast or predict, or you set OBJECTIVE recall; leave them out otherwise. Three wrong answers to Q, as a reader who half-knows the notes might give them: each opening, built and as long as ANSWER is (when ANSWER is a whole sentence, so is each WRONG line; the right one must not stand out by its form), each a different idea that the POINT does not support (a neighbouring term, a common confusion), never ANSWER with a word changed, never a sentence of the POINT. Q stays a question answered in words: never list them in it.
-- Write Q, CRITERIA, ANSWER, H1 and the WRONG lines in the block's LANGUAGE. Field labels stay in English as written.
+- CHOICE, WRONG1, WRONG2, WRONG3: only when the item's KIND is recall, contrast or predict, or you set OBJECTIVE recall; leave all four out otherwise. Four options a reader picks among, written together as one set. CHOICE first: the right answer to Q from the POINT in at most 12 words, a short phrase when a phrase answers Q, never ANSWER copied. Then three wrong answers, as a reader who half-knows the notes might give them: each WRONG line keeps CHOICE's pattern (the same opening, the same form, the same number of words, as many names, dates and details) and changes its content to a different idea that the POINT does not support (a neighbouring term, a common confusion), never a sentence of the POINT. The right answer comes out a little longer by habit: write at least one WRONG line a word or two longer than CHOICE, and none shorter than half of it. Q stays a question answered in words: never list them in it. Each WRONG line is a different idea that the POINT does not support (a neighbouring term, a common confusion), never CHOICE with a word changed, never a sentence of the POINT. Q stays a question answered in words: never list them in it.
+- Write Q, CRITERIA, ANSWER, H1, CHOICE and the WRONG lines in the block's LANGUAGE. Field labels stay in English as written.
 
 Check every Q before writing it: one demand, no "and" adding a second ask; it names its subject in words; it never mentions a text, a note, a point or a "given" definition; its answer is in SPAN.
 
@@ -985,9 +1006,10 @@ ANSWER: <reference answer>
 Q: <question>
 CRITERIA: <propositions>
 H1: <hint>
-WRONG1: <wrong answer, recall, contrast or predict only>
-WRONG2: <wrong answer>
-WRONG3: <wrong answer>
+CHOICE: <the right option, recall, contrast or predict only>
+WRONG1: <wrong option in CHOICE's pattern>
+WRONG2: <wrong option>
+WRONG3: <wrong option>
 END
 
 {notes}
@@ -1187,9 +1209,12 @@ def generate(rows: list[dict]) -> dict[str, list[dict]]:
                 it["objective"] = row["objective"]
         # checked here and not at parse: only now are the kind and the line it
         # rests on settled, and a kind the ask turned into explain has no choice
-        wrong = it.pop("wrong", [])
-        if it["kind"] in CHOICE_KINDS:
-            it.update(choices(it["answer"], wrong, [it.get("span", ""), it.get("claim", "")]))
+        wrong, choice = it.pop("wrong", []), it.pop("choice", "")
+        if it["kind"] in CHOICE_KINDS and choice:
+            # the key is CHOICE, never ANSWER: ANSWER is written for the grader
+            # of a written answer, as full as the note allows, and was the
+            # longest option in 23 items of 23 (ADR-0168, amended 2026-11-13)
+            it.update(choices(choice, wrong, [it.get("span", ""), it.get("claim", "")], even=True))
         it["grader"] = "model"
         have.append(it)
     if finish == "length":
