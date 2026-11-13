@@ -37,6 +37,83 @@ def _saved(p) -> None:
     p.wait("document.querySelector('#nv-foot .nv-st').textContent.startsWith('Saved')", 8, "the server's answer")
 
 
+def _typed(p, text: str) -> None:
+    """One key's text at a time, as a person types: the list asks its sources on each."""
+    for ch in text:
+        p.type(ch)
+        time.sleep(0.02)
+
+
+LISTED = "[...document.querySelectorAll('.cm-tooltip-autocomplete li')].map((li) => li.textContent)"
+
+
+def _listed(p, label: str) -> None:
+    p.wait(f"{LISTED}.some((t) => t.startsWith({label!r}))", 5, f"{label} in the list")
+    time.sleep(0.2)  # CodeMirror ignores an accept within 75 ms of the list opening
+
+
+def _closed(p) -> None:
+    p.wait("!document.querySelector('.cm-tooltip-autocomplete')", 5, "the list closed")
+
+
+def _new_line(p, vault, text: str = "Start.\n") -> None:
+    (vault / "Topic" / "Other.md").write_text(text, encoding="utf-8")
+    p.js("openCentre('Topic/Other.md')")
+    p.wait("!!document.querySelector('#nv-edit .cm-content .cm-line')", 8, "the editor")
+    p.click("document.querySelector('#nv-edit .cm-content .cm-line')")
+    _key(p, "End", "End", 35)
+    _press_enter(p)
+
+
+def test_a_name_in_math_completes_as_before_and_enter_takes_it(app):  # noqa: F811
+    p, vault = app
+    _new_line(p, vault)
+    _typed(p, "$acqu")
+    _listed(p, "acqua")
+    _press_enter(p)
+    p.wait("centreNote.editor.getText().includes('$\\\\ce{H2O}')", 5, "the formula in the word's place")
+    _closed(p)
+
+
+def test_a_name_in_prose_offers_its_inline_formula_and_only_tab_takes_it(app):  # noqa: F811
+    """The owner's wish (2026-11-13): part of a molecule's name in a sentence is offered
+    as its formula. Prose is typed fast, so Enter stays a newline: "acqua" must never
+    become H2O by a key meant for the next line."""
+    p, vault = app
+    _new_line(p, vault)
+    _typed(p, "acq")
+    time.sleep(0.4)
+    assert not p.js(LISTED), "three letters are a word, not yet a name"
+    _typed(p, "ua")
+    _listed(p, "acqua")
+    _press_enter(p)
+    _closed(p)
+    assert p.js("centreNote.editor.getText()") == "Start.\nacqua\n\n"  # the word as typed, then the new line
+    _typed(p, "Ho versato dell'acido solforico")
+    _listed(p, "acido solforico")
+    _key(p, "Tab", "Tab", 9)
+    p.wait("centreNote.editor.getText().includes(\"dell'$\\\\ce{H2SO4}$\\n\")", 5, "the formula, after the elision")
+    _closed(p)
+    _typed(p, " e caffeine")
+    _listed(p, "caffeine")
+    _key(p, "Escape", "Escape", 27)
+    _closed(p)
+    _typed(p, ", water")
+    _listed(p, "water")
+    _typed(p, " f")  # typing on: no name goes on with " f"
+    _closed(p)
+    _typed(p, "; pitagora")
+    _listed(p, "teorema di Pitagora")
+    _key(p, "Tab", "Tab", 9)
+    p.wait("centreNote.editor.getText().includes('$a^2 + b^2 = c^2$\\n')", 5, "the formula, as inline math")
+    _typed(p, " [[acqua")
+    time.sleep(0.4)
+    assert not p.js(LISTED), "a link's name is a note's, not a molecule's"
+    _saved(p)
+    assert (vault / "Topic" / "Other.md").read_text(encoding="utf-8") == (
+        "Start.\nacqua\nHo versato dell'$\\ce{H2SO4}$ e caffeine, water f; $a^2 + b^2 = c^2$ [[acqua\n")
+
+
 def test_a_cell_edit_writes_its_cell_and_tab_and_enter_move_through_the_grid(app):  # noqa: F811
     p, vault = app
     (vault / "Topic" / "Other.md").write_text(TABLE, encoding="utf-8")
