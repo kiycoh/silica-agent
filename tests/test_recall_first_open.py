@@ -179,6 +179,31 @@ class TestTheRecallSaysSo:
                                                    leg_stats=stats)
         assert results and stats["degraded"] == {"embed": "building"}
 
+    def test_embeddings_half_built_are_still_building_though_the_query_embeds(self, vault, monkeypatch):
+        """The build fills the shared store 32 notes at a time: after the first
+        chunk the query embeds, and the store holds a part of the vault."""
+        from silica.kernel.recall import perception
+
+        refresh.build_missing()
+        embedder = _Embedder()
+        refresh._embed_all(embedder, lambda *s: None)  # the store as the build leaves it
+        monkeypatch.setattr("silica.model.providers.get_embedder", lambda config: embedder)
+        monkeypatch.setattr(refresh, "building", lambda store=None: store == "embeddings")
+        stats: dict = {}
+        results, vec = perception.facade_retrieve("Galileo Pisa", k=3, use_memory=False, use_rerank=False,
+                                                  leg_stats=stats)
+        assert vec is not None and results and stats["degraded"] == {"embed": "building"}
+
+    def test_co_occurrence_being_filled_is_no_leg_yet(self, vault, monkeypatch):
+        """The same singleton a request reads is the one the build fills."""
+        from silica.kernel.recall import perception
+
+        refresh.build_missing()
+        monkeypatch.setattr(refresh, "building", lambda store=None: store in (None, "cooccurrence"))
+        stats: dict = {}
+        assert perception.facade_retrieve("Galileo Pisa", k=3, use_memory=False, leg_stats=stats) == (None, None)
+        assert stats["degraded"] == {"index": "building"}
+
     def test_recall_answers_from_the_passages_with_its_flag_first(self, vault):
         from silica.tools.graph import silica_recall
 
@@ -209,7 +234,7 @@ class TestTheLines:
         assert degraded_lines({"index": "missing"}, "repl") == [
             "passages only: the recall index was never built · run /cooccur and /embed"]
         assert degraded_lines({"embed": "building"}) == [
-            "lexical only: the embedding index is still being built"]
+            "partly by meaning: the embedding index is still being built"]
         assert [line.split(":")[0] for line in degraded_lines({"rerank": "slow", "index": "building"})] == [
             "passages only", "not reranked"]
 

@@ -48,7 +48,10 @@ def degraded_lines(degraded: dict, surface: str = "gui") -> list[str]:
         prefix, role, knob, timeout_attr = _LEG[leg]
         if cause in _UNBUILT:
             fix = " · run /cooccur and /embed" if cause == "missing" else ""
-            lines.append(f"{prefix}: the {_STORE.get(leg, role)} {_UNBUILT[cause]}{fix}")
+            # An embedding store being built answers for the notes it holds so
+            # far: the search ran by meaning over part of the vault, not none.
+            head = "partly by meaning" if (leg, cause) == ("embed", "building") else prefix
+            lines.append(f"{head}: the {_STORE.get(leg, role)} {_UNBUILT[cause]}{fix}")
             continue
         if cause == "slow":
             phrase, fix = f"did not answer in {getattr(CONFIG, timeout_attr):g} s", f"raise {knob}"

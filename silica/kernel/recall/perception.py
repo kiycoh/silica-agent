@@ -270,6 +270,8 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
     from silica.kernel.recall.rerank import rerank_related
     from silica.kernel.recall.sync import sweep
 
+    from silica.kernel.recall import refresh
+
     peek = _peek_dir(vault)
     cooccur_store: CooccurStore | None
     if peek is None:
@@ -280,7 +282,9 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
         embed_store = get_store()
         try:
             loaded = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-            cooccur_store = loaded if len(loaded) else None  # empty store ⇒ abstain
+            # Empty ⇒ abstain; and while the app's first build fills this same
+            # singleton (ADR-0173), a part of the vault would read as all of it.
+            cooccur_store = loaded if len(loaded) and not refresh.building("cooccurrence") else None
         except Exception:
             cooccur_store = None
     else:
@@ -309,7 +313,6 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
                 from silica.model.providers import why_of
 
                 leg_stats.setdefault("degraded", {}).setdefault("embed", why_of(exc))
-    from silica.kernel.recall import refresh
 
     if query_vec is None and cooccur_store is None and mem_cooccur is None:
         # A store of vectors that a failed query embed could not use is there:
@@ -319,9 +322,11 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
             if cause:
                 leg_stats.setdefault("degraded", {}).setdefault("index", cause)
         return None, None
-    if leg_stats is not None and peek is None and query_vec is None and refresh.building("embeddings"):
+    if leg_stats is not None and peek is None and refresh.building("embeddings"):
         # Not built yet is not "no embedder configured": the app is making the
-        # leg now (ADR-0173), and a reader should know it searched without it.
+        # leg now (ADR-0173). Whether or not the query embedded: the store it
+        # fills chunk by chunk holds part of the vault, and a memory lane's
+        # vectors embed the query over an empty one.
         leg_stats.setdefault("degraded", {}).setdefault("embed", "building")
 
     results = related_notes_for_query(
