@@ -832,6 +832,33 @@ function nearFolder(x, y, r, big, dirs, gap) {
   }
 }
 
+// The area a note is spread with: its own, or, for a note in no area of two or
+// more, the one most of its ties are in, through other such notes too. On
+// alex_second_brain 295 notes were each an area of one, 284 of them tied to the
+// rest by similarity alone; spread as discs of their own they stood a median
+// 11.9 px from the nearest note they are tied to, and 148 px at the 90th
+// percentile, where the forces left 4.4 and 17.6 (the owner: "le note non
+// linkate vanno nel loro vicino"). `pairs`: [i, j] ties. Returns one area per
+// note, below 0 for none.
+function adoptAreas(area, pairs) {
+  const size = new Map(), ties = area.map(() => []);
+  area.forEach(a => { if (a >= 0) size.set(a, (size.get(a) || 0) + 1); });
+  const out = area.map(a => a >= 0 && size.get(a) > 1 ? a : -1);
+  for (const [a, b] of pairs) { ties[a].push(b); ties[b].push(a); }
+  for (let moved = true; moved;) {
+    moved = false;
+    out.forEach((a, i) => {
+      if (a >= 0) return;
+      const count = new Map();
+      let best = -1, most = 0;
+      for (const j of ties[i]) if (out[j] >= 0) count.set(out[j], (count.get(out[j]) || 0) + 1);
+      count.forEach((n, k) => { if (n > most) { best = k; most = n; } });
+      if (best >= 0) { out[i] = best; moved = true; }
+    });
+  }
+  return out;
+}
+
 // A crowded vault spread by areas (ADR-0152, amendment 2026-11-13, the owner's
 // pick over the forces' places). The pass to no overlap mixed the areas because
 // a note pushed out of a crowded core lands in the area beside it. Here each
@@ -841,7 +868,7 @@ function nearFolder(x, y, r, big, dirs, gap) {
 // so one note deep in a neighbour does not set it) until no two touch; a note
 // with no area is a disc of one. A node outside a big part (`held` false) does
 // not move: nearFolder places it after. What still touches is left to the
-// overlap pass. In place; `area[i]` below 0 is no area.
+// overlap pass. In place; `area[i]` below 0 is no area (see adoptAreas).
 const AREA_PACK = 0.7;
 function spreadAreas(x, y, r, area, held, gap) {
   const groups = new Map();
@@ -1358,11 +1385,13 @@ function spreadLayout() {
   // A crowded vault is spread by areas, not note by note (Decision 1 gives way,
   // the owner's pick of 2026-11-13). On alex_second_brain the pass to no overlap
   // alone took the share of a note's ten nearest in its own area from 0.63 to
-  // 0.28; after the areas it is a last nudge and the share is 0.83, the median
-  // note moving 280 px, the notes' circle growing from 203 to 489 px and the
-  // median disc at the fit going from 2.8 to 2.1 px. 2.3 s of the main thread,
+  // 0.28; after the areas it is a last nudge. Measured there: the share is 0.89
+  // for the notes with an area of their own (0.73 as the forces left them), a
+  // note with none stands 6.7 px from the nearest note it is tied to (4.4), the
+  // median note moves 189 px, the notes' circle grows from 203 to 568 px and the
+  // median disc at the fit goes from 2.8 to 2.0 px. 1.2 s of the main thread,
   // once: the layout cache holds it after.
-  if (DISC_SCALE < 1) spreadAreas(x, y, r, notes.map(n => n.group == null ? -1 : n.group), big, gap);
+  if (DISC_SCALE < 1) spreadAreas(x, y, r, adoptAreas(notes.map(n => n.group == null ? -1 : n.group), pairs), big, gap);
   nearFolder(x, y, r, big, notes.map(n => {
     const p = n.path || n.id;
     return p.slice(0, Math.max(0, p.lastIndexOf("/")));

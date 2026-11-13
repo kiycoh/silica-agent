@@ -109,7 +109,7 @@ def test_a_crowded_vault_is_spread_by_areas():
     amendments 2026-11-13)."""
     body = FRAME[FRAME.index("function spreadLayout() {"):]
     body = body[:body.index("\n}\n")]
-    areas = body.index("if (DISC_SCALE < 1) spreadAreas(")
+    areas = body.index("if (DISC_SCALE < 1) spreadAreas(x, y, r, adoptAreas(")
     assert areas < body.index("nearFolder(") < body.index("spreadDiscs(x, y, r, gap);")
 
 
@@ -137,6 +137,18 @@ def test_areas_laid_on_each_other_come_apart():
     for i in range(60):
         own, other = cen[i % 2], cen[1 - i % 2]
         assert math.hypot(x[i] - own[0], y[i] - own[1]) < math.hypot(x[i] - other[0], y[i] - other[1])
+
+
+@needs_node
+def test_a_note_in_no_area_joins_the_area_of_its_ties():
+    """A note that is an area of one, or in none, is spread with the area most
+    of its ties are in, through such notes too; with no tie it stays alone
+    (the owner, 2026-11-13: "le note non linkate vanno nel loro vicino")."""
+    got = _pure("""
+      const area = [0, 0, 1, 1, -1, 5, -1, -1];
+      return adoptAreas(area, [[4, 0], [4, 1], [4, 2], [5, 2], [5, 3], [6, 4]]);
+    """)
+    assert got == [0, 0, 1, 1, 0, 1, 0, -1]
 
 
 @needs_node
