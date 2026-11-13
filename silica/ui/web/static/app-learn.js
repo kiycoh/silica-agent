@@ -314,7 +314,13 @@ async function lrAttach(id) {
     // a pick's text is the answer the previous row and the reveal show
     const picks = {}, answers = {};
     for (const [i, v] of Object.entries(verdicts)) if (v.pick != null) { picks[i] = v.pick; answers[i] = v.options?.[v.pick] || ""; }
-    lrSession = { ...s, cur: cur < 0 ? s.items.length - 1 : cur, answers, picks, verdicts, results, skipped, hintsUsed: {}, shown: {}, conf: null, told: false, state: "input", teachT };
+    // the hints read before the reload are on screen again, and still counted
+    const shown = {}, hintsUsed = {};
+    for (const it of s.items) {
+      const n = s.help?.[it.i]?.hints || 0;
+      if (n) { shown[it.i] = (it.hints || []).slice(0, n); hintsUsed[it.i] = n; }
+    }
+    lrSession = { ...s, cur: cur < 0 ? s.items.length - 1 : cur, answers, picks, verdicts, results, skipped, hintsUsed, shown, conf: null, told: false, state: "input", teachT };
     lrSession.choosing = lrFormats()[lrFormatKey(lrSession)] === "choice";
     const it = lrSession.items[lrSession.cur];
     if (it && verdicts[it.i]) { lrSession.state = "reveal"; lrSession.conf = verdicts[it.i].conf ?? null; lrSession.told = !!verdicts[it.i].told; }
@@ -2630,7 +2636,9 @@ function lrVerdictSay(it, v, s) {
   if (v.told) return { mark: "open", word: "Told", sub: "the point stays open" };
   if (v.grader === "choice") return v.correct ? { mark: "half", word: "Right choice", sub: "recognised among four, not counted as met without help" }
     : { mark: "open", word: "Wrong choice", sub: "the point stays open" };
-  const used = (s.shown[it.i] || []).length;
+  // the server's count: it holds the hints read before a reload and the four
+  // options seen before writing, which this tab may never have shown
+  const used = v.hints ?? (s.shown[it.i] || []).length;
   if (v.grade === "recalled") return used ? { mark: "half", word: "Met with help", sub: "not counted as without help" } : { mark: "full", word: "Met", sub: "without help" };
   if (it.kind === "predict") return { mark: "open", word: "First attempt", sub: "graded as such" };
   if (v.grade === "partial") return { mark: "open", word: "Partly met", sub: "the point stays open" };
@@ -2765,10 +2773,18 @@ function lrFormatSwitch(s, it) {
   if (s.choosing) row.appendChild(mkEl("span", "lr-help", lrAsChoice(s, it)
     ? "A right pick is Good at most and is not counted as met without help."
     : "No four options for this question: answer it in writing."));
+  else if (s.help?.[it.i]?.options) row.appendChild(mkEl("span", "lr-help", "You saw the four options: a written answer counts as met with help, Hard at most."));
   return row;
 }
 
 function lrOptions(s, it) {
+  // the four on screen are a hint to a written answer, kept by the server past
+  // a reload (ADR-0168 amended 2026-11-13); marked once the post lands
+  if (!s.help?.[it.i]?.options) {
+    apiPost("/learn/help", { id: s.id, i: it.i, options: true })
+      .then((h) => { (s.help ||= {})[it.i] = h; })
+      .catch(() => { /* not recorded: the next render of the four sends it again */ });
+  }
   const box = mkEl("div", "lr-choices");
   box.setAttribute("role", "radiogroup"); box.setAttribute("aria-label", "options");
   it.options.forEach((text, n) => {
@@ -2913,6 +2929,7 @@ function lrSaidWith(s, it) {
   if (s.conf !== null && s.conf !== undefined) bits.push(LR_CONF.find((c) => c[1] === s.conf)?.[0] || String(s.conf));
   const used = (s.shown[it.i] || []).length;
   if (used) bits.push(`${lrPlural(used, "hint")} used`);
+  if (s.help?.[it.i]?.options && s.verdicts[it.i]?.grader !== "choice") bits.push("after the four options");
   return bits;
 }
 
@@ -3031,6 +3048,8 @@ function lrHint() {
   if (!next || shown.length >= 2) return;
   shown.push(next);
   s.hintsUsed[it.i] = shown.length;
+  apiPost("/learn/help", { id: s.id, i: it.i, hints: shown.length })
+    .catch(() => { /* the answer still sends the count; only a reload before it loses the hint */ });
   lrRender();
 }
 
@@ -3208,13 +3227,15 @@ function lrReveal(sheet, it, v) {
   const rate = mkEl("div", "lr-actions lr-rate");
   const proposed = v.rating;
   const chosen = s.results[it.i]?.rating ?? s.chosen?.[it.i] ?? (self ? null : proposed) ?? null;
-  const seg = () => {
+  const seg = (cap = 4) => {
     const g = mkEl("div", "lr-seg");
     g.id = "lr-rate-opts"; g.setAttribute("role", "radiogroup"); g.setAttribute("aria-label", "rating");
     for (const [n, name] of Object.entries(LR_RATING)) {
       const on = Number(n) === chosen;
       const b = lrKey(lrBtn(on ? "on" : null, lrCap(name), () => lrChoose(Number(n))), n, n);
       b.setAttribute("role", "radio"); b.setAttribute("aria-checked", on ? "true" : "false");
+      // the server records Hard at most after a hint, the options or "just tell me"
+      if (Number(n) > cap) { b.disabled = true; b.title = "capped at Hard: the answer had help"; }
       g.appendChild(b);
     }
     return g;
@@ -3228,7 +3249,9 @@ function lrReveal(sheet, it, v) {
     // a proposal with change (review §10), the four only on request
     rate.appendChild(mkEl("span", "lr-help", "rating"));
     if (s.changing && !s.results[it.i]) {
-      rate.append(seg(), mkEl("span", "lr-help", "changes the schedule only; the rubric result stays recorded"));
+      const capped = !!(v.hints || v.told);
+      rate.append(seg(capped ? 2 : 4), mkEl("span", "lr-help", "changes the schedule only; the rubric result stays recorded"
+        + (capped ? "; with help, Hard at most" : "")));
     } else {
       rate.append(mkEl("b", null, lrCap(LR_RATING[chosen])), mkEl("span", "lr-help", chosen === proposed ? "proposed from the verdict" : "chosen by you"));
     }
@@ -3311,6 +3334,10 @@ async function lrFetchAid(it) {
 function lrChoose(n) {
   const s = lrSession, it = lrItem();
   if (s.results[it.i]) return;    // recorded: the ledger line is written once
+  const v = s.verdicts[it.i];
+  // a verdict given with help is Hard at most on the server (session._rate), keys 3 and 4 included;
+  // a self-rating keeps all four, since Good or Easy there is the reader saying it was right
+  if (v && !v.needs_self_grade && v.grader !== "self" && (v.hints || v.told)) n = Math.min(n, 2);
   (s.chosen || (s.chosen = {}))[it.i] = n;
   lrRender();
 }
