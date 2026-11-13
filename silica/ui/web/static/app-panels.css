@@ -1463,8 +1463,8 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 }
 
 /* A table is a grid (ADR-0160): the cell being edited holds its source in a field
-   ringed in teal, as any focus is; the bar over the table's corner shows on
-   hover, its row and column acts only while a cell is being edited. */
+   ringed in teal, as any focus is; the bar at the table's corner shows on hover,
+   its row and column acts only while a cell is being edited. */
 :is(#note-edit,#nv-edit) .cm-grid {
   position: relative;
 }
@@ -1494,16 +1494,19 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   outline: none;
 }
 
+/* The bar keeps its own row above the table, hidden and not removed, so it covers no
+   word and neither a hover nor the press that opens a cell moves the table. Laid over
+   the line above, it covered a heading set right above a table at any width, and the
+   drawer's head for a table that starts the note (measured 2026-11-13). */
 :is(#note-edit,#nv-edit) .cm-grid-bar {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% - 0.35em);
-  z-index: 2;
-  display: none;
+  display: flex;
+  visibility: hidden;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 1px;
+  width: fit-content;
   max-width: 100%;
+  margin: 0 0 2px auto;
   padding: 2px;
   background: var(--bubble);
   border: 1px solid var(--line-2);
@@ -1511,7 +1514,7 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 }
 
 :is(#note-edit,#nv-edit) .cm-grid:is(:hover, :focus-within) .cm-grid-bar {
-  display: flex;
+  visibility: visible;
 }
 
 :is(#note-edit,#nv-edit) .cm-grid:not(:focus-within) .cm-grid-op {

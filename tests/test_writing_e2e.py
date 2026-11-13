@@ -114,6 +114,62 @@ def test_a_name_in_prose_offers_its_inline_formula_and_only_tab_takes_it(app):  
         "Start.\nacqua\nHo versato dell'$\\ce{H2SO4}$ e caffeine, water f; $a^2 + b^2 = c^2$ [[acqua\n")
 
 
+UNDER_A_HEADING = ("## Prices paid for the fruit in the second quarter\n| Item | Price | Note |\n| --- | ---: | --- |\n"
+                   "| Apple | $5 | plain |\n| Pear | 3 | a \\| b |\n\nAfter.\n")
+# The words the grid's bar would cover: every text node of the note outside the grid
+# whose glyphs meet the bar's box, and the head of the view or the drawer, which is text too.
+COVERED = """(() => {
+  const bar = document.querySelector('%(ed)s .cm-grid-bar').getBoundingClientRect(), hit = [];
+  for (const host of [document.querySelector('%(ed)s'), document.querySelector('%(head)s')]) {
+    const walk = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+    for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+      if (!t.textContent.trim() || t.parentElement.closest('.cm-grid')) continue;
+      const r = document.createRange();
+      r.selectNodeContents(t);
+      if ([...r.getClientRects()].some((b) => b.bottom > bar.top && b.top < bar.bottom && b.right > bar.left && b.left < bar.right))
+        hit.push(t.textContent);
+    }
+    for (const f of host.querySelectorAll('textarea, input')) {  // a title's words are its value, no text node
+      const b = f.getBoundingClientRect();
+      if (f.value && b.bottom > bar.top && b.top < bar.bottom && b.right > bar.left && b.left < bar.right) hit.push(f.value);
+    }
+  }
+  return hit;
+})()"""
+
+
+@pytest.mark.parametrize("width, ed, head", [(1440, "#nv-edit", "#nv-bar"), (900, "#note-edit", "#note-panel > header")])
+@pytest.mark.parametrize("text", [UNDER_A_HEADING, TABLE.replace("Before.\n\n", "")], ids=["under-a-heading", "first-line"])
+def test_the_grid_bar_is_one_row_and_covers_no_word(app, width, ed, head, text):  # noqa: F811
+    """At 900 the drawer is 320 px and the bar of six acts wrapped to two rows over the
+    line above (2026-11-13); one row still covered a heading set right above a table."""
+    p, vault = app
+    p.send("Browser.setWindowBounds", {"windowId": p.send("Browser.getWindowForTarget")["windowId"],
+                                       "bounds": {"width": width, "height": 900}})
+    p.wait(f"innerWidth === {width}", 5, "the window's width")
+    (vault / "Topic" / "Other.md").write_text(text, encoding="utf-8")
+    p.js("openCentre('Topic/Other.md')" if ed == "#nv-edit" else "openNote('Topic/Other.md')")
+    p.wait(f"!!document.querySelector('{ed} .cm-content .cm-line')", 8, "the editor")
+    time.sleep(0.6)  # the drawer slides in
+    p.click(f"[...document.querySelectorAll('{ed} .cm-line')].find((l) => l.textContent === 'After.')")
+    p.wait(f"!!document.querySelector('{ed} .cm-grid td')", 8, "the grid")
+    hover = p.js(f"document.querySelector('{ed} .cm-grid').getBoundingClientRect().top")
+    x, y = p.center(f"document.querySelector('{ed} .cm-grid [data-r=\"2\"][data-c=\"0\"]')")  # plain words, no link
+    p.mouse("mouseMoved", x, y)
+    assert p.js(f"document.querySelector('{ed} .cm-grid').getBoundingClientRect().top") == hover, "a hover moves nothing"
+    p.mouse("mousePressed", x, y, True)
+    p.mouse("mouseReleased", x, y)
+    p.wait("document.activeElement.classList.contains('cm-grid-input')", 5, "the cell's field")
+    # the cell opened where it was pressed
+    assert p.js(f"document.elementFromPoint({x}, {y}).closest('td') === document.activeElement.closest('td')")
+    rows = p.js(f"(() => {{ const b = [...document.querySelectorAll('{ed} .cm-grid-bar button')].map((e) => e.getBoundingClientRect().top);"
+                " return new Set(b.map(Math.round)).size; })()")
+    assert rows == 1, "six acts on one row"
+    labels = p.js(f"[...document.querySelectorAll('{ed} .cm-grid-bar button')].map((b) => [b.textContent, b.title, b.getAttribute('aria-label')])")
+    assert len(labels) == 6 and all(t == a and len(a) > len(s) for s, t, a in labels), labels
+    assert p.js(COVERED % {"ed": ed, "head": head}) == []
+
+
 def test_a_cell_edit_writes_its_cell_and_tab_and_enter_move_through_the_grid(app):  # noqa: F811
     p, vault = app
     (vault / "Topic" / "Other.md").write_text(TABLE, encoding="utf-8")

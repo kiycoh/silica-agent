@@ -396,15 +396,18 @@
     el.classList.remove("cm-grid-off");
     const bar = document.createElement("div");
     bar.className = "cm-grid-bar";
+    // Labels short enough for one row in a 320 px drawer (ADR-0160, 2026-11-13); the full
+    // name is the tooltip and what a screen reader says.
     for (const [act, label, say] of [["row-add", "+ row", "add a row under this one"], ["row-del", "− row", "remove this row"],
-      ["col-add", "+ column", "add a column after this one"], ["col-del", "− column", "remove this column"],
-      ["align", "Align", "this column's alignment: left, centre, right, none"], ["text", "Edit as text", "edit the table as Markdown"]]) {
+      ["col-add", "+ col", "add a column after this one"], ["col-del", "− col", "remove this column"],
+      ["align", "Align", "align this column: left, centre, right, none"], ["text", "As text", "edit as text, the table's Markdown"]]) {
       const b = document.createElement("button");
       b.type = "button";
       b.dataset.act = act;
       b.className = act === "text" ? "" : "cm-grid-op";
       b.textContent = label;
       b.title = say;
+      b.setAttribute("aria-label", say);
       bar.append(b);
     }
     const table = document.createElement("table"), thead = table.createTHead(), tbody = table.createTBody();
