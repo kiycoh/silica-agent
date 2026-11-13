@@ -65,8 +65,9 @@ def lexical_built(vault: str | None = None) -> bool:
     """Whether `vault` (None: the current one) has a lexical index on disk.
 
     The lexical leg is maintained only where it exists: the sweep, the write
-    hook and the explicit-vault reader never create one, and the first
-    whole-vault /embed is what seeds it (recall.refresh)."""
+    hook and the explicit-vault reader never create one: the first whole-vault
+    /embed seeds it, and so does the app's first open of the vault
+    (recall.refresh, ADR-0173)."""
     return index_file(LEXICAL, vault).is_file()
 
 

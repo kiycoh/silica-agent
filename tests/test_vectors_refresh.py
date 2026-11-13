@@ -11,11 +11,18 @@ import pytest
 
 from silica.config import CONFIG
 from silica.ui.web import vectors
-from silica.ui.web.vectors import _eligible as real_eligible
+from silica.ui.web.vectors import _builds as real_builds, _eligible as real_eligible
 
 
 def _fake_embed(texts):
     return [[float(len(t) % 7 + 1), 1.0, float("watchers" in t)] for t in texts]
+
+
+class _RecallEmbedder:
+    model = "fake"
+
+    def embed(self, texts, query=False):
+        return _fake_embed(texts)
 
 
 @pytest.fixture
@@ -24,12 +31,16 @@ def engine(tmp_vault, monkeypatch):
     from silica_core.config import CONFIG as CORE
 
     monkeypatch.setattr(vectors, "_eligible", real_eligible)
+    monkeypatch.setattr(vectors, "_builds", real_builds)
     # This tree's embedder: the engine mirrors it into core's CONFIG at every call.
     monkeypatch.setattr(CONFIG, "embedding_base_url", "http://127.0.0.1:1234/v1")
     monkeypatch.setattr(CONFIG, "embedding_model", "fake")
     monkeypatch.setattr(CORE, "embedding_base_url", "")
     monkeypatch.setattr(embeddings, "embed_texts", _fake_embed)
     monkeypatch.setattr(embeddings, "_CACHE", None)
+    # Recall's embeddings come first in the same job (ADR-0173), through this
+    # tree's embedder: never the live one the URL above names.
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda config: _RecallEmbedder())
     monkeypatch.setattr("silica.onboarding.serve.ready", lambda base: True)
     monkeypatch.setattr(vectors, "_STATUS", {"state": "idle"})
     vault = Path(CONFIG.vault_path)
@@ -56,8 +67,15 @@ def test_a_refresh_builds_the_page_vectors_when_the_embedder_is_this_machines(en
 
 
 def test_nothing_is_built_on_the_server_or_with_an_embedder_elsewhere(engine, monkeypatch):
+    """An embedder elsewhere still gets recall's local stores (ADR-0173), and
+    no page vector and no embedding call."""
+    from silica_core import embeddings
+
     monkeypatch.setattr(CONFIG, "embedding_base_url", "https://api.example.com/v1")
-    assert vectors.refresh() is False
+    monkeypatch.setattr(embeddings, "embed_texts", lambda texts: pytest.fail("a page went off this machine"))
+    assert vectors.refresh() is True
+    _wait()
+    assert embeddings.load() is None and vectors.status()["state"] == "idle"
     monkeypatch.setattr(CONFIG, "embedding_base_url", "http://127.0.0.1:1234/v1")
     monkeypatch.setenv("SILICA_HOSTED", "1")
     assert vectors.refresh() is False
@@ -143,11 +161,15 @@ def test_a_written_note_and_a_finished_conversion_each_ask_for_a_build(tmp_vault
 
 
 def test_a_refresh_that_cannot_start_never_fails_its_caller(engine, monkeypatch):
+    """A silica-core this tree cannot drive costs the page vectors only:
+    recall's stores need none of it (ADR-0173)."""
     def broken():
         raise RuntimeError("silica-core no longer reads PDFs through _pdf_text")
 
     monkeypatch.setattr(vectors, "_eligible", broken)
-    assert vectors.refresh() is False
+    assert vectors.refresh() is True
+    _wait()
+    assert vectors.status()["state"] == "idle"
 
 
 def test_the_status_rides_the_bus_once_per_state_and_at_most_twice_a_second_within_one(monkeypatch):
