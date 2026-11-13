@@ -35,6 +35,26 @@ THIN_COVERAGE_HINT = "vault coverage was thin: /web to search the web"
 _TOO_WEAK_TO_ESCALATE = frozenset({"silica_search"})
 
 
+# The notes of a search the general block is checked against: the best few,
+# since a note far down a ranking is not one the model was shown as the answer.
+_FOUND_PER_CALL = 3
+
+
+def found_paths(event: ToolCompleteEvent) -> list[str]:
+    """The notes a successful search call found, best first, through the key
+    its tool declares (Tool.found): a path or a store key, or a `{path}` item."""
+    key = getattr(TOOLS.get(event.name), "found", "")
+    if not key:
+        return []
+    try:
+        data = json.loads(event.result)
+    except (ValueError, TypeError):
+        return []
+    items = data.get(key) if isinstance(data, dict) else None
+    paths = [i if isinstance(i, str) else i.get("path") for i in items or [] if isinstance(i, (str, dict))]
+    return [p for p in paths if isinstance(p, str) and p][:_FOUND_PER_CALL]
+
+
 class RecallWatch:
     """Wraps a turn's tool_progress_callback; `.thin` is the verdict afterwards.
 
@@ -65,6 +85,10 @@ class RecallWatch:
         # Did the turn change a note or save a memory? Its answer reports that,
         # and no line calls such a report general knowledge (ADR-0174).
         self.wrote = False
+        # The notes the turn's searches found (Tool.found), best first, the
+        # first `_FOUND_PER_CALL` of each: a general block is checked against
+        # them (general_knowledge.held_in_found).
+        self.found: list[str] = []
 
     def __call__(self, event) -> None:
         if isinstance(event, ToolCompleteEvent):
@@ -77,6 +101,7 @@ class RecallWatch:
             # it changes no note, so Tool.mutates is empty for it.
             self.wrote = self.wrote or (not tool_failed(event.result) and bool(
                 getattr(TOOLS.get(event.name), "mutates", "") or event.name == "silica_remember"))
+            self.found = list(dict.fromkeys(self.found + found_paths(event)))
             self.numbers |= result_numbers(event.result, event.args)
         if self._inner is not None:
             self._inner(event)

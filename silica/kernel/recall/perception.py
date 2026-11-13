@@ -312,7 +312,9 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
     from silica.kernel.recall import refresh
 
     if query_vec is None and cooccur_store is None and mem_cooccur is None:
-        if leg_stats is not None and peek is None:
+        # A store of vectors that a failed query embed could not use is there:
+        # its line is the embedder's, already marked above, not "never built".
+        if leg_stats is not None and peek is None and (embed_store is None or len(embed_store) == 0):
             cause = "building" if refresh.building() else "missing" if _holds_notes() else ""
             if cause:
                 leg_stats.setdefault("degraded", {}).setdefault("index", cause)

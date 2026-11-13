@@ -33,15 +33,29 @@ IN_COMMAND = "this command answers from your notes alone; the general-knowledge 
 HELD_BACK = ("*An answer from general knowledge was held back: Silica answers from it only after "
              "searching your notes, and this turn did not search them. Ask again to have them searched.*")
 # The same for a turn whose search ran without part of its index and found
-# nothing (ADR-0173): that is no showing the notes lack it, and the line under
-# the answer names what was missing.
+# nothing (ADR-0173): that is no showing the notes lack it. The degraded line
+# with the answer names what was missing; no "below", since the browser draws
+# the turn's lines above the answer's text and the terminal under it.
 HELD_BACK_UNSURE = ("*An answer from general knowledge was held back: your notes were searched without "
-                    "part of their index, named below, so the search could not show they lack this. "
+                    "part of their index, so the search could not show they lack this. "
                     "Ask again once it is back.*")
 
 
 def has_general(answer: str) -> bool:
     return bool(_HEAD.search(answer or ""))
+
+
+def _parts(answer: str):
+    """(line, part) for each line: part "head" or "body" inside a block, ""
+    outside one."""
+    inside = False
+    for line in (answer or "").splitlines():
+        if _HEAD.match(line):
+            inside = True
+            yield line, "head"
+            continue
+        inside = inside and bool(_QUOTED.match(line))
+        yield line, "body" if inside else ""
 
 
 def without_general(answer: str, instead: str | None = None) -> str:
@@ -50,18 +64,52 @@ def without_general(answer: str, instead: str | None = None) -> str:
     what the turn read, and a second line naming its years says it twice.
     `instead`, when given, stands where each block was."""
     out: list[str] = []
-    inside = False
-    for line in (answer or "").splitlines():
-        if _HEAD.match(line):
-            inside = True
-            if instead is not None:
-                out.append(instead)
-            continue
-        if inside and _QUOTED.match(line):
-            continue
-        inside = False
-        out.append(line)
+    for line, part in _parts(answer):
+        if part == "head" and instead is not None:
+            out.append(instead)
+        elif not part:
+            out.append(line)
     return "\n".join(out)
+
+
+def general_text(answer: str) -> str:
+    """What the blocks of `answer` say, without their heads and quote marks."""
+    return "\n".join(_QUOTED.sub("", line) for line, part in _parts(answer) if part == "body")
+
+
+# A block whose every figure is in one note this turn's own searches found: the
+# notes held what the block gave as general knowledge. "When was Galileo
+# born?" got the note cited for 1564 and "15 February 1564" in a block, after a
+# body search whose two sections of that note missed its Life section
+# (2026-11-13). One figure of three digits or more, because a two-digit number
+# alone sits in too many notes to say anything.
+_FIGURE_DIGITS = 3
+
+
+def held_in_found(answer: str, found) -> list[dict]:
+    """The `general` turn note naming the notes among `found` (RecallWatch.found)
+    that hold every figure of the answer's blocks, [] when none does or the
+    blocks state no figure of three digits."""
+    from silica.driver import DRIVER
+    from silica.kernel.write.provenance import checked_numbers, number_tokens, unfounded_numbers
+
+    block = general_text(answer)
+    figures = checked_numbers(block)
+    if not any(sum(c.isdigit() for c in f) >= _FIGURE_DIGITS for f in figures):
+        return []
+    holding: list[str] = []
+    for path in found:
+        try:
+            body = DRIVER.read_note(path).content or ""
+        except Exception:
+            # Tolerated: a note moved or deleted since the search names nothing.
+            continue
+        if not unfounded_numbers(block, number_tokens(body)):
+            holding.append(path.removesuffix(".md").rsplit("/", 1)[-1])
+    if not holding:
+        return []
+    return [{"kind": "general", "text": "the figures of the general-knowledge block are in your notes: "
+             + ", ".join(dict.fromkeys(holding))}]
 
 
 def held_back(answer: str, line: str = HELD_BACK) -> str:

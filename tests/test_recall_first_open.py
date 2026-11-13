@@ -130,6 +130,28 @@ class TestTheRecallSaysSo:
         assert perception.facade_retrieve("Galileo", k=3, use_memory=False, leg_stats=stats) == (None, None)
         assert stats["degraded"] == {"index": "missing"}
 
+    def test_a_store_of_vectors_whose_embedder_failed_is_not_a_missing_index(self, vault, monkeypatch):
+        """A hosted import's shape: embeddings and no co-occurrence. With the
+        query embed failing, the line is the embedder's, not "never built"."""
+        import openai
+        import httpx
+
+        from silica.kernel.recall import perception
+
+        class _Store:
+            def __len__(self):
+                return 30
+
+        class _Slow:
+            def embed(self, texts, query=False):
+                raise openai.APITimeoutError(request=httpx.Request("POST", "http://127.0.0.1:9/v1"))
+
+        monkeypatch.setattr("silica.kernel.recall.embed.get_store", lambda: _Store())
+        monkeypatch.setattr("silica.model.providers.get_embedder", lambda config: _Slow())
+        stats: dict = {}
+        assert perception.facade_retrieve("Galileo", k=3, use_memory=False, leg_stats=stats) == (None, None)
+        assert stats["degraded"] == {"embed": "slow"}
+
     def test_while_the_app_builds_it_is_building(self, vault, monkeypatch):
         from silica.kernel.recall import perception
 

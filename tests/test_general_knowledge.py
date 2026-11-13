@@ -241,6 +241,58 @@ def test_the_turn_step_leaves_out_commands_held_back_blocks_the_web_and_empty_an
     assert [n["kind"] for n in t.notes] == ["retrieval"], "the thin line already says the notes had nothing"
 
 
+def test_in_a_demo_the_thin_line_is_not_drawn_so_the_uncited_line_is(tmp_vault, monkeypatch):
+    from silica.session.conversation import Conversation
+    from silica.session.turn import Turn, note
+
+    monkeypatch.setenv("SILICA_DEMO", "1")
+    thin = RecallWatch()
+    thin(MISS)
+    conv = Conversation(messages=[{"role": "user", "content": "q"}, {"role": "assistant", "content": "Canberra."}])
+    t = Turn(conv=conv, text="q", answer="Canberra.", read=thin)
+    t.watch = thin
+    note(t)
+    assert [n["text"] for n in t.notes] == [gk.UNCITED]
+
+
+# The live trace of 2026-11-13, "When was Galileo born?" on the demo vault: the
+# model's own body search returned two sections of the note that missed the one
+# with the day, and the model gave the day in a block.
+GALILEO_NOTE = ("---\ndescription: \"The astronomer (1564 to 1642).\"\n---\nGalileo Galilei (1564 to 1642) was "
+                "an Italian astronomer.\n\n## Life\n\nHe was born in Pisa on 15 February 1564.\n\n"
+                "## Why he was tried by the Inquisition\n\n- **1616:** consultants judged Copernicus.\n")
+GALILEO_ANSWER = ("Your notes say [[Galileo Galilei]] lived **1564 to 1642**, so your vault places the birth in "
+                  "**1564**, without a specific day.\n\n"
+                  f"{GENERAL_HEAD}\n> The exact date is **15 February 1564**, in Pisa, under the Julian calendar "
+                  "then in use.")
+GALILEO_SEARCH = ToolCompleteEvent(name="silica_search_context", args={"query": "Galileo born"}, call_id="c1",
+                                   result=json.dumps({"hits": [
+                                       {"path": "Culture/Science/Galileo Galilei.md", "line": 24,
+                                        "section": "Why he was tried by the Inquisition", "snippet": "- **1616:**"},
+                                       {"path": "Culture/Culture.md", "line": 62, "section": "Timeline",
+                                        "snippet": "| 1543 |"}], "notes_matched": 4}),
+                                   duration_s=0.0, iteration=1)
+
+
+def test_a_block_whose_figures_a_found_note_holds_says_so(client, tmp_vault, monkeypatch):
+    """ADR-0174: a fact the vault holds, given as general knowledge, is named
+    under the answer with the note that holds it."""
+    tmp_vault.note("Culture/Science/Galileo Galilei.md", GALILEO_NOTE)
+    tmp_vault.note("Culture/Culture.md", "# Culture\n\n| 1543 | Copernicus |\n")
+    monkeypatch.setattr("silica.session.turn.run_agent", _turn(GALILEO_ANSWER, GALILEO_SEARCH))
+    done = _sse(client.post("/chat", json={"text": "When was Galileo born?"}))[-1]
+    assert _general(done) == [gk.LABEL, "the figures of the general-knowledge block are in your notes: Galileo Galilei"]
+
+
+def test_a_block_no_found_note_holds_gets_no_such_line(client, tmp_vault, monkeypatch):
+    tmp_vault.note("Culture/Science/Galileo Galilei.md", GALILEO_NOTE)
+    said = ("Your notes say nothing on Westphalia.\n\n"
+            f"{GENERAL_HEAD}\n> Signed in 1648, it ended the Thirty Years' War.")
+    monkeypatch.setattr("silica.session.turn.run_agent", _turn(said, GALILEO_SEARCH))
+    done = _sse(client.post("/chat", json={"text": "what was the peace of westphalia?"}))[-1]
+    assert _general(done) == [gk.UNCITED]
+
+
 def test_a_degraded_search_that_found_nothing_holds_a_block_back_with_its_own_reason(client, monkeypatch):
     from silica.ui.web.session import SESSION
 

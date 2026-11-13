@@ -21,12 +21,20 @@ from silica.agent.general_knowledge import (
     HELD_BACK_UNSURE,
     general_notes,
     held_back,
+    held_in_found,
     uncited_notes,
     without_general,
 )
 from silica.agent.constraints import AgentConstraints, chat_constraints
 from silica.agent.loop import run_agent
-from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
+from silica.agent.recall_watch import (
+    READS_KEY,
+    THIN_COVERAGE_HINT,
+    RecallWatch,
+    numbers_notes,
+    read_refs,
+    unfounded_in_turn,
+)
 from silica.agent.sentinels import EMPTY_COMPLETION
 from silica.config import CONFIG
 from silica.metrics import emit
@@ -316,13 +324,15 @@ def note(t: Turn) -> None:
     if not (t.stopped or t.web) and t.read is not None:
         command, refs = t.text.startswith("/"), read_refs(t.conv.messages)
         notes += general_notes(t.answer, command=command, reads=refs)
+        notes += held_in_found(t.answer, t.read.found)
         # ADR-0174 leaves out, read off the turn and not the answer's words:
         # a command's output, an empty answer, a web answer (it cites its
         # pages), a turn that wrote, whose answer reports the write, and a turn
-        # whose every search came back empty, under which the thin-coverage
-        # line already says the notes had nothing and the answer is most often
-        # the refusal saying so.
-        if not (command or t.empty or t.read.web_answer or t.read.wrote or t.read.thin):
+        # under which the thin-coverage line says every search came back empty,
+        # where the answer is most often the refusal saying so. The line itself
+        # and not `thin`: a demo and a web answer leave it out.
+        thin_said = {"kind": "retrieval", "text": THIN_COVERAGE_HINT} in notes
+        if not (command or t.empty or t.read.web_answer or t.read.wrote or thin_said):
             notes += uncited_notes(t.answer, refs)
     notes += numbers_notes(t.unread)
     if not (t.stopped or t.web):
