@@ -927,7 +927,7 @@ function evDangling(d, T) {
   box.appendChild(mTable(
     [{ key: "target", label: "Target" }, { key: "refs", label: "Refs", num: true },
      { key: "src", label: "Referenced from" },
-     // a row's action is the outline button; the card's one teal is "write the top N" below it
+     // a row's action is the outline button; the card's one signal is "write the top N" below it
      { label: "", el: (r) => evWrite(r._row) }],
     d.dangling.map((r) => ({ target: r.target, refs: r.refs, _row: r, src: srcLabel(r) })),
   ));

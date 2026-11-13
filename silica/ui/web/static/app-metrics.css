@@ -47,8 +47,8 @@
 }
 
 /* Examine's and Explore's chart tables print in graphite (ADR-0146 amendment 2026-11-01, which
-   extends ADR-0069 rule 12 to every chart here): teal is what you press (DESIGN.md, the Clickable
-   Teal Rule), and the one mark a card is about takes frost, as the E(vault) total already did.
+   extends ADR-0069 rule 12 to every chart here): the signal is what you press (DESIGN.md, the
+   Clickable Signal Rule, ADR-0176), and the one mark a card is about takes frost, as the E(vault) total already did.
    Scoped to the two views because the teal ramp above still themes the diagrams inside notes
    (app-notes.js reads it from the root). Measured against the card (--page) and the view
    (--sheet), WCAG contrast and OKLCH L, 2026-11-01:
@@ -512,7 +512,7 @@ button.rv-t[data-path]:hover {
   background: var(--line-2);
 }
 
-/* the bin the caption is about: frost, the chart's one lead; teal is what you press
+/* the bin the caption is about: frost, the chart's one lead; the signal is what you press
    (ADR-0146 amendment 2026-11-01) */
 .hist i.hot {
   background: var(--frost);

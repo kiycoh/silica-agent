@@ -110,8 +110,11 @@ def test_python_writes_the_sheets_colours():
     app = _sheets()["app-base.css"]
     assert overlays._EDGE_COLOR_GAP.lower() == app["graphite"]["--warn"]
     assert overlays._EDGE_COLOR_GAP_PAPER.lower() == app["paper"]["--warn"]
-    assert palette.EDGE_COLOR_SIMILAR.lower() == app["graphite"]["--accent"]
-    assert palette.EDGE_COLOR_SIMILAR_PAPER.lower() == app["paper"]["--accent"]
+    # k-NN is the graph's data teal, not the signal (ADR-0176): sapphire sits inside the area arc
+    frame = _sheets()["graph-frame.css"]
+    for theme, similar in (("graphite", palette.EDGE_COLOR_SIMILAR), ("paper", palette.EDGE_COLOR_SIMILAR_PAPER)):
+        assert similar.lower() == frame[theme]["--g-signal"]
+        assert similar.lower() != app[theme]["--accent"]
     assert palette.EDGE_COLOR_REQUIRES.lower() == app["graphite"]["--frost"]
     assert palette.EDGE_COLOR_REQUIRES_PAPER.lower() == app["paper"]["--frost"]
 

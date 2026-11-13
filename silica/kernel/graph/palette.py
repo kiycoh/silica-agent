@@ -88,9 +88,9 @@ EDGE_COLOR_EXTRACTED = "#868f9c"   # unlit graphite — resolved links
 # A written `requires:` (ADR-0145 point 7): the theme's frost, the "on" ink of
 # what the person wrote and accepted, a neutral so k-NN stays the one vivid layer.
 EDGE_COLOR_REQUIRES = "#F4F5F7"
-EDGE_COLOR_REQUIRES_PAPER = "#1A1815"
+EDGE_COLOR_REQUIRES_PAPER = "#0E1A33"
 EDGE_COLOR_AMBIGUOUS = "#e2544f"   # alarm red, deliberately outside the arc
-EDGE_COLOR_SIMILAR   = "#22b4cc"   # the signal — embedding k-NN (semantic map)
+EDGE_COLOR_SIMILAR   = "#22b4cc"   # embedding k-NN: the graph's data teal, not the signal (ADR-0176)
 
 # The paper set. Every one of these is drawn ON the floor and read AGAINST it,
 # so a light floor needs its own values or the whole mesh disappears — an edge

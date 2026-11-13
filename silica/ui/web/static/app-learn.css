@@ -1626,7 +1626,7 @@ button.lr-exp:hover {
 
 .lr-input:focus-visible {
   outline: 0;
-  box-shadow: 0 0 0 2px var(--wash-a, rgba(34, 180, 204, 0.16));
+  box-shadow: 0 0 0 2px var(--wash-a, rgba(141, 179, 255, 0.16));
   border-color: var(--accent);
 }
 

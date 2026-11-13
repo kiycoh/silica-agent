@@ -1,4 +1,4 @@
-/* Palette mirrors the app shell: graphite substrate, one signal hue at 189deg,
+/* Palette mirrors the app shell: graphite substrate, the sapphire signal,
    amber for caution. Community hues stay data-driven. Type: Archivo, inlined
    as a data: URI because this file must stay self-contained for file:// use.
    tests/test_design_copies.py holds these tokens to static/app-base.css: this
@@ -10,8 +10,8 @@
   --void:#0D0E0F;--slate:#141518;--slate-2:#24272B;
   --line:#2F343A;--line-2:#3F454D;
   --frost:#F4F5F7;--text:#C5CAD2;--ash:#AEB4BE;--ash-dim:#969CA6;
-  --accent:#22B4CC;--warn:#E0A93B;
-  --sel:rgb(150 205 215 / .14);--sel-hover:rgb(244 245 247 / .06);
+  --accent:#8DB3FF;--warn:#E0A93B;
+  --sel:rgb(175 195 233 / .14);--sel-hover:rgb(244 245 247 / .06);
   --sans:"Archivo",ui-sans-serif,system-ui,"Helvetica Neue",Arial,sans-serif;
   --lift:0 10px 28px -12px rgb(0 0 0 / .7);
   /* HUD and focus bar float over the canvas, so their fill is the floor at
@@ -33,6 +33,12 @@
   --glass:rgba(35,39,43,.78);--glass-blur:blur(20px) saturate(1.3);
   --glass-edge:inset 0 1px 0 rgba(244,245,247,.07);
   --g-ghost:#454b54;--g-fallback:#545d67;--g-dim:#1A1D20;--g-link-dim:#131517;
+  /* What the graph measures, not what you press (ADR-0176): k-NN links, hub
+     rings, COVERS and coverage arcs. It stayed the 189deg teal when the
+     signal moved to sapphire, because sapphire comes within 0.042 OKLab of an
+     area hue and teal stays 0.083 off (0.048 and 0.109 on paper). palette.py's
+     EDGE_COLOR_SIMILAR is this value. */
+  --g-signal:#22B4CC;
 }
 /* Light: same ramp as the app shell, same warm paper, same reasoning — see
    static/app-base.css. Kept in sync by hand because this file must stay
@@ -41,14 +47,15 @@
   color-scheme:light;
   --void:#EFEAE0;--slate:#F5F1E9;--slate-2:#E9E2D4;
   --line:#D9D1C0;--line-2:#C6BCA8;
-  --frost:#1A1815;--text:#3A362F;--ash:#5B554B;--ash-dim:#655D4F;
-  --accent:#0A6070;--warn:#7A4F03;
-  --sel:rgb(40 90 100 / .10);--sel-hover:rgb(26 24 21 / .05);
+  --frost:#0E1A33;--text:#3A362F;--ash:#5B554B;--ash-dim:#655D4F;
+  --accent:#0F52BA;--warn:#7A4F03;
+  --sel:rgb(64 82 113 / .10);--sel-hover:rgb(14 26 51 / .05);
   --lift:0 8px 20px -12px rgba(58,44,20,.34);
   --hud-fill:rgba(245,241,233,.95);
   --glass:rgba(255,255,255,.86);
   --glass-edge:inset 0 1px 0 rgba(255,255,255,.9),inset 0 -1px 0 rgba(58,44,20,.05);
   --g-ghost:#cbc6bd;--g-fallback:#79705f;--g-dim:#DCD5C7;--g-link-dim:#E5DFD2;
+  --g-signal:#0A6070;
 }
 *{box-sizing:border-box;margin:0;padding:0;border-radius:0}
 /* Firefox only: scrollbar-color inherits, and anywhere it is set Chromium drops

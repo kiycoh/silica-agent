@@ -704,7 +704,7 @@
 }
 
 /* The part of an answer the notes did not give (ADR-0169): its own words say so
-   in the head, and a caution edge sets it apart, never teal, which is for what
+   in the head, and a caution edge sets it apart, never the signal, which is for what
    can be pressed. Upright where a quote is italic: it is the answer's own prose.
    --warn on the brightest plane it may touch, measured 2026-11-12: 5.99:1 on
    --bubble (graphite), 4.98:1 on --bubble (paper). */
@@ -2954,7 +2954,7 @@ body.demo-card :is(#dock-composer, #vh-ideas) {
 
 /* --- the first run without a terminal (ADR-0172 point 1) -------------------
    The setup card stands over the box on the composer's measure and inset, in
-   the box's own border and the app's tokens: teal only on what can be pressed.
+   the box's own border and the app's tokens: the signal only on what can be pressed.
    While it shows, the greeting and the ways to start go, since each is a
    question nothing can answer yet. Important for the :has() rules of three
    ids' weight that show them on an empty chat. */

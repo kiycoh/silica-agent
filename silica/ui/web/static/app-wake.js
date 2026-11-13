@@ -1,6 +1,6 @@
 /* The wait, drawn as ASCII wake's hand running over a row of cells (bencho.dev, MIT;
    ADR-0146 point 3). Every .frame-loading carries one in place of the spinner, the view's own
-   message under it. The spinner went because it spun the accent, and teal is what you can
+   message under it. The spinner went because it spun the accent, and the signal is what you can
    press; the wake is the landing's own figure of a hand at work, in ink.
    One loop serves every row and runs only while a row is on screen: a row inside a hidden
    overlay or an inactive view has no offsetParent, and a change to `hidden` or `class` anywhere

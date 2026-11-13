@@ -1,6 +1,7 @@
 /* Silica reads and writes for a living, so it is typeset as a reading tool,
-   not as a terminal. Graphite substrate and one signal hue at 189deg, the same
-   hue the paper theme and the mark carry, so every surface agrees. Rigid
+   not as a terminal. Graphite substrate and one signal, midnight sapphire, the
+   same hue the paper theme and the mark carry, so every surface agrees
+   (ADR-0176). Rigid
    1px-compartment grid, 90 degree corners only. Type: Archivo for UI and prose,
    Martian Mono only where the cell grid matters, meaning code.
    Two rules carry the design. First, hierarchy comes from size and surface, not
@@ -82,7 +83,7 @@
      value held AA over --slate and fell to 3.83:1 on --slate-2, which is where
      the 9-10px stat labels and every placeholder actually sit. #969CA6 clears
      4.54:1 there. */
-  --accent: #22B4CC;
+  --accent: #8DB3FF;
   /* The selection is a frosted box, not a stripe: a translucent neutral with a
      trace of the signal hue in it, so a selected row reads as a small object
      resting on the surface. It replaces every inset accent bar, active pill and
@@ -90,16 +91,18 @@
      --sheet (view, drawer), the two planes it lands on; the paper pair is not a
      mirror because a tint that reads on graphite is a stain on paper. No
      backdrop-filter goes with it: on a uniform fill there is nothing to blur. */
-  --sel: rgb(150 205 215 / .14);
+  --sel: rgb(175 195 233 / .14);
   --sel-hover: rgb(244 245 247 / .06);
-  /* the signal, hue 189deg. One hue at two stops, this one for graphite and
-     #0A6070 for paper, because no single chromatic hex clears AA on both a
-     near-white and a near-black ramp. 189deg is short of the cyan the category
-     reaches for: far enough toward teal to read as an instrument colour rather
-     than a glow, far enough from green not to collide with --add. The only
+  /* the signal, midnight sapphire (ADR-0176). One hue at two stops, this one
+     for graphite and #0F52BA for paper, because no single chromatic hex clears
+     AA on both a near-white and a near-black ramp: 6.06:1 on --bubble, the
+     brightest plane it touches, and the floor on it as text 9.22:1. It replaced
+     the 189deg teal of 2026-08-23, which the graph keeps as data and not as a
+     control (graph-frame.css --g-signal): sapphire comes within 0.042 OKLab of
+     an area hue there, the distance the area arc was moved to escape. The only
      vivid colour that is ever interactive. */
-  --mark-lit: #22B4CC;
-  --mark-hot: #A6EAF4;
+  --mark-lit: #8DB3FF;
+  --mark-hot: #CCDDFE;
   /* the presence's light (ADR-0048, amendment 2026-10-21), the signal's hue
      taken brighter: --mark-lit is a shell while the wave crosses it, --mark-hot
      the seed and the wave's crest. Light on the mark and never text, so the AA
@@ -206,7 +209,7 @@
      here: in the dark palette "deeper" and "the ink that survives a vivid fill"
      both resolve to the floor, so the split costs nothing and reads the same.
      In light they diverge hard — a code well has to be a step DOWN from the
-     paper while text on a teal chip has to be white — and one token cannot be
+     paper while text on a sapphire chip has to be white — and one token cannot be
      both. Naming them now is what lets the light block below stay a pure
      value swap instead of a second set of rules.
        --well     inset surfaces: code blocks, the .env sample in the stt panel.
@@ -242,7 +245,7 @@
   --shadow-rgb: 0 0 0;
   --scrim: rgba(13, 14, 15, .70);
   --drop-scrim: rgba(13, 14, 15, .88);
-  --art-glow: rgba(34, 180, 204, .16);
+  --art-glow: rgba(141, 179, 255, .16);
 }
 
 /* --- light: the same room, lit --------------------------------------------
@@ -250,7 +253,8 @@
    substrate and it has no light half to invert into; a cool white would have
    read as the dark theme with the lamp turned up, which is the one thing a
    second theme must not do. So light is a different material — laid paper, a
-   toned desk under it, deep teal where the dark theme is emissive cyan.
+   toned desk under it, navy ink, and a deep sapphire where the dark theme's
+   is pale.
 
    The ramp is not the dark one flipped. Flipping it puts the reading surface
    at the bottom and the chrome above it, and on paper that is backwards: the
@@ -267,9 +271,9 @@
    code well) now takes a real share of that range instead of an even slice.
 
    Every ink below clears 4.5:1 on all seven surfaces, computed, worst pair
-   --ash-dim on --bubble at 4.71:1. --accent lands on a deep teal rather than
-   the mascot's cyan because cyan cannot clear 4.5:1 on paper at any useful
-   saturation; it keeps the hue and gives up the glow, which is the honest
+   --ash-dim on --bubble at 4.71:1. --accent lands on a deep sapphire rather than
+   graphite's pale one because the pale one cannot clear 4.5:1 on paper at any
+   useful saturation; it keeps the hue and gives up the glow, which is the honest
    trade and not a compromise worth hiding. */
 :root[data-theme="light"] {
   color-scheme: light;
@@ -292,21 +296,24 @@
   --line: #D9D1C0;
   --line-2: #C6BCA8;
 
-  --frost: #1A1815;
+  --frost: #0E1A33;
+  /* midnight's navy ink (ADR-0176), 17.02:1 on --page. Only the ink moves:
+     the prose greys stay warm, because Midnight changes the light and the
+     ink, not the room, which is what set it apart from the navy draft. */
   --text: #3A362F;
   --ash: #5B554B;
   --ash-dim: #655D4F;
   --on-vivid: #FFFFFF;
 
-  --accent: #0A6070;
-  --sel: rgb(40 90 100 / .10);
-  --sel-hover: rgb(26 24 21 / .05);
-  /* the same 189deg hue as graphite, at the stop that survives paper: 5.03:1 on
+  --accent: #0F52BA;
+  --sel: rgb(64 82 113 / .10);
+  --sel-hover: rgb(14 26 51 / .05);
+  /* the same sapphire as graphite, at the stop that survives paper: 5.00:1 on
      the brightest plane it touches. Keeps the hue and gives up the glow, which
      is the honest trade and not a compromise worth hiding. */
-  --mark-lit: #1597AE;
-  --mark-hot: #1A9AB0;
-  /* paper's shells are black, so the light that crosses them is a teal brighter
+  --mark-lit: #5286DB;
+  --mark-hot: #5589DE;
+  /* paper's shells are black, so the light that crosses them is a sapphire brighter
      than the accent rather than the accent itself */
   --warn: #7A4F03;
   --err: #B3261E;

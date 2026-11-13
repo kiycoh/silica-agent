@@ -22,14 +22,14 @@
   color-scheme: light;
   --void: #EFEAE0; --slate: #F5F1E9; --sheet: #FFFDF9; --slate-2: #E9E2D4; --bubble: #E1D7C1;
   --line: #D9D1C0; --line-2: #C6BCA8;
-  --frost: #1A1815; --text: #3A362F; --ash: #5B554B; --ash-dim: #655D4F;
-  --accent: #0A6070; --on-vivid: #FFFFFF; --warn: #7A4F03;
-  --sel: rgb(40 90 100 / .10); --sel-hover: rgb(26 24 21 / .05);
+  --frost: #0E1A33; --text: #3A362F; --ash: #5B554B; --ash-dim: #655D4F;
+  --accent: #0F52BA; --on-vivid: #FFFFFF; --warn: #7A4F03;
+  --sel: rgb(64 82 113 / .10); --sel-hover: rgb(14 26 51 / .05);
   --wash: rgba(58, 44, 20, .05);
   /* a figure is printed in two inks: paper and ink here, the well and frost on graphite */
   /* an engraving prints on the sheet itself (--fig is the sheet), so it has no edge, and so does the
      hero's page graph; Fig. 3 and 4 are objects, the app and a note, and keep their plate */
-  --fig: #FFFDF9; --fig-ink: #1A1815; --fig-edge: #D9D1C0; --well: #F5F1E9; --plate: #FFFDF9;
+  --fig: #FFFDF9; --fig-ink: #0E1A33; --fig-edge: #D9D1C0; --well: #F5F1E9; --plate: #FFFDF9;
   --r: 14px; --r-sm: 8px; --r-xs: 4px; --gutter: 12px;
   --sans: "Archivo", ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
   --mono: "Martian Mono", ui-monospace, Menlo, monospace;
@@ -46,8 +46,8 @@
   --void: #0D0E0F; --slate: #141518; --sheet: #23272B; --slate-2: #24272B; --bubble: #2F3339;
   --line: #2F343A; --line-2: #3F454D;
   --frost: #F4F5F7; --text: #C5CAD2; --ash: #AEB4BE; --ash-dim: #969CA6;
-  --accent: #22B4CC; --on-vivid: #0D0E0F; --warn: #E0A93B;
-  --sel: rgb(150 205 215 / .14); --sel-hover: rgb(244 245 247 / .06);
+  --accent: #8DB3FF; --on-vivid: #0D0E0F; --warn: #E0A93B;
+  --sel: rgb(175 195 233 / .14); --sel-hover: rgb(244 245 247 / .06);
   --wash: rgba(63, 69, 77, .30);
   --fig: #23272B; --fig-ink: #F4F5F7; --fig-edge: transparent; --well: #0D0E0F; --plate: #0D0E0F;
 }
@@ -64,7 +64,7 @@ body {
   font: 400 var(--t-4)/1.65 var(--sans);
   -webkit-font-smoothing: antialiased;
 }
-::selection { background: rgb(34 180 204 / .32); color: var(--frost); }
+::selection { background: rgb(141 179 255 / .32); color: var(--frost); }
 h1, h2, h3, p, figure, dl, dd, ol, ul { margin: 0; }
 h1, h2, h3 { text-wrap: balance; color: var(--frost); }
 p { text-wrap: pretty; }

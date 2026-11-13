@@ -27,12 +27,12 @@ HERE = Path(__file__).parent
 # top of it, at the cost of Silica looking like whatever host it was embedded in.
 BG, PANEL, RAISED, LINE = "#0D0E0F", "#1B1E21", "#24272B", "#2F343A"
 DIM, TEXT, BRIGHT = "#969CA6", "#C5CAD2", "#F4F5F7"
-# One signal hue at 189deg, and the three status colours that are older than any
+# One signal, midnight sapphire (ADR-0176), and the three status colours that are older than any
 # brand. There is no --violet in the system any more, so the one thing that still
 # needs a second hue -- the model, marked as data and not as a control -- takes a
 # stop off the community arc the graph itself colours nodes with (212-306deg,
 # 0.66 saturation): here graph_export._community_color(4).
-ACCENT, MODEL = "#22B4CC", "#9C80E5"
+ACCENT, MODEL = "#8DB3FF", "#9C80E5"
 GREEN, RED, AMBER = "#4FD08A", "#EB778E", "#E0A93B"
 # Archivo and Martian Mono are named first and never load: GitHub serves a README
 # image through camo, which runs no script and fetches no font. The stack behind

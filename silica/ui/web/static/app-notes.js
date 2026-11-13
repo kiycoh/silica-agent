@@ -946,8 +946,8 @@ function loadMermaid() {
 
 // A ```smiles fence (ADR-0159) draws as a skeletal formula with smiles-drawer, a
 // 197 KB file read at the first molecule, as mermaid is. Every atom is the theme's
-// frost: the CPK colours would be a second palette on the reading plane, and teal is
-// what can be pressed. A string it cannot parse stays its source, as code.
+// frost: the CPK colours would be a second palette on the reading plane, and the signal
+// is what can be pressed. A string it cannot parse stays its source, as code.
 let smilesLoad = null;
 function loadSmiles() {
   return (smilesLoad ||= new Promise((resolve, reject) => {
