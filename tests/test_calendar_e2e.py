@@ -105,9 +105,20 @@ class Page:
         raise AssertionError(f"timed out waiting for {what or expr}")
 
     def center(self, el: str) -> tuple[float, float]:
-        """The middle of the element a JS expression finds, scrolled into view."""
-        r = self.js(f"(() => {{ const e = {el}; if (!e) return null; e.scrollIntoView({{block: 'center'}});"
-                    " const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()")
+        """The middle of the element a JS expression finds, scrolled into view,
+        once it holds still: the narrow view's New event slid by up to 29 px
+        while the side column folded, and a press at the first reading missed
+        it (1 run in 3 here, every run on a slower checkout, 2026-11-13)."""
+        expr = (f"(() => {{ const e = {el}; if (!e) return null; e.scrollIntoView({{block: 'center'}});"
+                " const r = e.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()")
+        r = self.js(expr)
+        end = time.monotonic() + 3
+        while r and time.monotonic() < end:
+            time.sleep(0.05)
+            again = self.js(expr)
+            if again == r:
+                break
+            r = again
         assert r, f"no element for {el}"
         return r[0], r[1]
 
