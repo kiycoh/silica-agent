@@ -66,6 +66,9 @@ def _new_line(p, vault, text: str = "Start.\n") -> None:
 
 
 def test_a_name_in_math_completes_as_before_and_enter_takes_it(app):  # noqa: F811
+    """The stock completion keys are put back by hand (defaultKeymap off, ADR-0159 point
+    15), so each list that took Enter before is driven here: a name in math, the second
+    entry by the arrow, a note after `[[`."""
     p, vault = app
     _new_line(p, vault)
     _typed(p, "$acqu")
@@ -73,6 +76,57 @@ def test_a_name_in_math_completes_as_before_and_enter_takes_it(app):  # noqa: F8
     _press_enter(p)
     p.wait("centreNote.editor.getText().includes('$\\\\ce{H2O}')", 5, "the formula in the word's place")
     _closed(p)
+    _typed(p, " + acqu")
+    _listed(p, "acqua ossigenata")
+    _key(p, "ArrowDown", "ArrowDown", 40)
+    _press_enter(p)
+    p.wait("centreNote.editor.getText().includes('$\\\\ce{H2O} + \\\\ce{H2O2}')", 5, "the second entry")
+    _typed(p, "$ see [[Sour")
+    _listed(p, "Source")
+    _press_enter(p)
+    p.wait("centreNote.editor.getText().includes('see [[Source]]')", 5, "the note's link")
+    _closed(p)
+
+
+def test_formula_and_molecule_open_the_whole_list(app):  # noqa: F811
+    p, vault = app
+    _new_line(p, vault)
+    # A blank line above: right under a line of text the editor reads `$$` as that
+    # paragraph going on, and Formula opens no list there (found 2026-11-13, not fixed here).
+    _press_enter(p)
+    p.click("document.querySelector('#nv-format [data-fmt=\"formula\"]')")
+    p.wait(f"{LISTED}.length > 20", 5, "the formulas and molecules")
+    _key(p, "Escape", "Escape", 27)
+    _closed(p)
+    _key(p, "End", "End", 35, mods=2)  # out of the formula block, to a line of its own
+    _press_enter(p)
+    _press_enter(p)
+    p.click("document.querySelector('#nv-format [data-fmt=\"molecule\"]')")
+    _listed(p, "water")
+    _press_enter(p)
+    p.wait("centreNote.editor.getText().includes('```smiles\\nO\\n```')", 5, "water's SMILES in the fence")
+
+
+def test_a_tab_right_after_a_letter_takes_the_name_while_the_list_refreshes(app):  # noqa: F811
+    """After a key the list has no selection until its sources answer, about 100 ms: a Tab
+    sent then left the editor, and in a list item indented it (2026-11-13)."""
+    p, vault = app
+    _new_line(p, vault, "Start.\n\n- two\n")
+    p.click("[...document.querySelectorAll('#nv-edit .cm-line')].find((l) => l.textContent.includes('two'))")
+    _key(p, "End", "End", 35)
+    _typed(p, " caffein")
+    _listed(p, "caffeine")
+    p.type("e")
+    _key(p, "Tab", "Tab", 9)
+    p.wait("centreNote.editor.getText().includes('\\n- two $\\\\ce{C8H10N4O2}$')", 5, "the formula, the item where it was")
+    assert p.js("centreNote.editor.view.hasFocus"), "the caret stays in the note"
+    _typed(p, " acqua")
+    _listed(p, "acqua ossigenata")
+    _key(p, "ArrowDown", "ArrowDown", 40)
+    _key(p, "Tab", "Tab", 9)
+    p.wait("centreNote.editor.getText().includes('$ $\\\\ce{H2O2}$')", 5, "the entry the arrow chose")
+    _key(p, "Tab", "Tab", 9)  # no list: Tab is the list item's again
+    p.wait("centreNote.editor.getText().includes('\\n  - two')", 5, "the item indented")
 
 
 def test_a_name_in_prose_offers_its_inline_formula_and_only_tab_takes_it(app):  # noqa: F811

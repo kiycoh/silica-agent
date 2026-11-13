@@ -41,8 +41,8 @@ function linkSource(cx) {
 // Italian), read at the first ask; picking one writes LaTeX, the `\ce` formula
 // or the SMILES in the word's place. In prose a name offers its formula as inline
 // math, taken by Tab alone (sciKeys). No model, and nothing leaves the page.
-let sciVocab = null;
-const loadVocab = () => (sciVocab ||= fetch("/static/science-vocab.json").then((r) => r.json())
+let sciVocab = null, sciData = null;
+const loadVocab = () => (sciVocab ||= fetch("/static/science-vocab.json").then((r) => r.json()).then((d) => (sciData = d))
   .catch(() => { sciVocab = null; return { molecules: [], formulas: [] }; })); // asked again at the next word
 const fold = (t) => t.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 // What the caret is in: "smiles", "ce", "math", "prose" or null. Read from the line as
@@ -86,20 +86,27 @@ function vocabHits(pool, q, prose = false) {
   // no word yet (a button's list): the file's order, formulas before molecules in math
   return q ? hits.sort((x, y) => y[0] - x[0] || x[1].localeCompare(y[1])) : hits;
 }
-async function scienceSource(cx) {
-  const kind = sciContext(cx.state, cx.pos);
+// The words before the caret, as CodeMirror's matchBefore reads them (250 characters at most).
+function wordBefore(state, pos) {
+  const line = state.doc.lineAt(pos), start = Math.max(line.from, pos - 250);
+  const text = line.text.slice(start - line.from, pos - line.from), at = text.search(/[\p{L}][\p{L}\p{N}' -]*$/u);
+  return at < 0 ? null : { from: start + at, text: text.slice(at) };
+}
+const scienceSource = async (cx) => sciResult(cx.state, cx.pos, cx.explicit, sciData || await loadVocab());
+// The list for the caret at `pos` from the vocabulary `v`; synchronous, so a Tab can ask it too.
+function sciResult(state, pos, explicit, v) {
+  const kind = sciContext(state, pos);
   if (!kind) return null;
   const prose = kind === "prose";
-  const word = cx.matchBefore(/[\p{L}][\p{L}\p{N}' -]*$/u);
+  const word = wordBefore(state, pos);
   // `$x$` is a variable, not a name; a sentence is mostly words, so prose waits for four letters
-  const least = prose ? 4 : cx.explicit ? 1 : 3;
-  if (!word ? prose || !cx.explicit : word.text.trim().length < least) return null;
-  const v = await loadVocab();
+  const least = prose ? 4 : explicit ? 1 : 3;
+  if (!word ? prose || !explicit : word.text.trim().length < least) return null;
   const pool = kind === "math" || prose ? [...v.formulas, ...v.molecules] : v.molecules;
   // `$a + acqua`: the longest run of words before the caret that names something,
   // so "acido solforico" is one name and the `a` of `a acqua` is left alone. A run
   // starts after a space or an elision: "dell'acido solforico" names the acid.
-  let from = cx.pos, hits = word ? [] : vocabHits(pool, "");
+  let from = pos, hits = word ? [] : vocabHits(pool, "");
   if (word) {
     for (const m of word.text.matchAll(/[^\s']+/g)) {
       const rest = word.text.slice(m.index);
@@ -130,10 +137,20 @@ async function scienceSource(cx) {
 function sciKeys() {
   const { completionKeymap, acceptCompletion, closeCompletion, selectedCompletion } = window.CM;
   const prose = (v) => !!selectedCompletion(v.state)?.prose;
+  // After a key the list has no selection until its sources answer, about 100 ms, so a
+  // Tab right after a letter fell through, out of the editor or indenting a list item
+  // (measured 2026-11-13): while the list shows, Tab takes what it is about to show.
+  const refreshing = (v) => {
+    if (!sciData || !v.contentDOM.hasAttribute("aria-controls")) return false; // no list on screen
+    const at = v.state.selection.main.head, r = sciResult(v.state, at, false, sciData), o = r && r.options[0];
+    if (!o || !o.prose) return false;
+    v.dispatch({ changes: { from: r.from, to: at, insert: o.apply }, selection: { anchor: r.from + o.apply.length }, userEvent: "input.complete" });
+    return true;
+  };
   return [
     ...completionKeymap.map((k) => (k.key !== "Enter" ? k
       : { key: "Enter", run: (v) => (prose(v) ? (closeCompletion(v), false) : acceptCompletion(v)) })),
-    { key: "Tab", run: (v) => prose(v) && (acceptCompletion(v), true) },
+    { key: "Tab", run: (v) => (prose(v) ? (acceptCompletion(v), true) : refreshing(v)) },
   ];
 }
 
