@@ -4,9 +4,13 @@
 """The page vectors of the vault's documents, kept current by the app
 (ADR-0156, amended 2026-11-08): a build when the GUI starts, then one after
 every write that adds or changes a document (a note saved, an import, a
-conversion, a vault switch), on a laptop whose embedder is this machine's.
-Before this nothing built them: a library's search and Explore's similar
-edges waited for someone to run a script.
+conversion, a vault switch, a chat turn that wrote, a move in the tree), on a
+laptop whose embedder is this machine's. Before this nothing built them: a
+library's search and Explore's similar edges waited for someone to run a script.
+
+The same job builds recall's own stores first when the vault lacks them
+(ADR-0173), co-occurrence and lexical on any laptop and the embeddings where
+the page vectors are built, and sweeps what changed into them.
 
 silica-core reads only the documents whose mtime moved and saves as it goes
 (0.13.0), so a refresh that finds nothing costs a walk, and a first build of
@@ -21,6 +25,8 @@ import time
 
 from silica.config import CONFIG, hosted
 from silica.kernel.recall import engine as recall_engine
+from silica.kernel.recall import refresh as recall_refresh
+from silica.kernel.recall import sync as recall_sync
 
 logger = logging.getLogger(__name__)
 
@@ -53,30 +59,44 @@ def status() -> dict:
     return dict(_STATUS)
 
 
+def _builds() -> bool:
+    """A laptop keeps its vault's indexes. A hosted tenant's are the host's
+    (ADR-0085): its imports embed what they bring and its runs index what
+    they write, and a restart of every tenant at a deploy is no moment for a
+    vault-wide build on a shared CPU (ADR-0173)."""
+    return not hosted()
+
+
 def _eligible() -> bool:
     """A laptop (ADR-0085: a tenant's vectors are the host's) and an
     embedder on this machine: a remote one sends every page off it, paid,
-    so that stays the person's `silica-core index --embed`."""
+    so that stays the person's `silica-core index --embed`, and recall's
+    embeddings stay their /embed for the same reason (ADR-0173)."""
     if hosted():
         return False
     from silica_core import embeddings
 
-    recall_engine.engine()  # raises on a silica-core this tree cannot drive, before a thread starts
+    recall_engine.engine()  # raises on a silica-core this tree cannot drive
     return embeddings.enabled() and embeddings.remote_host() is None
 
 
-def refresh() -> bool:
-    """A build now, or one more after the running one. False when this
-    process builds no vectors (`_eligible`)."""
-    global _THREAD
+def _local_embedder() -> bool:
     try:
-        if not _eligible():
-            return False
+        return _eligible()
     except Exception:
-        # Tolerated: a silica-core engine() refuses costs the vectors only.
-        # The callers are a note's own index and a finished job's follow-up,
-        # which must not fail for it.
+        # Tolerated: a silica-core engine() refuses costs the vectors only;
+        # recall's co-occurrence and lexical stores were built before this.
         logger.exception("page vectors: not started")
+        return False
+
+
+def refresh() -> bool:
+    """A build now, or one more after the running one: recall's stores when
+    the vault lacks them, a sweep of what changed since, then the page
+    vectors where `_eligible`. False when this process keeps no index
+    (`_builds`)."""
+    global _THREAD
+    if not _builds():
         return False
     with _LOCK:
         if _THREAD is not None:
@@ -134,23 +154,63 @@ def _build_once() -> None:
     vault = CONFIG.vault_path
     if not vault:
         return
-    _set(state="waiting", vault=vault)
-    if not _embedder_up():
-        logger.warning("page vectors: the embedder did not answer within %.0f s", _WAIT_S)
-        _set(state="failed", vault=vault, error="the embedder did not answer")
-        return
 
     def progress(stage: str, done: int, total: int) -> None:
         if CONFIG.vault_path != vault:
             raise _Switched
         _set(state=stage, vault=vault, done=done, total=total)
 
+    try:
+        # Recall's stores first (ADR-0173): co-occurrence and lexical with no
+        # model, so the vault is searchable by its words seconds after it
+        # opens; the embeddings and the page vectors, the long part, once an
+        # embedder on this machine answers.
+        _build(lambda: recall_refresh.build_missing(progress=progress), "recall stores")
+        up = _local_embedder() and _wait_for_embedder(vault)
+        if up:
+            from silica.model.providers import get_embedder
+
+            _build(lambda: recall_refresh.build_missing(embedder=get_embedder(CONFIG), progress=progress),
+                   "recall embeddings")
+        # A note written or moved since the last build: its new key into all
+        # three stores, its old one out of them.
+        recall_sync.sweep(force=True)
+        if CONFIG.vault_path != vault:
+            raise _Switched
+        if up:
+            _page_vectors(vault, progress)
+        elif _STATUS.get("state") != "failed":
+            _set(state="idle", vault=vault)
+    except _Switched:
+        _AGAIN.set()
+
+
+def _build(run, what: str) -> None:
+    try:
+        run()
+    except _Switched:
+        raise
+    except Exception:
+        # Tolerated: recall says its index is missing and answers from the
+        # passages (ADR-0173), and the next open or write builds again.
+        logger.exception("%s: the build failed", what)
+
+
+def _wait_for_embedder(vault: str) -> bool:
+    _set(state="waiting", vault=vault)
+    if _embedder_up():
+        return True
+    logger.warning("page vectors: the embedder did not answer within %.0f s", _WAIT_S)
+    _set(state="failed", vault=vault, error="the embedder did not answer")
+    return False
+
+
+def _page_vectors(vault: str, progress) -> None:
     started = time.monotonic()
     try:
         out = recall_engine.engine().build_index(embed=True, progress=progress)
     except _Switched:
-        _AGAIN.set()
-        return
+        raise
     except Exception:
         # Tolerated: the search stays lexical and the next write or start
         # builds again from silica-core's last save.

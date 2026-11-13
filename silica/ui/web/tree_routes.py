@@ -151,6 +151,10 @@ def tree_move(payload: dict):
     if res["error"]:
         logger.warning("tree move stopped after %d of %d: %s", len(res["moved"]), len(moves), res["error"])
         res["error"] = f"{len(moves) - len(res['moved'])} of {len(moves)} could not be moved"
+    if res["moved"]:
+        from silica.ui.web import vectors
+
+        vectors.refresh()  # the moved notes' vectors and entries under their new keys (ADR-0173)
     return {"run": res["run"], "moved": [{"from": a, "to": b} for a, b in res["moved"]],
             "skipped": skipped, "rewritten": rewritten, "error": res["error"]}
 

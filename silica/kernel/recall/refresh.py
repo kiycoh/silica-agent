@@ -10,6 +10,7 @@ that had been pasted beside them had to stay equal to the write hook's.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -213,3 +214,98 @@ def flush(*, embed: bool, cooccur: bool, lexical: bool) -> None:
             get_lexical_store().save()
         except Exception as e:
             logger.debug("flush: lexical index save skipped (%s)", e)
+
+
+# --- the first build, when the app opens a vault (ADR-0173) ---------------------
+
+# The stores the running first build has still to make. A set and not a flag:
+# a search during it asks about one store, and "embeddings" is pending only
+# when an embedder came with the build.
+_PENDING: set[str] = set()
+_PENDING_LOCK = threading.Lock()
+# Notes per embedding call, as build_index batches them; the rail steps by it.
+_EMBED_CHUNK = 32
+
+
+def building(store: str | None = None) -> bool:
+    """A first build of this vault's stores runs in this process (`store`: that
+    one is still to come). A search that finds no store meanwhile is waiting on
+    it, which recall says as `building` rather than as `missing`."""
+    with _PENDING_LOCK:
+        return bool(_PENDING) if store is None else store in _PENDING
+
+
+def missing(*, embed: bool) -> list[str]:
+    """The stores recall reads that this vault lacks, in the order they are
+    built: co-occurrence and lexical, then embeddings when `embed`. Empty
+    counts as missing, because the sweep maintains only a seeded store."""
+    from silica.config import CONFIG
+    from silica.kernel.base import home
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.recall.embed import get_store
+
+    out = []
+    if not get_cooccur_store(lang=CONFIG.cooccurrence_lang).paths():
+        out.append("cooccurrence")
+    if not home.lexical_built():
+        out.append("lexical")
+    if embed and not len(get_store()):
+        out.append("embeddings")
+    return out
+
+
+def build_missing(*, embedder: Any = None,
+                  progress: Callable[[str, int, int], None] | None = None) -> dict[str, Any]:
+    """Build the stores this vault lacks (`missing`), as /cooccur, /lexical and
+    /embed would: the first two always, since neither calls a model; embeddings
+    only with `embedder`. Returns what each build reported, {} when nothing was
+    missing or the vault holds no note.
+
+    The embeddings go through embed.build_index and never through `embed`
+    above, whose figure readings pay the chat model per image: a build the
+    person did not ask for must not spend their key. `progress(stage, done,
+    total)` takes the page vectors' stages ("index", then "vectors") so the
+    rail draws it with the labels it has, and an exception it raises (a vault
+    switched under the build) stops the build there.
+    """
+    todo = missing(embed=embedder is not None)
+    if not todo:
+        return {}
+    step = progress or (lambda stage, done, total: None)
+    with _PENDING_LOCK:
+        _PENDING.update(todo)
+    done: dict[str, Any] = {}
+    try:
+        for name, build in (("cooccurrence", cooccurrence), ("lexical", lexical)):
+            if name in todo:
+                step("index", 0, 0)
+                done[name] = build()
+                if "error" in done[name]:  # a vault with no note: nothing to build, nothing to retry
+                    return {}
+                with _PENDING_LOCK:
+                    _PENDING.discard(name)
+        if "embeddings" in todo:
+            done["embeddings"] = _embed_all(embedder, step)
+    finally:
+        with _PENDING_LOCK:
+            _PENDING.clear()
+    return done
+
+
+def _embed_all(embedder: Any, step: Callable[[str, int, int], None]) -> dict[str, Any]:
+    from silica.kernel.recall.embed import build_index, get_store
+    from silica.kernel.recall.note_index import EMBED_LOCK
+
+    store = get_store()  # bound to this vault's file before the read: a switch cannot redirect it
+    _refs, notes, errors, refused = _read_all("")
+    if refused:
+        return refused
+    step("vectors", 0, len(notes))
+    for i in range(0, len(notes), _EMBED_CHUNK):
+        # Per chunk: a person's save (note_index) and an import embed into the
+        # same store, and neither should wait for a whole vault.
+        with EMBED_LOCK:
+            build_index(embedder, notes[i:i + _EMBED_CHUNK], store=store, save=False)
+        step("vectors", min(i + _EMBED_CHUNK, len(notes)), len(notes))
+    store.save()
+    return {"indexed": len(store), "total_notes": len(notes), "read_errors": errors}

@@ -288,6 +288,31 @@ def silica_semantic_search(query: Annotated[str, Field(description='Free-form qu
     return _without_score({"query": query, **recall_search.facade_search(query, k=k, memory=memory, folder=folder)})
 
 
+def _passages(query: str, folder: str, k: int) -> dict[str, Any]:
+    """A recall that ran without a leg and found nothing, answered from the
+    body search's passages (ADR-0173): its index builds itself on the first
+    search, so it finds the notes while recall's stores are missing or still
+    being built. Only an unfiltered recall: the body search knows no trust,
+    lifecycle or date floor and cannot read another vault. The reply keeps
+    `degraded` and its hint, which say what this context is."""
+    from silica.tools.atomic import silica_search_context
+
+    try:
+        found = silica_search_context(query, folder=folder, k=min(k, 8))
+    except Exception:
+        # Tolerated: the reply already says the recall ran without its index,
+        # which is the one thing it must not leave out; the passages are extra.
+        logger.exception("recall: the passage fallback failed")
+        return {}
+    hits = [h for h in found.get("hits") or [] if isinstance(h, dict) and h.get("path")]
+    if not hits:
+        return {}
+    keys = list(dict.fromkeys(h["path"].removesuffix(".md") for h in hits))
+    context = "\n\n".join(f"[[{h['path'].removesuffix('.md')}]], {h.get('section') or 'line ' + str(h.get('line'))}:\n"
+                          f"{h.get('snippet', '')}" for h in hits)
+    return {"context": context, "notes": keys, "partial": keys}
+
+
 def _without_score(out: dict[str, Any]) -> dict[str, Any]:
     """The payload the model gets: no fused `score`, and no `reranked`, which
     only said which of two scales that score was on. Seven of nine models in
@@ -420,6 +445,9 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
            # worst report was born.
            "partial": [b.path for b in p.blocks if b.origin != "memory" and not b.whole],
            "facts": len(p.fact_hits)}
+    if ("degraded" in out and not out["notes"]
+            and not (named or peek or window or min_trust or lifecycle)):
+        out.update(_passages(query, folder.strip(), k))
     if missing:
         out["missing"] = missing
     if window is not None:

@@ -14,10 +14,15 @@ from typing import Any
 # The degraded line, one per leg: `<prefix>: the <role> <phrase><fix>` (ADR-0094
 # point 5). The prefix says what the answer lost, not which server failed: the
 # reader judges the answer, and "lexical only" is what changes how to read it.
-_LEG = {"embed": ("lexical only", "embedder", "SILICA_EMBEDDING_TIMEOUT", "embedding_timeout"),
+_LEG = {"index": ("passages only", "recall index", "", ""),
+        "embed": ("lexical only", "embedder", "SILICA_EMBEDDING_TIMEOUT", "embedding_timeout"),
         "rerank": ("not reranked", "reranker", "SILICA_RERANK_TIMEOUT", "rerank_timeout")}
 _PHRASE = {"unreachable": "is unreachable", "loading": "is still loading",
            "rejected": "refused the model name", "failed": "failed"}
+# A store not built yet is no server's failure (ADR-0173): its line names the
+# index, and the commands that build it are the fix on every surface.
+_UNBUILT = {"building": "is still being built", "missing": "was never built"}
+_STORE = {"index": "recall index", "embed": "embedding index"}
 # Where to fix it, per surface. The GUI names its own panels; the REPL has none,
 # so both Settings pointers become the doctor; a tool result can be read by
 # either, so it names both. Loading has no fix: it ends.
@@ -31,15 +36,20 @@ _FIX = {
 
 
 def degraded_lines(degraded: dict, surface: str = "gui") -> list[str]:
-    """One line per leg this call or turn ran without, the embedder first."""
+    """One line per leg this call or turn ran without, the recall index first,
+    then the embedder."""
     from silica.config import CONFIG
 
     lines = []
-    for leg in ("embed", "rerank"):
+    for leg in ("index", "embed", "rerank"):
         cause = degraded.get(leg)
         if cause is None:
             continue
         prefix, role, knob, timeout_attr = _LEG[leg]
+        if cause in _UNBUILT:
+            fix = " · run /cooccur and /embed" if cause == "missing" else ""
+            lines.append(f"{prefix}: the {_STORE.get(leg, role)} {_UNBUILT[cause]}{fix}")
+            continue
         if cause == "slow":
             phrase, fix = f"did not answer in {getattr(CONFIG, timeout_attr):g} s", f"raise {knob}"
         else:

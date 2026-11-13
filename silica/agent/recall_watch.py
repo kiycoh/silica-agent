@@ -59,50 +59,66 @@ class RecallWatch:
         # Did the turn search the vault or read a note at all? A general-knowledge
         # block in a turn with no such call is held back (ADR-0169 point 2).
         self.looked = False
+        # A search that ran without a leg and found nothing (ADR-0173): it is
+        # no search for that rule, since it cannot show the notes lack the answer.
+        self.unsure = False
+        # Did the turn change a note or save a memory? Its answer reports that,
+        # and no line calls such a report general knowledge (ADR-0174).
+        self.wrote = False
 
     def __call__(self, event) -> None:
         if isinstance(event, ToolCompleteEvent):
             if event.name == "silica_web_answer":
                 self.web_answer = True
-            self.looked = self.looked or looks_in_vault(event.name)
+            unsure = self._inspect(event)
+            self.looked = self.looked or (looks_in_vault(event.name) and not unsure)
+            self.unsure = self.unsure or unsure
+            # silica_remember by name, as callback.py and the renderer name it:
+            # it changes no note, so Tool.mutates is empty for it.
+            self.wrote = self.wrote or (not tool_failed(event.result) and bool(
+                getattr(TOOLS.get(event.name), "mutates", "") or event.name == "silica_remember"))
             self.numbers |= result_numbers(event.result, event.args)
-            self._inspect(event)
         if self._inner is not None:
             self._inner(event)
 
-    def _inspect(self, event: ToolCompleteEvent) -> None:
+    def _inspect(self, event: ToolCompleteEvent) -> bool:
+        """Count the call toward `thin`; True when it ran without a leg and
+        found nothing."""
         empty_key = getattr(TOOLS.get(event.name), "found_nothing", "")
         if not empty_key or event.name in _TOO_WEAK_TO_ESCALATE:
-            return
+            return False
         try:
             data = json.loads(event.result)
         except (ValueError, TypeError):
-            return
+            return False
         if not isinstance(data, dict):
-            return
+            return False
         # Before the error check: a call with no leg left answers with an error,
         # and the error alone points at rebuilding an index that is fine.
         degraded = data.get("degraded")
         for leg, cause in (degraded.items() if isinstance(degraded, dict) else ()):
             self.degraded.setdefault(leg, cause)
+        unsure = bool(degraded) and not data.get(empty_key)
         if "error" in data:
             # A degraded index or an offline embedder is not thin coverage:
             # sending the user to the web here would mask the real problem.
-            return
+            return unsure
         self.calls += 1
         if not data.get(empty_key):
             self.misses += 1
+        return unsure
 
     @property
     def thin(self) -> bool:
         """True when the turn searched the vault and every search missed.
 
-        Never when a search ran without the embedder: that turn did not search
+        Never when a search ran without the embedder or without recall's index
+        (ADR-0173): that turn did not search
         by meaning, so its misses, silica_search_context's included, are not a
         finding about coverage and the web is the wrong fix. A turn that lost
         only the reranker keeps the rule: a reorder cannot change membership.
         """
-        if "embed" in self.degraded:
+        if "embed" in self.degraded or "index" in self.degraded:
             return False
         return self.calls > 0 and self.calls == self.misses
 
