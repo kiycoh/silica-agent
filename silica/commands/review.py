@@ -58,7 +58,8 @@ def review(c: Call) -> Result:
         rows = [p for p in pending if p.kind == name]
         if not rows:
             continue
-        note = (": a yes runs the worker model" if kind.spends_model
+        note = (": a yes runs the worker model, so it is accepted by id or name, never by all"
+                if kind.spends_model
                 else ": accepted by id or name, never by all" if not kind.in_all else "")
         out.print(f"  [bold]{kind.label}[/] ({len(rows)}){note}")
         for p in rows:
@@ -156,8 +157,32 @@ def curate(c: Call) -> Result:
             # autolink's shared concepts (ADR-0164).
             why = f"  [dim]{escape(it['reason'])}[/]" if it.get("reason") else ""
             out.print(f"  · [bold]{it['kind']}[/]  {escape(it['target'])}{pair}{why}")
+        if judged := res.get("judged"):
+            _say_judged(out, judged)
         out.print('  Run [bold]/curate --apply[/] to execute, or ask e.g. "apply only dedup".')
     return out
+
+
+def _say_judged(out: Result, n: dict[str, int]) -> None:
+    """How the worker's verdicts on the duplicate candidates came out (ADR-0175):
+    only a duplicate reaches /review, and a pair past the run's cap waits."""
+    from silica.tools.review.curate import JUDGE_CAP
+
+    def pairs(k: int) -> str:
+        return f"{k} pair" + ("" if k == 1 else "s")
+
+    tally = ", ".join(f"{n[v]} {label}" for v, label in
+                      (("duplicate", "duplicate"), ("distinct", "distinct"), ("contradicts", "contradictory"))
+                      if n.get(v))
+    asked = f"Judged {pairs(n['asked'])}" if n.get("asked") else "No pair needed a new verdict"
+    out.print(f"  {asked}{f'; verdicts: {tally}' if tally else ''}.")
+    if n.get("duplicate"):
+        out.print("  The duplicates wait in [bold]/review[/]; a yes merges them through the worker.")
+    if n.get("contradicts"):
+        out.print("  A contradictory pair is kept for the contradictions view, which does not list it yet.")
+    if n.get("waiting"):
+        out.print(f"  {pairs(n['waiting'])} {'waits' if n['waiting'] == 1 else 'wait'} for the next "
+                  f"/curate (at most {JUDGE_CAP} verdicts a run).")
 
 
 def aliases(c: Call) -> Result:

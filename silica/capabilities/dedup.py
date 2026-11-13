@@ -90,10 +90,26 @@ def passes_dedup_gate(
     return large / small <= max_ratio
 
 
+_CANDIDATE_BUDGET = 8000
+
+
+def judge_pair(item: WorkItem[DedupJob], config: Any) -> DedupDecision:
+    """The verdict alone on two notes, nothing written: what /curate asks
+    before it offers a duplicate for review (ADR-0175). The same framing and
+    call as run_dedup's single path, so the yes that later merges the pair
+    puts the question the offer was made on."""
+    job = item.context
+    body, skip = read_or_skip(item.target_path)
+    if skip is not None:
+        return DedupDecision(verdict="distinct", rationale=str(skip.get("reason", "")), judged=False)
+    return _decide_dedup(config, concept=job.concept, excerpt=job.excerpt, candidate_name=job.candidate,
+                         candidate_body=body[:_CANDIDATE_BUDGET], score=job.score)
+
+
 def run_dedup(item: WorkItem[DedupJob | DedupFamily], config: Any) -> dict[str, Any]:
     job = item.context
     candidate_path = item.target_path
-    budget = 8000
+    budget = _CANDIDATE_BUDGET
 
     emit_feedback(item, "reading")
     candidate_body, skip = read_or_skip(candidate_path)

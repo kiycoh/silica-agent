@@ -7,13 +7,29 @@ The report behind the plan is minutes on a large vault, so the plan is listed as
 the last dry run left it and never recomputed by a listing. A link is a
 mechanical write, previewed before it is offered: a pair whose notes never name
 each other has nothing to link and is not offered. An orphan or a duplicate is
-the leashed worker's to judge, through /curate --apply's own path, so its yes
-spends the worker model."""
+the leashed worker's to land, through /curate --apply's own path, so its yes
+spends the worker model.
+
+A duplicate is offered only once the worker has judged it one (ADR-0175): the
+dry run asks for the verdict alone on each candidate pair and remembers every
+verdict against the text of both notes, so the next run asks again only about a
+pair whose note changed."""
 from __future__ import annotations
 
+import hashlib
+import logging
+import time
+
 from silica.kernel.report.curator import CurationItem, CurationPlan
-from silica.kernel.review import Kind, Proposal, offer, offered, proposal_id, register
+from silica.kernel.review import Kind, Proposal, offer, offered, proposal_id, register, remember, verdicts
 from silica.kernel.text.note_parts import clean_name
+
+logger = logging.getLogger(__name__)
+
+# Verdicts one /curate asks for. A command in the chat cannot be stopped between
+# calls, and the demo vault's high band held 6 pairs on 2026-11-13, so 20 covers
+# a vault several times its size in one run; the rest wait for the next.
+JUDGE_CAP = 20
 
 
 def _link(src: str, dst: str, titles: list[str]) -> tuple[str, str] | None:
@@ -49,13 +65,14 @@ def _md(path: str) -> str:
     return path if path.endswith(".md") else path + ".md"
 
 
-def offer_plan(vault: str, plan: CurationPlan) -> None:
-    """The dry run's plan as proposals of the three kinds, in place of the last."""
+def offer_plan(vault: str, plan: CurationPlan) -> dict[str, int]:
+    """The dry run's plan as proposals of the three kinds, in place of the last,
+    and how the worker's verdicts on its duplicate candidates came out."""
     from silica.driver import DRIVER
     from silica.kernel.link.autolink import build_title_index
 
     if not vault:
-        return
+        return {}
     titles = build_title_index(DRIVER.list_files()) if plan.by_kind("autolink") else []
     links = []
     for it in plan.by_kind("autolink"):
@@ -71,12 +88,88 @@ def offer_plan(vault: str, plan: CurationPlan) -> None:
         id=proposal_id("orphan", _md(it.target)), kind="orphan",
         title=f"Connect {clean_name(it.target)}", why="nothing links to it",
         notes=(_md(it.target),), data={"target": it.target}) for it in plan.by_kind("orphan")])
-    offer(vault, "duplicate", [Proposal(
-        id=proposal_id("duplicate", *sorted((_md(it.target), _md(it.partner)))), kind="duplicate",
-        title=f"{clean_name(it.target)} and {clean_name(it.partner)}", why=it.reason,
-        notes=(_md(it.target), _md(it.partner)),
-        data={"target": it.target, "partner": it.partner, "score": it.score, "reason": it.reason})
-        for it in plan.by_kind("dedup")])
+    duplicates, judged = _judged_duplicates(vault, plan.by_kind("dedup"))
+    offer(vault, "duplicate", duplicates)
+    return judged
+
+
+def pair_hash(a: str, b: str) -> str | None:
+    """Both notes' text as one digest, None when either cannot be read: a
+    verdict holds for the notes as they were when the worker read them."""
+    from silica.driver import DRIVER
+
+    try:
+        texts = [DRIVER.read_note(p).content or "" for p in sorted((a, b))]
+    except Exception:
+        return None  # gone or unreadable since the report: nothing to judge
+    return hashlib.sha1("\0".join(texts).encode()).hexdigest()[:16]
+
+
+def verdict_of(vault: str, a: str, b: str) -> str | None:
+    """The worker's verdict on the pair for the notes as they are now, None
+    when it has not judged them so. Examine's Band column reads it."""
+    a, b = sorted((_md(a), _md(b)))
+    row = verdicts(vault).get(proposal_id("duplicate", a, b))
+    return row["verdict"] if row and row.get("hash") == pair_hash(a, b) else None
+
+
+def _merged(path: str) -> bool:
+    from silica.kernel.write.contested import follow_superseded
+
+    return follow_superseded(path) != path
+
+
+def _judged_duplicates(vault: str, items: list[CurationItem]) -> tuple[list[Proposal], dict[str, int]]:
+    """The candidates the worker judged duplicates. It is asked only about a
+    pair with no verdict for its notes as they are, at most JUDGE_CAP a run."""
+    from silica import capabilities
+    from silica.config import CONFIG
+    from silica.kernel.recall.duplicates import pairs_to_items
+
+    known = verdicts(vault)
+    rows: dict[str, dict] = {}
+    out: list[Proposal] = []
+    said = {"asked": 0, "duplicate": 0, "distinct": 0, "contradicts": 0, "waiting": 0}
+    reachable = True
+    for it in items:
+        a, b = sorted((_md(it.target), _md(it.partner)))
+        pid = proposal_id("duplicate", a, b)
+        digest = pair_hash(a, b)
+        if digest is None or _merged(a) or _merged(b):
+            continue  # a note gone, or a pair a yes already merged: nothing left to judge
+        row = known.get(pid)
+        if not row or row.get("hash") != digest:
+            if not reachable or said["asked"] >= JUDGE_CAP:
+                said["waiting"] += 1
+                continue
+            said["asked"] += 1
+            work = pairs_to_items([{"source": a, "target": b, "score": it.score}])
+            decision = None
+            try:
+                decision = capabilities.judge_pair(work[0], CONFIG) if work else None
+            except Exception as exc:
+                # The worker is down or refused: every later pair would fail the
+                # same way, so they wait for the next /curate instead of each
+                # paying a failed call.
+                logger.warning("curate: the worker could not judge %s and %s (%s)", a, b, exc)
+                reachable = False
+            if decision is None or not decision.judged:
+                # An unparsed reply reads as "distinct" downstream; kept, it
+                # would hide a duplicate until one of the notes changed.
+                said["waiting"] += 1
+                continue
+            row = {"notes": [a, b], "hash": digest, "verdict": decision.verdict, "why": decision.rationale,
+                   "claim": decision.addition if decision.verdict == "contradicts" else "", "at": time.time()}
+            rows[pid] = row
+        said[row["verdict"]] = said.get(row["verdict"], 0) + 1
+        if row["verdict"] == "duplicate":
+            out.append(Proposal(
+                id=pid, kind="duplicate", title=f"{clean_name(it.target)} and {clean_name(it.partner)}",
+                why=f"{it.reason}: {row['why']}" if row.get("why") else it.reason,
+                notes=(_md(it.target), _md(it.partner)),
+                data={"target": it.target, "partner": it.partner, "score": it.score, "reason": it.reason}))
+    remember(vault, rows)
+    return out, said
 
 
 def _apply_links(vault: str, props: list[Proposal]) -> dict[str, str | None]:

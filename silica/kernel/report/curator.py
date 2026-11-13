@@ -14,8 +14,9 @@ that already exists.
 Finding → item (spec-hermes-coherence §5):
     strong autolink candidate  → autolink  (mechanical, no LLM, direct commit)
     orphan                     → orphan    WorkItem
-    high-similarity pair       → dedup     WorkItem (ternary verdict incl.
-                                            contradicts → contested sweep)
+    confirmed or same-wording  → dedup     WorkItem (ternary verdict incl.
+    pair                                    contradicts → contested sweep)
+    borderline cosine pair     → autolink  (related, not the same: ADR-0175)
 
 Pure & kernel-legal: reads only graph_report dataclasses, no I/O, no
 router/capabilities import (import-linter boundary). It is the curator's twin
@@ -233,19 +234,34 @@ def compose_curation_plan(report: VaultReport) -> CurationPlan:
             reason="orphan (no inbound links)",
         ))
 
-    # 3. High-similarity pairs → dedup WorkItem. Confirmed (>= tau_high) first,
-    #    then the borderline band; the dedup worker itself returns the ternary
-    #    verdict (duplicate / distinct / contradicts), so feeding both bands
-    #    also yields the contested-notes sweep for free.
-    seen_pairs: set[tuple[str, str]] = set()
-    for dp in list(report.confirmed_duplicate_pairs) + list(report.duplicate_pairs):
+    # 3. Duplicate candidates → dedup WorkItem: the confirmed band (>= tau_high)
+    #    and the pairs that share their wording (MinHash, which lands in the
+    #    borderline list on a scale of its own). The borderline cosine band is
+    #    "related but distinct" (ADR-0175): 26 of the demo vault's 32 candidates
+    #    on 2026-11-13, while its paraphrase and its copy both cleared the high
+    #    bar. So it is a link candidate at most, which the review queue offers
+    #    only where one note names the other.
+    def pair_key(a: str, b: str) -> tuple[str, ...]:
+        return tuple(sorted((_norm_note_path(a), _norm_note_path(b))))
+
+    linked = {pair_key(i.target, i.partner) for i in items if i.kind == "autolink"}
+    seen_pairs: set[tuple[str, ...]] = set()
+    bands = ([(dp, True) for dp in report.confirmed_duplicate_pairs]
+             + [(dp, False) for dp in report.duplicate_pairs])
+    for dp, confirmed in bands:
         if _is_vault_artifact(dp.source) or _is_vault_artifact(dp.target):
             continue
-        lo, hi = sorted((dp.source, dp.target))
-        key = (lo, hi)
-        if key in seen_pairs:
+        pair = pair_key(dp.source, dp.target)
+        if pair in seen_pairs:
             continue
-        seen_pairs.add(key)
+        seen_pairs.add(pair)
+        reason = (f"{similarity_percent(dp.score)}% similar" if dp.cosine
+                  else "shares most of its wording")
+        if dp.cosine and not confirmed:
+            if pair not in linked:
+                items.append(CurationItem(kind="autolink", target=dp.source, partner=dp.target,
+                                          score=dp.score, reason=reason))
+            continue
         items.append(CurationItem(
             kind="dedup",
             target=dp.source,
@@ -253,8 +269,7 @@ def compose_curation_plan(report: VaultReport) -> CurationPlan:
             score=dp.score,
             # The percentage every surface prints for a cosine (ADR-0164); a
             # MinHash pair's score is the wording's overlap, said in words.
-            reason=(f"{similarity_percent(dp.score)}% similar" if dp.cosine
-                    else "shares most of its wording"),
+            reason=reason,
         ))
 
     return CurationPlan(items=items)
