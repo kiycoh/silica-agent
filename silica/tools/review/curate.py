@@ -264,5 +264,5 @@ def _orphans(vault: str) -> list[Proposal]:
 
 register(Kind("autolink", "Links to add", lambda vault: offered(vault, "autolink"), _apply_links))
 register(Kind("orphan", "Orphans to connect", _orphans, _apply_judged, spends_model=True))
-register(Kind("duplicate", "Possible duplicates", lambda vault: offered(vault, "duplicate"), _apply_judged,
+register(Kind("duplicate", "Duplicates to merge", lambda vault: offered(vault, "duplicate"), _apply_judged,
               spends_model=True))

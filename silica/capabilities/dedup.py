@@ -102,8 +102,12 @@ def judge_pair(item: WorkItem[DedupJob], config: Any) -> DedupDecision:
     body, skip = read_or_skip(item.target_path)
     if skip is not None:
         return DedupDecision(verdict="distinct", rationale=str(skip.get("reason", "")), judged=False)
+    from silica.kernel.text import language
+
+    # The reason is read by a person in the queue, so its language is named.
     return _decide_dedup(config, concept=job.concept, excerpt=job.excerpt, candidate_name=job.candidate,
-                         candidate_body=body[:_CANDIDATE_BUDGET], score=job.score)
+                         candidate_body=body[:_CANDIDATE_BUDGET], score=job.score,
+                         reason_language=language.named(body[:4000]))
 
 
 def run_dedup(item: WorkItem[DedupJob | DedupFamily], config: Any) -> dict[str, Any]:
@@ -694,6 +698,7 @@ def _decide_dedup(
     title_score: float = 0.0,
     author_spoke: bool = False,
     hub: str | None = None,
+    reason_language: str = "",
 ) -> DedupDecision:
     """The ternary verdict on one pair. The cosine (`score`, `full_score`,
     `title_score`) is not shown to the judge (ADR-0079 decision 3): a closeness
@@ -702,6 +707,11 @@ def _decide_dedup(
     from silica.model.providers import get_provider
 
     prompt = load_prompt("dedup_prompt.txt")
+    if reason_language:
+        # "The language of the CANDIDATE NOTE" was not enough: on 2026-11-13 two
+        # of six reasons on English notes came back in German and Italian.
+        prompt += (f"\n\nWrite \"rationale\" in {reason_language}, calling the two notes"
+                   f" {concept} and {candidate_name}.")
     if author_spoke:
         # Judge+author (C2): the same call that judges "distinct" also
         # authors the spoke note — a second pass would just re-read the

@@ -183,6 +183,7 @@ def test_the_judge_reads_both_notes_makes_one_call_and_writes_nothing(tmp_vault,
     assert call["response_schema"] is DedupVerdict and call["reasoning"] is False
     text = call["messages"][0]["content"]
     assert "Virtue is the only good." in text and "They held virtue alone to be good." in text
+    assert 'Write "rationale" in English, calling the two notes' in text
     assert (tmp_vault.read(a), tmp_vault.read(b)) == before
 
 
