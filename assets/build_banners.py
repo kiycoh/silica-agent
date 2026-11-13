@@ -49,8 +49,8 @@ ART_COPIES = (STATIC / "favicon.svg", SITE / "favicon.svg")
 # value clears AA on both a near-white and a near-black ground. The seed carries
 # the signal, the shells and the words carry the ink. See
 # docs/specs/visual-identity.md.
-PAPER = dict(ink="#1A1815", sig="#0A6070")
-GRAPHITE = dict(ink="#F4F5F7", sig="#22B4CC")
+PAPER = dict(ink="#0E1A33", sig="#0F52BA")
+GRAPHITE = dict(ink="#F4F5F7", sig="#8DB3FF")
 
 # One unit, 16 in the 256 box: seed 5u, gap 1u, shell 2u, three shells and 1u
 # of padding, so the mark is 14u square and each edge is a whole pixel at 16px.

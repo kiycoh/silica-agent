@@ -1463,8 +1463,8 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 }
 
 /* A table is a grid (ADR-0160): the cell being edited holds its source in a field
-   ringed in teal, as any focus is; the bar at the table's corner shows on hover,
-   its row and column acts only while a cell is being edited. */
+   ringed in the signal, as any focus is; the bar at the table's corner shows on
+   hover, its row and column acts only while a cell is being edited. */
 :is(#note-edit,#nv-edit) .cm-grid {
   position: relative;
 }

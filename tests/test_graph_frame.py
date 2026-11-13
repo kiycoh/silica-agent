@@ -261,7 +261,7 @@ def _run_frame(body: str, *, light: bool, mode: str = "2d") -> object:
     stride = next(ln for ln in js.splitlines() if ln.startswith("const GL_STRIDE"))
     pack = js[js.index("function glRGBA("):js.index("// The canvas the lib's pre-paint layers draw on")]
     tok = _tokens(light)
-    gp = {"bg": tok["--void"], "linkDim": tok["--g-link-dim"], "accent": tok["--accent"]}
+    gp = {"bg": tok["--void"], "linkDim": tok["--g-link-dim"], "accent": tok["--accent"], "signal": tok["--g-signal"]}
     stubs = (
         f"const DATA = {{colors: {{extracted: {json.dumps(pal.EDGE_COLOR_EXTRACTED)},"
         f" extracted_paper: {json.dumps(pal.EDGE_COLOR_EXTRACTED_PAPER)}}}}};\n"
@@ -353,12 +353,12 @@ def test_a_written_link_is_todays_colour_mixed_onto_the_floor(light):
 def test_a_band_prints_its_own_hue_and_the_screen_is_its_density(light):
     """Kind stays the hue (invariant 4): the band's ink is the kind's colour
     whole, and certainty is how many cells of the screen it inks. COVERS is
-    the accent, read from the theme."""
+    the graph's data teal (--g-signal, ADR-0176), read from the theme."""
     tok = _tokens(light)
     kinds = ("GAP", "PROPOSED", "COUPLED", "COVERS")
     for kind, paint in zip(kinds, _paint_all([_edge(k) for k in kinds], light=light)):
         c = _edge(kind).get("color")
-        hue = tok["--accent"] if kind == "COVERS" else (c["paper"] if light else c["color"])
+        hue = tok["--g-signal"] if kind == "COVERS" else (c["paper"] if light else c["color"])
         assert _rgba(paint)[:3] == _mix(hue, hue, 1), (kind, paint)
 
 

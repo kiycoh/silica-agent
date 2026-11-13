@@ -229,7 +229,7 @@
         if (lit(a, b) || k === S.link || (chosen.has(a) && chosen.has(b))) { later.push(k); return; }
         seg(X(N[a]), Y(N[a]), X(N[b]), Y(N[b]), quiet ? INK.linkDim : INK.link);
       });
-      // teal on the map says "chosen": an area in focus keeps the plain ink, or it reads as picked
+      // the signal on the map says "chosen": an area in focus keeps the plain ink, or it reads as picked
       for (const k of later) { const [a, b] = m.e[k]; seg(X(N[a]), Y(N[a]), X(N[b]), Y(N[b]), foc == null && k !== S.link && !(chosen.has(a) && chosen.has(b)) ? INK.node : INK.sig); }
       for (const n of drawn) {
         const x = Math.round(X(n)), y = Math.round(Y(n)), r = rad(n) + (chosen.has(n.i) ? 1 : 0);

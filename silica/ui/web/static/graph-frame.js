@@ -1571,8 +1571,8 @@ const GP = {
   label: tok('--frost'), ghostLabel: tok('--ash-dim'),
   linkDim: tok('--g-link-dim'),
   bg: tok('--void'),
-  ringHub: tok('--accent'), ringOrphan: tok('--ash-dim'), ringCut: tok('--warn'),
-  accent: tok('--accent'), line: tok('--line'), line2: tok('--line-2'),
+  ringHub: tok('--g-signal'), ringOrphan: tok('--ash-dim'), ringCut: tok('--warn'),
+  accent: tok('--accent'), signal: tok('--g-signal'), line: tok('--line'), line2: tok('--line-2'),
 };
 // three.js wants the floor as an int, and only here: one parse of the value
 // above rather than a second literal that can disagree with it.
@@ -2130,7 +2130,7 @@ function drawRim(ctx, scale) {
   for (const a of arcs) {
     const lit = pending || a.covered > 0;
     ctx.lineWidth = 3 / scale;
-    ctx.strokeStyle = lit ? GP.accent : GP.ghostLabel;
+    ctx.strokeStyle = lit ? GP.signal : GP.ghostLabel;
     ctx.globalAlpha = lit ? 0.8 : 0.5;
     ctx.beginPath();
     ctx.arc(cx, cy, band, a.a0 - Math.PI / 2, a.a1 - Math.PI / 2);   // canvas 0 is three o'clock
@@ -2483,8 +2483,8 @@ function linkPaint(l) {
   else if (q >= FADE_STEPS || l._ctx || (AB && !on)) out = GP.linkDim;
   else {
     const c = l.color || {};
-    // A covers line is the accent, read from the theme's own token.
-    const hex = l.type === "COVERS" ? GP.accent
+    // A covers line is the graph's data teal (--g-signal, ADR-0176), read from the theme's own token.
+    const hex = l.type === "COVERS" ? GP.signal
       : (LIGHT ? c.paper || c.color : c.color) || EDGE_FALLBACK;
     const n = parseInt(hex.slice(1), 16);
     // 2D stacks every edge on one flat plane with no depth to thin the far ones
