@@ -18,7 +18,6 @@ from silica.command_table import Call, Result
 from silica.commands import answered
 from silica.config import CONFIG, PROVIDER_PREFIXES, demo, ensure_prefix, hosted
 from silica.prompts import GENERAL_HEAD, GENERAL_MARK
-from silica.provider_table import HOSTED
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +29,11 @@ MIN_MEMBERS, MAX_MEMBERS = 2, 5
 MEMBER_TIMEOUT_S = 180.0
 
 _LETTERS = "ABCDE"
+# Silica's provider prefixes that are also vendors in OpenRouter's ids
+# (`deepseek/deepseek-v4-flash-0731`). Gemini, Mistral and xAI are `google/`,
+# `mistralai/` and `x-ai/` there, so `gemini/` beside an OpenRouter chat still
+# names Gemini's own API.
+_OPENROUTER_VENDORS = frozenset({"deepseek", "openai"})
 
 
 def members() -> list[str]:
@@ -45,12 +49,13 @@ def _resolved(model: str) -> str:
     so the chat's id as SILICA_MODEL holds it seats a member: raw, the
     `deepseek/` of an OpenRouter id sent it to DeepSeek's own API (2026-11-13).
     A member that names another of Silica's providers runs there, which no
-    chat model does (`lmstudio/qwen3.5-9b` beside an OpenRouter chat), except a
-    hosted one under OpenRouter, where `deepseek/` is the vendor half of the id
-    (ADR-0170 point 6)."""
+    chat model does (`lmstudio/qwen3.5-9b` beside an OpenRouter chat), except
+    one that is also an OpenRouter vendor under an OpenRouter chat (ADR-0170,
+    amendment 2026-11-13)."""
     provider = CONFIG._provider
     prefix = model.partition("/")[0] if "/" in model else ""
-    if prefix in PROVIDER_PREFIXES and prefix != provider and not (provider == "openrouter" and prefix in HOSTED):
+    vendor = provider == "openrouter" and prefix in _OPENROUTER_VENDORS
+    if prefix in PROVIDER_PREFIXES and prefix != provider and not vendor:
         return model
     return ensure_prefix(model, provider)
 
@@ -153,7 +158,7 @@ def _why(e: Exception) -> str:
     if status == 429:
         return "its provider is rate-limiting it"
     if status == 408:
-        return f"no answer in {MEMBER_TIMEOUT_S:.0f} s"
+        return "its endpoint timed out"
     if isinstance(e, ConnectionError) or (status or 0) >= 500:
         return "its endpoint did not answer"
     return "its provider refused the call"

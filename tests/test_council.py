@@ -179,6 +179,9 @@ def test_a_recall_with_no_index_falls_back_to_the_body_search(council, monkeypat
     ("openrouter", "deepseek/deepseek-v4-flash-0731", MODEL),
     ("openrouter", MODEL, MODEL),
     ("openrouter", "anthropic/claude-sonnet-5", "openrouter/anthropic/claude-sonnet-5"),
+    ("openrouter", "openai/gpt-4o", "openrouter/openai/gpt-4o"),
+    # Google is `google/` on OpenRouter: `gemini/` is Gemini's own API.
+    ("openrouter", "gemini/gemini-2.5-flash", "gemini/gemini-2.5-flash"),
     # A local endpoint's prefix names where the member runs, whatever the chat's provider.
     ("openrouter", "lmstudio/qwen3.5-9b", "lmstudio/qwen3.5-9b"),
     ("lmstudio", MODEL, MODEL),
