@@ -793,6 +793,45 @@ function partsOf(n, pairs) {
   return up.map((_, i) => root(i));
 }
 
+// Where a node goes when it links to nothing big (ADR-0156, amended
+// 2026-11-13). The forces push a part with no tie to the rest out to a ring, and
+// the fit framed that ring: on alex_second_brain 150 files, 14 editions and 3
+// notes with no tie to the rest took the frame's edge, and its 2,164 notes were 450 px
+// across at 1440 px. Each node not in a big part goes beside the nearest folder
+// up its path that holds a node of a big part, or beside all of them when none
+// does, after the forces, so no note of a big part moves. One folder's nodes
+// make a golden-angle spiral, the largest first, with a step of the largest
+// diameter plus `gap`: no two of them overlap, whether or not the overlap pass
+// runs. In place; `big[i]` says node i is in a big part, `dirs[i]` its folder.
+function nearFolder(x, y, r, big, dirs, gap) {
+  const at = new Map(), all = [0, 0, 0];
+  x.forEach((_, i) => {
+    if (!big[i]) return;
+    const a = at.get(dirs[i]) || [0, 0, 0];
+    a[0] += x[i]; a[1] += y[i]; a[2]++;
+    at.set(dirs[i], a);
+    all[0] += x[i]; all[1] += y[i]; all[2]++;
+  });
+  if (!all[2]) return;
+  const up = d => d.slice(0, Math.max(0, d.lastIndexOf("/")));
+  const groups = new Map();
+  x.forEach((_, i) => {
+    if (big[i]) return;
+    let d = dirs[i];
+    while (d && !at.has(d)) d = up(d);
+    const a = at.get(d) || all;
+    if (groups.has(a)) groups.get(a).push(i); else groups.set(a, [i]);
+  });
+  for (const [a, ids] of groups) {
+    ids.sort((i, j) => r[j] - r[i]);
+    const step = 2 * r[ids[0]] + gap;
+    ids.forEach((i, j) => {
+      x[i] = a[0] / a[2] + step * Math.sqrt(j) * Math.cos(j * GOLDEN);
+      y[i] = a[1] / a[2] + step * Math.sqrt(j) * Math.sin(j * GOLDEN);
+    });
+  }
+}
+
 // The circle the notes arrive on: rows [{id, area, links, r}] in area order,
 // biggest area first, most linked first inside one, clockwise from the top, so
 // the ring reads as arcs of one colour. Each note gets an arc its own size.
@@ -1252,26 +1291,38 @@ function arrivalDone() {
 // frame's size on a 1440px window so a layout does not depend on the window it
 // was computed in, and the overlap pass moves the notes apart at that size (see
 // spreadDiscs) where the discs fit the room the forces left them (discScale).
-// A ghost is the far end of a link and hidden until asked for: it pushes nothing.
+// What links to nothing big is first put beside its folder (nearFolder), so the
+// fit is the big parts'. A ghost is the far end of a link and hidden until asked
+// for: it pushes nothing.
 function spreadLayout() {
   const notes = RAW_NODES.filter(n => n.type !== "ghost");
   const x = notes.map(n => n.x || 0), y = notes.map(n => n.y || 0);
-  const span = v => Math.max(1, Math.max(...v) - Math.min(...v));
-  KREF = Math.min(880 / span(x), 820 / span(y));
   const at = new Map(notes.map((n, i) => [n.id, i]));
   const pairs = RAW_EDGES.filter(e => at.has(e.from) && at.has(e.to)).map(e => [at.get(e.from), at.get(e.to)]);
+  const part = partsOf(notes.length, pairs), count = new Map();
+  part.forEach(p => count.set(p, (count.get(p) || 0) + 1));
+  const big = part.map(p => count.get(p) >= PART_MIN);
+  const held = big.some(Boolean) ? big : big.map(() => true);
+  const span = v => {
+    const w = v.filter((_, i) => held[i]);
+    return Math.max(1, Math.max(...w) - Math.min(...w));
+  };
+  KREF = Math.min(880 / span(x), 820 / span(y));
   // Measured at full size: discs already scaled by an earlier layout would read
   // as fitting, and the factor would go back to 1.
   DISC_SCALE = 1;
-  DISC_SCALE = discScale(x, y, notes.map(nodeRadius), partsOf(notes.length, pairs));
+  DISC_SCALE = discScale(x, y, notes.map(nodeRadius), part);
+  nearFolder(x, y, notes.map(nodeRadius), big, notes.map(n => {
+    const p = n.path || n.id;
+    return p.slice(0, Math.max(0, p.lastIndexOf("/")));
+  }), 1.4 / KREF);
   // A crowded vault keeps the forces' places and its discs overlap (Decision 1
   // over O4, the owner 2026-11-13). Its core is a pile at any size a reader sees:
   // on alex_second_brain 74% of the notes sat inside another's disc at the 0.5
   // factor, and the pass to no overlap moved the median note 56 px and took the
   // share of a note's ten nearest in its own area from 0.63 to 0.28. Before
   // ADR-0152 that vault drew the forces' places at 0.646.
-  if (DISC_SCALE < 1) return;
-  spreadDiscs(x, y, notes.map(nodeRadius), 1.4 / KREF);
+  if (DISC_SCALE === 1) spreadDiscs(x, y, notes.map(nodeRadius), 1.4 / KREF);
   notes.forEach((n, i) => { n.x = x[i]; n.y = y[i]; });
 }
 

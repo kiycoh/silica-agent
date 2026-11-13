@@ -106,7 +106,43 @@ def test_a_crowded_vault_keeps_the_forces_places():
     reader sees (0.63 to 0.28 at the 0.5 factor), so a scaled vault skips it."""
     body = FRAME[FRAME.index("function spreadLayout() {"):]
     body = body[:body.index("\n}\n")]
-    assert body.index("if (DISC_SCALE < 1) return;") < body.index("spreadDiscs(")
+    assert "if (DISC_SCALE === 1) spreadDiscs(" in body
+
+
+@needs_node
+def test_what_links_to_nothing_big_sits_beside_its_folder():
+    """ADR-0156, amended 2026-11-13: the files with no link sat on a ring the
+    forces push out, and the fit framed it. Each goes beside the nearest folder
+    up its path that holds a node of a big part; with none, beside them all.
+    The big parts do not move, and two loose nodes do not overlap."""
+    a_x, a_y = _spiral(30, 20.0, cx=100.0)
+    b_x, b_y = _spiral(30, 20.0, cx=-100.0)
+    got = _pure(f"""
+      const x = {json.dumps(a_x + b_x)}.concat([900, 905, -900, 0]);
+      const y = {json.dumps(a_y + b_y)}.concat([900, 900, 900, -900]);
+      const big = x.map((_, i) => i < 60);
+      const dirs = Array(30).fill("A").concat(Array(30).fill("B/C"), ["A/x/y", "A/x/y", "B/C", "Z"]);
+      const before = [x.slice(0, 60), y.slice(0, 60)];
+      nearFolder(x, y, x.map(() => 2), big, dirs, 1);
+      return [x, y, before];
+    """)
+    x, y, (bx, by) = got
+    assert x[:60] == bx and y[:60] == by
+    near = lambda i, cx: math.hypot(x[i] - cx, y[i]) < 20
+    assert near(60, 100.0) and near(61, 100.0)
+    assert math.hypot(x[60] - x[61], y[60] - y[61]) >= 2 + 2
+    assert near(62, -100.0)
+    assert near(63, 0.0)
+
+
+@needs_node
+def test_with_no_big_part_nothing_moves():
+    got = _pure("""
+      const x = [1, 2, 3], y = [4, 5, 6];
+      nearFolder(x, y, [1, 1, 1], [false, false, false], ["A", "A", "B"], 1);
+      return [x, y];
+    """)
+    assert got == [[1, 2, 3], [4, 5, 6]]
 
 
 @needs_node
