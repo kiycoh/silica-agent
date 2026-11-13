@@ -289,12 +289,17 @@ def silica_semantic_search(query: Annotated[str, Field(description='Free-form qu
 
 
 def _passages(query: str, folder: str, k: int) -> dict[str, Any]:
-    """A recall that ran without a leg and found nothing, answered from the
-    body search's passages (ADR-0173): its index builds itself on the first
-    search, so it finds the notes while recall's stores are missing or still
-    being built. Only an unfiltered recall: the body search knows no trust,
-    lifecycle or date floor and cannot read another vault. The reply keeps
-    `degraded` and its hint, which say what this context is."""
+    """A recall that ran without a leg and found nothing, answered through the
+    body search (ADR-0173): its index builds itself on the first search, so it
+    finds the notes while recall's stores are missing or still being built.
+    The notes it finds are then assembled as named notes are, each by its
+    query-densest window: its own passages are two sections a note, and for
+    "When was Galileo born?" on the demo vault they were the trial and the
+    opening, not the "He was born in Pisa on 15 February 1564" a section
+    further down (2026-11-13). A document that is no note keeps its passage.
+    Only an unfiltered recall: the body search knows no trust, lifecycle or
+    date floor and cannot read another vault. The reply keeps `degraded` and
+    its hint, which say how this context was found."""
     from silica.tools.atomic import silica_search_context
 
     try:
@@ -305,12 +310,17 @@ def _passages(query: str, folder: str, k: int) -> dict[str, Any]:
         logger.exception("recall: the passage fallback failed")
         return {}
     hits = [h for h in found.get("hits") or [] if isinstance(h, dict) and h.get("path")]
-    if not hits:
+    notes = list(dict.fromkeys(h["path"].removesuffix(".md") for h in hits if h["path"].endswith(".md")))
+    named = silica_recall(query, k=k, memory=False, notes=notes) if notes else {}
+    others = [h for h in hits if not h["path"].endswith(".md")]
+    if not (named.get("notes") or others):
         return {}
-    keys = list(dict.fromkeys(h["path"].removesuffix(".md") for h in hits))
-    context = "\n\n".join(f"[[{h['path'].removesuffix('.md')}]], {h.get('section') or 'line ' + str(h.get('line'))}:\n"
-                          f"{h.get('snippet', '')}" for h in hits)
-    return {"context": context, "notes": keys, "partial": keys}
+    paths = list(dict.fromkeys(h["path"] for h in others))
+    context = "\n\n".join([named.get("context") or ""] + [
+        f"[[{h['path']}]], {h.get('section') or 'line ' + str(h.get('line'))}:\n{h.get('snippet', '')}"
+        for h in others]).strip()
+    return {"context": context, "notes": (named.get("notes") or []) + paths,
+            "partial": (named.get("partial") or []) + paths}
 
 
 def _without_score(out: dict[str, Any]) -> dict[str, Any]:

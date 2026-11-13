@@ -25,7 +25,11 @@ from silica.kernel.recall.search import degraded_lines
 from silica.obs.events import ToolCompleteEvent
 from silica.ui.web.vectors import _builds as real_builds  # before conftest turns it off
 
-GALILEO = "# Galileo Galilei\n\nGalileo Galilei was born in Pisa on 15 February 1564.\n"
+# The demo vault's shape: the birth is in a section that does not name him, and
+# the sections that do outrank it for the body search's two per note.
+GALILEO = ("# Galileo Galilei\n\nGalileo Galilei (1564 to 1642) was an astronomer. Galileo argued "
+           "that the earth moves.\n\n## Life\n\nHe was born in Pisa on 15 February 1564.\n\n"
+           "## The trial\n\nGalileo was tried in 1633. Galileo recanted. Galileo was held at Arcetri.\n")
 
 
 class _Embedder:
@@ -159,9 +163,9 @@ class TestTheRecallSaysSo:
         out = silica_recall("When was Galileo born?", k=5, memory=False)
         assert list(out)[:4] == ["query", "degraded", "hint", "context"]
         assert out["degraded"] == {"index": "missing"}
-        assert "1564" in out["context"] and "Galileo Galilei" in out["context"]
+        assert "15 February 1564" in out["context"], "the note as recall assembles it, not two sections"
         assert out["notes"][0] == "Culture/Science/Galileo Galilei"
-        assert out["partial"] == out["notes"]
+        assert out["partial"] == [], "a short note arrives whole"
 
     def test_recall_on_an_empty_vault_is_plain_empty(self, tmp_vault):
         from silica.tools.graph import silica_recall
