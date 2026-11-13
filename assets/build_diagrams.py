@@ -31,8 +31,10 @@ DIM, TEXT, BRIGHT = "#969CA6", "#C5CAD2", "#F4F5F7"
 # brand. There is no --violet in the system any more, so the one thing that still
 # needs a second hue -- the model, marked as data and not as a control -- takes a
 # stop off the community arc the graph itself colours nodes with (212-306deg,
-# 0.66 saturation): here graph_export._community_color(4).
-ACCENT, MODEL = "#8DB3FF", "#9C80E5"
+# 0.66 saturation): here palette.community_color(8), the arc's magenta end. It was
+# stop 4's violet #9C80E5 beside the teal (0.181 OKLab apart); beside sapphire that
+# violet is 0.127 and the model read as one more control, this stop is 0.164.
+ACCENT, MODEL = "#8DB3FF", "#E580E4"
 GREEN, RED, AMBER = "#4FD08A", "#EB778E", "#E0A93B"
 # Archivo and Martian Mono are named first and never load: GitHub serves a README
 # image through camo, which runs no script and fetches no font. The stack behind
