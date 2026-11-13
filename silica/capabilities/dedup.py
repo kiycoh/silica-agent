@@ -710,9 +710,9 @@ def _decide_dedup(
     if reason_language:
         # "The language of the CANDIDATE NOTE" was not enough: on 2026-11-13 two
         # of six reasons on English notes came back in German and Italian. The
-        # line names the language only: asked to name the notes as well, one run
-        # judged a hub and its child page a duplicate, which the runs before and
-        # after it, without that request, judged distinct (one run each, n=6).
+        # line names the language only, so the prompt the import's judge was
+        # measured on (ADR-0030) gains one line; the queue puts the two notes'
+        # names into the reason itself (tools.review.curate._named).
         prompt += f"\n\nWrite \"rationale\" in {reason_language}."
     if author_spoke:
         # Judge+author (C2): the same call that judges "distinct" also
