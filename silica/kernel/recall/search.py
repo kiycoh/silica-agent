@@ -22,7 +22,7 @@ _PHRASE = {"unreachable": "is unreachable", "loading": "is still loading",
 # A store not built yet is no server's failure (ADR-0173): its line names the
 # index, and the commands that build it are the fix on every surface.
 _UNBUILT = {"building": "is still being built", "missing": "was never built"}
-_STORE = {"index": "recall index", "embed": "embedding index"}
+_STORE = {"embed": "embedding index"}
 # Where to fix it, per surface. The GUI names its own panels; the REPL has none,
 # so both Settings pointers become the doctor; a tool result can be read by
 # either, so it names both. Loading has no fix: it ends.

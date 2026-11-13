@@ -98,7 +98,9 @@ class RecallWatch:
         degraded = data.get("degraded")
         for leg, cause in (degraded.items() if isinstance(degraded, dict) else ()):
             self.degraded.setdefault(leg, cause)
-        unsure = bool(degraded) and not data.get(empty_key)
+        # Not a lost reranker: a reorder cannot change membership, as in `thin`.
+        lost = set(degraded) & {"embed", "index"} if isinstance(degraded, dict) else set()
+        unsure = bool(lost) and not data.get(empty_key)
         if "error" in data:
             # A degraded index or an offline embedder is not thin coverage:
             # sending the user to the web here would mask the real problem.

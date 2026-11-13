@@ -211,6 +211,12 @@ class TestTheTurn:
         w(_done("silica_search_context", {"hits": [], "notes_matched": 0}))
         assert w.looked
 
+    def test_a_lost_reranker_still_searched_the_notes(self):
+        """A reorder cannot change membership, as `thin` already holds."""
+        w = RecallWatch()
+        w(_done("silica_recall", {"notes": [], "degraded": {"rerank": "slow"}}))
+        assert w.looked and not w.unsure
+
     def test_a_degraded_recall_that_found_notes_did_look(self):
         w = RecallWatch()
         w(_done("silica_recall", {"notes": ["Galileo Galilei"], "degraded": {"index": "missing"}}))

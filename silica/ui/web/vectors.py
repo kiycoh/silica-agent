@@ -166,7 +166,8 @@ def _build_once() -> None:
         # opens; the embeddings and the page vectors, the long part, once an
         # embedder on this machine answers.
         _build(lambda: recall_refresh.build_missing(progress=progress), "recall stores")
-        up = _local_embedder() and _wait_for_embedder(vault)
+        local = _local_embedder()
+        up = local and _wait_for_embedder(vault)
         if up:
             from silica.model.providers import get_embedder
 
@@ -179,7 +180,7 @@ def _build_once() -> None:
             raise _Switched
         if up:
             _page_vectors(vault, progress)
-        elif _STATUS.get("state") != "failed":
+        elif not local:  # an embedder that did not answer left its failure on the rail
             _set(state="idle", vault=vault)
     except _Switched:
         _AGAIN.set()
