@@ -241,8 +241,8 @@ def test_a_written_answer_after_the_options_were_shown_is_with_help_and_a_reload
     assert page["help"] == {str(shown["i"]): {"options": True}}
     v = c.post("/learn/answer", json={"id": s["id"], "i": shown["i"], "production": RIGHT, "conf": 90}).json()
     assert v["correct"] is True and v["rating"] == grade.HARD and v["hints"] == 1   # the page sent no hint
-    # the page confirms the proposal; a change stays the reader's, logged beside it, as for any hint (ADR-0040)
-    r = c.post("/learn/rate", json={"id": s["id"], "i": shown["i"], "rating": v["rating"]}).json()
+    # Easy from the page's "change" is not taken: a hint caps at Hard, and so do the options
+    r = c.post("/learn/rate", json={"id": s["id"], "i": shown["i"], "rating": 4}).json()
     assert r["rating"] == grade.HARD and r["unassisted"] is False
     line = json.loads((tmp_path / "quiz.jsonl").read_text().splitlines()[-1])
     assert (line["grader"], line["hints"], line["rungs"]) == ("model", 1, ["options"])   # no H1 claimed as shown
@@ -298,6 +298,8 @@ def test_the_page_says_which_help_it_showed_where_a_reload_reads_it_back():
     # server, counting only the hints this tab had shown
     say = js[js.index("function lrVerdictSay("):js.index("function lrRenderSession(")]
     assert "v.hints ??" in say
+    # the change row offers no rating the server refuses, by click or by key
+    assert "seg(capped ? 2 : 4)" in js and "n = Math.min(n, 2)" in js[js.index("function lrChoose("):][:600]
 
 
 def test_a_pick_never_becomes_the_written_answer_and_a_reloaded_right_pick_reads_with_help():

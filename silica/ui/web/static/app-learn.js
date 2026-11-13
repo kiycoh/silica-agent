@@ -3227,13 +3227,15 @@ function lrReveal(sheet, it, v) {
   const rate = mkEl("div", "lr-actions lr-rate");
   const proposed = v.rating;
   const chosen = s.results[it.i]?.rating ?? s.chosen?.[it.i] ?? (self ? null : proposed) ?? null;
-  const seg = () => {
+  const seg = (cap = 4) => {
     const g = mkEl("div", "lr-seg");
     g.id = "lr-rate-opts"; g.setAttribute("role", "radiogroup"); g.setAttribute("aria-label", "rating");
     for (const [n, name] of Object.entries(LR_RATING)) {
       const on = Number(n) === chosen;
       const b = lrKey(lrBtn(on ? "on" : null, lrCap(name), () => lrChoose(Number(n))), n, n);
       b.setAttribute("role", "radio"); b.setAttribute("aria-checked", on ? "true" : "false");
+      // the server records Hard at most after a hint, the options or "just tell me"
+      if (Number(n) > cap) { b.disabled = true; b.title = "capped at Hard: the answer had help"; }
       g.appendChild(b);
     }
     return g;
@@ -3247,7 +3249,9 @@ function lrReveal(sheet, it, v) {
     // a proposal with change (review §10), the four only on request
     rate.appendChild(mkEl("span", "lr-help", "rating"));
     if (s.changing && !s.results[it.i]) {
-      rate.append(seg(), mkEl("span", "lr-help", "changes the schedule only; the rubric result stays recorded"));
+      const capped = !!(v.hints || v.told);
+      rate.append(seg(capped ? 2 : 4), mkEl("span", "lr-help", "changes the schedule only; the rubric result stays recorded"
+        + (capped ? "; with help, Hard at most" : "")));
     } else {
       rate.append(mkEl("b", null, lrCap(LR_RATING[chosen])), mkEl("span", "lr-help", chosen === proposed ? "proposed from the verdict" : "chosen by you"));
     }
@@ -3330,6 +3334,10 @@ async function lrFetchAid(it) {
 function lrChoose(n) {
   const s = lrSession, it = lrItem();
   if (s.results[it.i]) return;    // recorded: the ledger line is written once
+  const v = s.verdicts[it.i];
+  // a verdict given with help is Hard at most on the server (session._rate), keys 3 and 4 included;
+  // a self-rating keeps all four, since Good or Easy there is the reader saying it was right
+  if (v && !v.needs_self_grade && v.grader !== "self" && (v.hints || v.told)) n = Math.min(n, 2);
   (s.chosen || (s.chosen = {}))[it.i] = n;
   lrRender();
 }

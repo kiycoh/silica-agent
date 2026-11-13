@@ -634,6 +634,14 @@ def _rate(sid: str, i: Any, raw: Any) -> dict:
         correct, rating, grader, proposed = sg["correct"], sg["rating"], "self", None
     else:
         correct = bool(v.get("correct"))
+        if v.get("hints") or v.get("told"):
+            # The reader may change a proposal (ADR-0040 point 2), but not past
+            # the cap that a hint or "just tell me" sets: Easy from the page's
+            # "change" took a written answer after the four options to Easy
+            # (2026-11-13), as self_grade and the choice branch above never do.
+            from silica.kernel.learn.grade import HARD
+
+            rating = min(rating, HARD)
     key = ledger_key(it["path"])
     before = learner.view().get(key)
     entry = ledger_entry(s, it, v, correct, rating, grader, proposed)
