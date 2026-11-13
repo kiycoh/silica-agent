@@ -1766,6 +1766,10 @@ def fetch_to_inbox(url: str) -> str:
     first_line = _first_line_of(text)
     if not first_line:
         raise ValueError(f"nothing readable at {url}")
+    if page.title and " ".join(text.split("\n", 2)[-1].split()) == page.title:
+        # A page drawn by its scripts gives a reader its title and nothing
+        # else (a subreddit with no Reddit session): a note of one word.
+        raise ValueError(f"nothing readable at {url}: the page is only its title")
     # The page's own title names the note; the first line is only the fallback
     # for a source that declares none. The note title is the reranker's query
     # (write-time is the one lane that A/B left open), and it is also the

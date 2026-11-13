@@ -934,6 +934,13 @@ def test_fetch_to_inbox_prefers_the_declared_title_over_the_first_line(
     assert "Graphs are everywhere" in body
 
 
+def test_a_repository_fetched_by_its_name_keeps_the_slash_as_a_space(tmp_vault, monkeypatch):
+    _patch_web_fetch(monkeypatch, "Source: https://github.com/python/cpython\n\nThe Python language.",
+                     title="python/cpython")
+
+    assert wr.fetch_to_inbox("https://github.com/python/cpython") == f"{CONFIG.inbox_dir}/python cpython.md"
+
+
 def test_fetch_to_inbox_assumes_https_for_a_bare_domain(tmp_vault, monkeypatch):
     """`/fetch en.wikipedia.org/wiki/X` is how humans type URLs. The scheme is
     inferred here at the user-facing seam, so the strict guard in web_fetch
@@ -1063,7 +1070,7 @@ def test_fetch_failure_line_survives_a_url_that_looks_like_rich_markup(
 
 
 def test_fetch_success_line_shows_the_real_path(tmp_vault, monkeypatch):
-    """slugify strips `\\ / : * ? " < > |` but not brackets, so a page titled
+    """slugify drops `: * ? " < > |` and spaces `\\ /` but keeps brackets, so a page titled
     `[bold red]Foo` yields a note_rel whose markup Rich would silently eat,
     telling the user a path that is not the file's name."""
     _patch_web_fetch(monkeypatch, "Source: https://a.test/p\n\n[bold red]Foo\n\nBody.")

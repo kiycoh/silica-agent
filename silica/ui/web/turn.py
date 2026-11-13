@@ -185,9 +185,20 @@ def _offer_next(t: _ChatTurn) -> None:
     session_turn.offer_next(t, [c.name.lstrip("/") for c in COMMANDS])
 
 
-_AFTER = (session_turn.check_numbers, session_turn.attribute, _figures, session_turn.plan_under_answer,
+def _reindex(t: _ChatTurn) -> None:
+    """A turn that wrote, moved or saved asks the indexes to take it in
+    (ADR-0173): the chat's write tools index nothing themselves, and a moved
+    note lost its vector at the move and got none back until the next recall's
+    sweep, which the drawer's similar notes and Links do not run."""
+    from silica.ui.web import vectors
+
+    if t.read is not None and t.read.wrote:
+        vectors.refresh()
+
+
+_AFTER = (session_turn.hold_unsearched_general, session_turn.check_numbers, session_turn.attribute, _figures, session_turn.plan_under_answer,
           _offer_next, session_turn.note, session_turn.stamp_reads, session_turn.beat,
-          session_turn.recount)
+          session_turn.recount, _reindex)
 
 
 def _drawn_in_the_answer(out):
@@ -346,7 +357,8 @@ async def run_turn(ask: Ask) -> AsyncIterator[dict]:
                 return
             if result.error is not None:
                 line.outcome = "error"
-                yield callback.error_frame(failures.said(result.error))
+                yield callback.error_frame({**failures.said(result.error),
+                                            **({} if result.retry else {"retry": False})})
                 return
             if result.directive is None:
                 # Appended only once the verdict is in: a directive falls through

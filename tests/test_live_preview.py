@@ -123,6 +123,33 @@ def test_the_editor_draws_what_the_reader_drew(tmp_path):
     assert ["FootnoteLabel", "[^a]: ", "2"] not in got[str(note.index("[^a]:") + 1)]
 
 
+HREF_PROBE = PROBE.replace(
+    "rows.push([kind, doc.slice(from, to)]",
+    "rows.push([kind, doc.slice(from, to), (s.attributes || {})['data-href'] || '']",
+).replace(".concat(s.widget && s.widget.n", ".slice(0, 3).concat(false && s.widget.n")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the editor bundle")
+def test_a_link_opens_its_destination_and_not_the_address_in_its_words(tmp_path):
+    """A pasted address with no title writes `[url](url)`, its words escaped (ADR-0161).
+    GFM finds an address in the words too, and the drawn link took that one: `a\\_b`
+    opened `a/_b`, `[a](b)` opened a, and `](<x (y)>)` asked for a note named `<x (y)>`
+    (2026-11-12, in Chrome). The words read as the reader reads them, escapes hidden."""
+    note = ("A [https://x.org/a\\_b](https://x.org/a_b) end.\n\n"
+            "B [words](<https://x.org/b_(c)>) end.\n\n"
+            "C [https://a.org/one](https://b.org/two) end.\n\nlast\n")
+    probe = tmp_path / "probe.js"
+    probe.write_text(HREF_PROBE)
+    run = subprocess.run(["node", str(probe), str(WEB / "codemirror.min.js"), str(WEB / "app-editor.js"),
+                          note, "[-1]", "[]"], capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr[-2000:]
+    rows = json.loads(run.stdout)["-1"]
+    links = [(text, href) for kind, text, href in rows if kind.startswith("a.cm-link")]
+    assert links == [("https://x.org/a\\_b", "https://x.org/a_b"), ("words", "https://x.org/b_(c)"),
+                     ("https://a.org/one", "https://b.org/two")]
+    assert ["hide", "\\", ""] in rows  # the escape in the words, as `Escape` hides one in prose
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the editor bundle")
 def test_a_claim_stamp_is_hidden_away_from_the_caret(tmp_path):
     """The drawer showed `<!-- silica: valid_from=… -->` as a line of text,

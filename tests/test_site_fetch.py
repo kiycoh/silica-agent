@@ -152,6 +152,60 @@ def test_reddits_refusal_is_named_and_nothing_is_written(served, status, words, 
     assert sorted(vault.rglob("*")) == before
 
 
+def test_one_comment_is_counted_as_one(served):
+    table, _ = served
+    table["https://www.reddit.com/"] = _resp(_thread([_comment("c1", "alice", "Only me.")]))
+    text = sf.page("https://redd.it/abc123").text
+    assert "1 comment, top first and 3 levels deep." in text and "All 1 comments" not in text
+
+
+def test_a_code_fence_left_open_closes_where_its_post_or_comment_ends(served):
+    """Reddit closes a fence at the end of the comment that opened it; the note
+    did not, and every comment after it, with the note's Sources, read as code
+    (driven in the GUI drawer, 2026-11-12)."""
+    table, _ = served
+    table["https://www.reddit.com/"] = _resp(_thread(
+        [_comment("c1", "coder", "Try:\n\n```python\nprint(1)\n"), _comment("c2", "next", "Thanks.")],
+        selftext="```\nopen post"))
+    text = sf.page("https://redd.it/abc123").text
+    assert text.index("open post") < text.index("\n```", text.index("open post")) < text.index("## Comments")
+    assert text.index("print(1)") < text.index("\n```", text.index("print(1)")) < text.index("**u/next**")
+
+
+def test_a_line_of_inline_code_in_triple_backticks_is_not_a_fence(served):
+    """`` ```pip install x``` `` on a line of its own is inline code: a fence's
+    info string holds no backtick (CommonMark). Counted as a fence it got a
+    fence appended, which opened a block over every comment after it."""
+    table, _ = served
+    table["https://www.reddit.com/"] = _resp(_thread(
+        [_comment("c1", "one", "```pip install x```"), _comment("c2", "next", "Thanks.")],
+        selftext="Run ```make``` first."))
+    assert sf.page("https://redd.it/abc123").text.count("```") == 4
+    table["https://api.github.com/"] = _resp({"state": "open", "comments": 0, "user": {"login": "x"},
+                                              "body": "```npm ci```"})
+    assert sf.page("https://github.com/o/r/issues/1").text.count("```") == 2
+
+
+def test_a_page_that_is_only_its_title_writes_nothing(served, tmp_vault):
+    """A subreddit, to a reader with no Reddit session, is a script's shell whose
+    only words are its title: /fetch wrote a note that said "Reddit" and nothing
+    else (2026-11-12)."""
+    from pathlib import Path
+
+    from silica.config import CONFIG
+    from silica.sources import web_research
+
+    table, _ = served
+    table["https://www.reddit.com/r/Python/"] = _resp(
+        text="<html><head><title>Reddit</title></head><body><script>boot()</script></body></html>",
+        ctype="text/html")
+    vault = Path(CONFIG.vault_path)
+    before = sorted(vault.rglob("*"))
+    with pytest.raises(ValueError, match="nothing readable"):
+        web_research.fetch_to_inbox("https://www.reddit.com/r/Python/")
+    assert sorted(vault.rglob("*")) == before
+
+
 def test_a_login_page_instead_of_the_listing_is_refused(served):
     table, _ = served
     table["https://www.reddit.com/"] = _resp(text="<html>log in</html>", ctype="text/html")
@@ -246,7 +300,33 @@ def test_a_missing_issue_is_named_and_a_missing_repo_falls_back_to_the_page(serv
     table["https://api.github.com/"] = httpx.HTTPStatusError("404", request=resp.request, response=resp)
     with pytest.raises(wf.SiteRefused, match="no issue or pull request there"):
         sf.page("https://github.com/o/r/issues/1")
-    assert sf.page("https://github.com/features/copilot") is None
+    table["https://github.com/features/copilot"] = _resp(
+        text="<html><head><title>Copilot</title></head><body><p>Your pair programmer.</p></body></html>",
+        ctype="text/html")
+    page = sf.page("https://github.com/features/copilot")
+    assert page.title == "Copilot" and "Your pair programmer." in page.text
+
+
+def test_a_repository_github_does_not_know_is_named_and_nothing_is_written(served, tmp_vault):
+    """The API's 404 sends a repository root to GitHub's page, which is
+    /features/copilot's; when the page is a 404 too there is no repository the
+    person can read, and they were shown httpx's words with an IP in them
+    (2026-11-12)."""
+    from pathlib import Path
+
+    from silica.config import CONFIG
+    from silica.sources import web_research
+
+    table, _ = served
+    api = _resp({"message": "Not Found"}, status=404)
+    table["https://api.github.com/"] = httpx.HTTPStatusError("404", request=api.request, response=api)
+    html = _resp(text="<title>Page not found</title>", status=404, ctype="text/html")
+    table["https://github.com/"] = httpx.HTTPStatusError("404", request=html.request, response=html)
+    vault = Path(CONFIG.vault_path)
+    before = sorted(vault.rglob("*"))
+    with pytest.raises(wf.SiteRefused, match="no repository there, or it is private: a private one needs GITHUB_TOKEN"):
+        web_research.fetch_to_inbox("https://github.com/nobody-4821/nothing")
+    assert sorted(vault.rglob("*")) == before
 
 
 def test_the_token_goes_only_with_the_persons_own_fetch_on_a_laptop(served, monkeypatch, tmp_vault):
@@ -265,6 +345,26 @@ def test_the_token_goes_only_with_the_persons_own_fetch_on_a_laptop(served, monk
     monkeypatch.setenv("SILICA_HOSTED", "1")
     web_research.fetch_to_inbox("https://github.com/o/r/issues/3")
     assert "Authorization" not in seen[-1][1]
+
+
+def test_discover_and_the_check_read_github_without_the_token(served, monkeypatch):
+    """Through their own entry points, not `_gh_headers`: an article Discover
+    reads and a page the check of a selection opens are addresses a feed or a
+    search named (ADR-0162 point 5)."""
+    from silica.kernel.check import web as check_web
+    from silica.session.check import web_legs
+    from silica.sources.discover import story
+
+    table, seen = served
+    table["https://api.github.com/"] = _resp({"title": "t", "comments": 0, "state": "open"})
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_secret")
+
+    story.article_text({"url": "https://github.com/o/r/issues/1", "title": "t"})
+    check_web._read([{"url": "https://github.com/o/r/issues/2"}], web_legs()[1], "a claim")
+
+    assert [url for url, _ in seen] == ["https://api.github.com/repos/o/r/issues/1",
+                                        "https://api.github.com/repos/o/r/issues/2"]
+    assert all("Authorization" not in headers for _, headers in seen)
 
 
 def test_on_the_server_githubs_refusals_name_no_token(served, monkeypatch):

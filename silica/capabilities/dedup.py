@@ -90,10 +90,30 @@ def passes_dedup_gate(
     return large / small <= max_ratio
 
 
+_CANDIDATE_BUDGET = 8000
+
+
+def judge_pair(item: WorkItem[DedupJob], config: Any) -> DedupDecision:
+    """The verdict alone on two notes, nothing written: what /curate asks
+    before it offers a duplicate for review (ADR-0175). The same framing and
+    call as run_dedup's single path, so the yes that later merges the pair
+    puts the question the offer was made on."""
+    job = item.context
+    body, skip = read_or_skip(item.target_path)
+    if skip is not None:
+        return DedupDecision(verdict="distinct", rationale=str(skip.get("reason", "")), judged=False)
+    from silica.kernel.text import language
+
+    # The reason is read by a person in the queue, so its language is named.
+    return _decide_dedup(config, concept=job.concept, excerpt=job.excerpt, candidate_name=job.candidate,
+                         candidate_body=body[:_CANDIDATE_BUDGET], score=job.score,
+                         reason_language=language.named(body[:4000]))
+
+
 def run_dedup(item: WorkItem[DedupJob | DedupFamily], config: Any) -> dict[str, Any]:
     job = item.context
     candidate_path = item.target_path
-    budget = 8000
+    budget = _CANDIDATE_BUDGET
 
     emit_feedback(item, "reading")
     candidate_body, skip = read_or_skip(candidate_path)
@@ -678,6 +698,7 @@ def _decide_dedup(
     title_score: float = 0.0,
     author_spoke: bool = False,
     hub: str | None = None,
+    reason_language: str = "",
 ) -> DedupDecision:
     """The ternary verdict on one pair. The cosine (`score`, `full_score`,
     `title_score`) is not shown to the judge (ADR-0079 decision 3): a closeness
@@ -686,6 +707,13 @@ def _decide_dedup(
     from silica.model.providers import get_provider
 
     prompt = load_prompt("dedup_prompt.txt")
+    if reason_language:
+        # "The language of the CANDIDATE NOTE" was not enough: on 2026-11-13 two
+        # of six reasons on English notes came back in German and Italian. The
+        # line names the language only, so the prompt the import's judge was
+        # measured on (ADR-0030) gains one line; the queue puts the two notes'
+        # names into the reason itself (tools.review.curate._named).
+        prompt += f"\n\nWrite \"rationale\" in {reason_language}."
     if author_spoke:
         # Judge+author (C2): the same call that judges "distinct" also
         # authors the spoke note — a second pass would just re-read the

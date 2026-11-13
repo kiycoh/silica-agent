@@ -130,13 +130,13 @@ Silica is single-user: one person, one vault. There are no per-person permission
 - The Calendar holds events, deadlines and the day each study plan is due; click or drag an empty time to add an event, with a reminder if you want one. `/agenda` lists a day or a week.
 - A decision is a note: `/decide` writes your words to `Decisions/` with why you took it, what you expect and a day to review it; any note becomes one by gaining `decision: true`. `/outcome` adds what happened, dated, `/decisions` lists them, and the Calendar shows each on its review day and in its Decisions view, expected beside outcomes. Nothing judges one against the other but you.
 - A request you make in 3 separate chats, never undone, becomes a proposed skill drafted from your own words. It runs only once you install it from Settings › Skills.
-- `/curate` plans links, orphans and duplicates, and `/aliases` proposes other names for note titles; both write only with `--apply`.
-- What they propose waits in `/review`, with `/organize`'s dry runs, the writes the check refused and the notes whose code moved on. `/review apply` lands a selection as one run `/revert` takes back, `/review dismiss` forgets a proposal for good; Examine's Review row does the same with buttons.
+- `/curate` plans links, orphans and duplicates, a duplicate only once the worker model has judged the pair one (up to 20 verdicts a run, each remembered until a note of the pair changes), and `/aliases` proposes other names for note titles; both write only with `--apply`.
+- What they propose waits in `/review`, with `/organize`'s dry runs, the writes the check refused and the notes whose code moved on. `/review apply` lands a selection as one run `/revert` takes back (`all` never takes an orphan or a duplicate, whose yes runs the worker model), `/review dismiss` forgets a proposal for good; Examine's Review row does the same with buttons.
 
 **Write science notes by hand.** The editor needs no model for any of this.
 
-- Formulas are LaTeX, and `$\ce{H2SO4}$` or `$\ce{2H2 + O2 -> 2H2O}$` writes chemistry as mhchem does; a ```` ```smiles ```` block draws the molecule, as Obsidian's Chem plugin reads it. Type a name in English or Italian inside a formula or a smiles block ("acido solforico", "pythagoras") and pick the formula or the molecule from the list.
-- A table is a grid: click a cell to edit it, Tab and Enter move on, and a bar adds or removes rows and columns. "Edit as text" shows the Markdown.
+- Formulas are LaTeX, and `$\ce{H2SO4}$` or `$\ce{2H2 + O2 -> 2H2O}$` writes chemistry as mhchem does; a ```` ```smiles ```` block draws the molecule, as Obsidian's Chem plugin reads it. Type a name in English or Italian inside a formula or a smiles block ("acido solforico", "pythagoras") and pick the formula or the molecule from the list; in a sentence the same list offers the formula inline, and Tab takes it (Enter stays a new line).
+- A table is a grid: click a cell to edit it, Tab and Enter move on, and a bar adds or removes rows and columns. "As text" shows the Markdown.
 - A pasted web address becomes a link named after its page. Pointing at a `[[link]]` shows the note it leads to.
 
 ## How a write is checked

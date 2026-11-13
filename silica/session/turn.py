@@ -16,10 +16,25 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from silica.agent import turn_notes
-from silica.agent.general_knowledge import general_notes, without_general
+from silica.agent.general_knowledge import (
+    HELD_BACK,
+    HELD_BACK_UNSURE,
+    general_notes,
+    held_back,
+    held_in_found,
+    uncited_notes,
+    without_general,
+)
 from silica.agent.constraints import AgentConstraints, chat_constraints
 from silica.agent.loop import run_agent
-from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
+from silica.agent.recall_watch import (
+    READS_KEY,
+    THIN_COVERAGE_HINT,
+    RecallWatch,
+    numbers_notes,
+    read_refs,
+    unfounded_in_turn,
+)
 from silica.agent.sentinels import EMPTY_COMPLETION
 from silica.config import CONFIG
 from silica.metrics import emit
@@ -236,6 +251,22 @@ def ask_model(t: Turn, cancel, cut: AgentConstraints) -> None:
 # --- after the model ----------------------------------------------------------
 
 
+def hold_unsearched_general(t: Turn) -> None:
+    """ADR-0169 as the owner set it: an answer from general knowledge only after
+    the vault was searched. A block in a turn that searched and read none of the
+    notes is held back (general_knowledge.held_back), first of the steps so that
+    nothing below, the stored answer and the history included, ever holds it."""
+    if t.stopped or t.web or t.read is None or t.read.looked:
+        return
+    held = held_back(t.answer, HELD_BACK_UNSURE if t.read.unsure else HELD_BACK)
+    if held == t.answer:
+        return
+    t.answer = held
+    messages = t.conv.messages
+    if messages and messages[-1].get("role") == "assistant":
+        messages[-1]["content"] = held
+
+
 def check_numbers(t: Turn) -> None:
     """ADR-0095: the answer as the model wrote it, before attribution and figures
     add text it did not; not a stopped turn's, not a /web turn's, whose answer is
@@ -291,7 +322,18 @@ def note(t: Turn) -> None:
     they are drawn live only."""
     notes = t.watch.notes() if isinstance(t.watch, RecallWatch) else []
     if not (t.stopped or t.web) and t.read is not None:
-        notes += general_notes(t.answer, looked=t.read.looked, command=t.text.startswith("/"))
+        command, refs = t.text.startswith("/"), read_refs(t.conv.messages)
+        notes += general_notes(t.answer, command=command, reads=refs)
+        notes += held_in_found(t.answer, t.read.found)
+        # ADR-0174 leaves out, read off the turn and not the answer's words:
+        # a command's output, an empty answer, a web answer (it cites its
+        # pages), a turn that wrote, whose answer reports the write, and a turn
+        # under which the thin-coverage line says every search came back empty,
+        # where the answer is most often the refusal saying so. The line itself
+        # and not `thin`: a demo and a web answer leave it out.
+        thin_said = {"kind": "retrieval", "text": THIN_COVERAGE_HINT} in notes
+        if not (command or t.empty or t.read.web_answer or t.read.wrote or thin_said):
+            notes += uncited_notes(t.answer, refs)
     notes += numbers_notes(t.unread)
     if not (t.stopped or t.web):
         # A card or a slide point its cited note does not hold (learn.artifacts).

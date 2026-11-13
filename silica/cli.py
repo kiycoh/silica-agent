@@ -108,7 +108,7 @@ def _print_answer(t: session_turn.Turn) -> None:
 
 
 _BEFORE = (session_turn.name_notes,)
-_AFTER = (session_turn.check_numbers, session_turn.attribute, session_turn.note, session_turn.beat,
+_AFTER = (session_turn.hold_unsearched_general, session_turn.check_numbers, session_turn.attribute, session_turn.note, session_turn.beat,
           _print_answer, session_turn.recount)
 
 

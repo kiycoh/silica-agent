@@ -178,6 +178,7 @@ def undo(c: Call) -> Result:
 
     rest = raw_input.strip().split(maxsplit=1)
     deleted = moved = None
+    batch: dict | None = None
     note_path: str | None
     if len(rest) > 1:
         note_path = unquoted(rest[1])
@@ -214,8 +215,24 @@ def undo(c: Call) -> Result:
             deleted, newest = last_delete, last_delete[2]
         last_move = journal.last_chat_move(vault)
         if last_move and (newest is None or last_move[3] >= newest):
-            deleted, moved = None, last_move
+            deleted, moved, newest = None, last_move, last_move[3]
+        # A yes from the review queue is one run of many notes (ADR-0165): it
+        # goes back whole when it came last, as the batch's revert takes it.
+        from silica.config import CONFIG
+        from silica.kernel import review
+
+        batch = next((b for b in review.batches(CONFIG.vault_path or "") if not b["reverted"]), None)
+        if batch and (newest is None or batch["at"] >= newest):
+            deleted = moved = None
+        else:
+            batch = None
         note_path = deleted[1] if deleted else (last_write[0] if last_write else None)
+    if batch:
+        res = revert_and_sweep(batch["run"])
+        left = res["skipped"] + res["errors"]
+        out.print(f"  Took back the review batch {batch['run'][:8]}: {len(res['reverted'])} note(s) restored"
+                  + (f", {len(left)} left as they are" if left else "") + ".")
+        return out
     if moved:
         res = revert_and_sweep(moved[0])
         if res["reverted"]:
@@ -290,7 +307,7 @@ def undo(c: Call) -> Result:
     try:
         DRIVER.overwrite(note_path, content, loss=Loss.RESTORE)
         try:
-            store.settle(note_path, DRIVER.read_note(note_path).content)  # what landed, stamp included
+            store.settle(note_path, DRIVER.read_note(note_path).content)  # what landed
         except UNREADABLE:
             pass  # the undo landed; an unsettled top only labels the next write as an outside edit
         depth = store.depth(note_path)

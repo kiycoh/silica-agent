@@ -496,6 +496,9 @@ class _MathMLProbe(HTMLParser):
         self.foreign = True
 
 
+_LONG_ARROW_MI = re.compile(r"<mi>(&#x027F[5-9A-C];)</mi>")
+
+
 def mathml(tex: str, display: bool) -> str:
     """LaTeX -> MathML, rendered natively by the browser (no client JS/fonts).
     A failed conversion degrades to the escaped source in a code span, and so
@@ -509,6 +512,9 @@ def mathml(tex: str, display: bool) -> str:
         # cannot read raises here, and the whole formula shows as its source.
         out = convert(mhchem.expand(tex) if "\\ce" in tex or "\\pu" in tex else tex,
                       display="block" if display else "inline")
+        # latex2mathml writes the long arrows (U+27F5..U+27FC: \longrightarrow, \implies,
+        # \iff) as identifiers, which take no spacing: mhchem's `->` drew B⟶C touching.
+        out = _LONG_ARROW_MI.sub(r"<mo>\1</mo>", out)
         probe = _MathMLProbe()
         probe.feed(out)
         probe.close()
@@ -580,7 +586,11 @@ def _unembed_foreign_imgs(fragment: str, own: tuple[str, ...], made: set[str]) -
 # as `|` so the alias still resolves; in a formula `\|` would read as a norm,
 # so its bars become `\vert` and `\Vert`, which draw the same.
 _TABLE_ALIAS = re.compile(r"\[\[([^\]\[|\\]+)\|([^\]\[]+)\]\]")
-_TABLE_MATH = re.compile(r"(?<!\$)\$(?!\$)([^$\n]+?)\$")
+# Inline math where dollarmath (allow_space=False, allow_digits=False) reads it: no space
+# inside either `$`, no digit before the first or after the last, never `$$`. Wider, it
+# took `$5 | $` in `| $5 | $7 |` for a formula and wrote its bar as `\vert{}`.
+# app-editor.js INLINE_MATH is this pattern, for the grid's split.
+_TABLE_MATH = re.compile(r"(?<![$\d\\])\$(?![$\s])([^$\n]*?)(?<!\s)\$(?!\d)")
 
 
 def _escape_table_aliases(text: str) -> str:

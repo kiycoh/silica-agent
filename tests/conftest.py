@@ -238,11 +238,14 @@ def _no_real_server_autostart(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_page_vector_builds(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test starts a page-vector build (silica/ui/web/vectors.py).
+    """No test starts a page-vector build (silica/ui/web/vectors.py), nor the
+    recall stores' build the same job runs first (ADR-0173).
 
     The real ~/.silica/.env names a loopback embedder, so every note a test
-    saves would start a build against the developer's live llama-server.
-    tests/test_vectors_refresh.py puts the real check back."""
+    saves would start a build against the developer's live llama-server, and
+    a thread outliving its test. tests/test_vectors_refresh.py and
+    tests/test_recall_first_open.py put the real checks back."""
+    monkeypatch.setattr("silica.ui.web.vectors._builds", lambda: False)
     monkeypatch.setattr("silica.ui.web.vectors._eligible", lambda: False)
 
 

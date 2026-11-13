@@ -474,10 +474,20 @@ def already_distilled(source: str, sha256: str, *, vault_path: str | None = None
     a segment on either."""
     recs = read_records(source, vault_path=vault_path)
     last = recs[-1] if recs else None
-    return bool(
-        last and last.get("sha256") == sha256 and last.get("notes")
-        and not last.get("partial")
-    )
+    if not (last and last.get("sha256") == sha256 and last.get("notes")
+            and not last.get("partial")):
+        return False
+    # A run /revert took back left its record behind, and the next /nucleate
+    # of the unchanged source skipped it as already in the vault.
+    from silica.kernel.write.undo_journal import get_undo_journal
+
+    try:
+        return not get_undo_journal().ledger_taken_back(str(last.get("run_id") or ""))
+    except Exception as exc:
+        # An unreadable journal keeps the old answer: re-distilling costs a full
+        # model pass, skipping a taken-back source is what the revert can redo.
+        logger.debug("already_distilled: undo journal unreadable (%s)", exc)
+        return True
 
 
 def note_authored_by(

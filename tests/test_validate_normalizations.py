@@ -44,6 +44,12 @@ def test_an_illegal_filename_character_is_counted(tmp_vault):
     assert ":" not in ops[0].path
 
 
+def test_a_filename_led_by_dots_and_a_separator_starts_at_its_first_word(tmp_vault):
+    ops, _ = validate_operations([_write_op("Secret", "Corso/..\\Secret.md")], [], "Corso")
+
+    assert "Corso/Secret.md" in [o.path for o in ops]
+
+
 def test_a_write_rebased_into_the_write_dir_is_counted(tmp_vault, monkeypatch):
     import silica.kernel.write.validate as validate_mod
 

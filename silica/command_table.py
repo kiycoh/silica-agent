@@ -86,7 +86,8 @@ class Result:
 
     The rest says how the command ended. With none of them set it did the whole
     job. `directive`: the model is asked this. `error`: why the line cannot run,
-    shown as an error and asked of nobody. `answer`: Markdown that is the reply
+    shown as an error and asked of nobody; `retry` False when the same line
+    would be refused again (a setting is missing), so no surface offers it. `answer`: Markdown that is the reply
     itself, which a code block would not render (the formulas on a card); `notes`
     are the lines under it (agent.turn_notes), /council's meter. `saved`:
     a write to memory, `user_memory.save`'s record, which the browser draws with its
@@ -97,6 +98,7 @@ class Result:
     lines: list[tuple[tuple, dict]] = field(default_factory=list)
     directive: str | None = None
     error: str | None = None
+    retry: bool = True
     answer: str | None = None
     notes: list[dict] = field(default_factory=list)
     saved: dict | None = None
@@ -126,8 +128,8 @@ class Result:
         self.directive = directive or None
         return self
 
-    def refused(self, why: str) -> Result:
-        self.error = why
+    def refused(self, why: str, *, retry: bool = True) -> Result:
+        self.error, self.retry = why, retry
         return self
 
 
@@ -265,7 +267,7 @@ COMMANDS: tuple[Command, ...] = (
             '/web-search "retrieval-augmented generation"',
             '/web-search "graph neural networks" --max-searches=6',
         ),
-        handler="silica.commands.ingress:web_search", shlex=True, demo_off=True,
+        handler="silica.commands.ingress:web_search", demo_off=True,
     ),
     Command(
         name="/web",
@@ -285,7 +287,7 @@ COMMANDS: tuple[Command, ...] = (
         summary="one question to 2 to 5 models over one search of your notes, then where they "
                 "agree and disagree, cited; name the models in Settings, Brains",
         examples=('/council "what do my notes say causes inflation?"',),
-        handler="silica.commands.council:council", shlex=True, demo_off=True,
+        handler="silica.commands.council:council", demo_off=True,
     ),
     Command(
         name="/keep",
@@ -355,7 +357,7 @@ COMMANDS: tuple[Command, ...] = (
         summary="a web page, or a small site, built from your notes into Pages/; it opens in "
                 "a safe frame in the app",
         examples=('/page "a timeline of the Roman republic"', '/page "a three-page site on my thesis chapters"'),
-        handler="silica.commands.notes:page", shlex=True, demo_off=True,
+        handler="silica.commands.notes:page", demo_off=True,
     ),
     Command(
         name="/memorize",

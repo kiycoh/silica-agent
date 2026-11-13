@@ -277,11 +277,12 @@ def _normalize_paths(ops: list[Op], *, target_dir: str, write_root: str, repaire
         if op.path:
             folder, filename = os.path.split(op.path)
             name, ext = os.path.splitext(filename)
-            # lstrip("."): a leading dot hides the note from every vault walker
+            # lstrip(". "): a leading dot hides the note from every vault walker
             # (the calendar scan, the timeline and ignore_matcher all skip a
             # dot-prefixed part), so a model-supplied ".secret.md" would be
-            # written, reported as a success, and never read back again.
-            sanitized = (slugify(name).lstrip(".") or "note") + ext
+            # written, reported as a success, and never read back again. The
+            # space goes too: slugify spaces a separator, so "..\\x" is ".. x".
+            sanitized = (slugify(name).lstrip(". ") or "note") + ext
             if sanitized != filename:
                 new_path = (os.path.join(folder, sanitized) if folder else sanitized).replace("\\", "/")
                 logger.debug("validate: sanitized path '%s' → '%s'", op.path, new_path)

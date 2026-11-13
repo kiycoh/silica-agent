@@ -44,7 +44,7 @@ export { EditorView, Decoration, WidgetType, keymap, drawSelection, placeholder,
 export { defaultKeymap, history, historyKeymap, indentMore, indentLess } from "@codemirror/commands";
 export { Language, LanguageSupport, syntaxTree, ensureSyntaxTree } from "@codemirror/language";
 export { markdownLanguage, markdownKeymap } from "@codemirror/lang-markdown";
-export { autocompletion, startCompletion } from "@codemirror/autocomplete";
+export { autocompletion, startCompletion, completionKeymap, acceptCompletion, closeCompletion, selectedCompletion } from "@codemirror/autocomplete";
 export { search, searchKeymap, SearchQuery, setSearchQuery, getSearchQuery, findNext, findPrevious, replaceNext, replaceAll, openSearchPanel, closeSearchPanel } from "@codemirror/search";
 JS
 

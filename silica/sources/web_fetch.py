@@ -396,12 +396,22 @@ def truncate(text: str, limit: int = _MAX_CHARS) -> str:
     """Hard ceiling with a visible marker, so the model knows it saw a prefix."""
     if len(text) <= limit:
         return text
-    cut = text[:limit].rstrip()
-    # An odd fence count means the cut landed inside a code block. Close it, or
-    # the truncation marker (and, in the vault, nothing else) renders as code.
-    if sum(1 for ln in cut.splitlines() if ln.strip() == _FENCE) % 2:
-        cut = f"{cut}\n{_FENCE}"
-    return f"{cut}\n\n[truncated at {limit} characters]"
+    # A cut inside a code block closes it, or the truncation marker (and, in
+    # the vault, everything after it) renders as code.
+    return f"{close_fence(text[:limit].rstrip())}\n\n[truncated at {limit} characters]"
+
+
+def close_fence(text: str) -> str:
+    """`text` with a code fence it left open closed at its end. An opening
+    fence names its language (```bash) and only the closing one is bare, so
+    a bare line is not the rule; a backtick after the run is, since a fence's
+    info string holds none (CommonMark): ```pip install x``` is inline code."""
+    if sum(1 for ln in text.splitlines() if _FENCE_LINE.fullmatch(ln)) % 2:
+        return f"{text}\n{_FENCE}"
+    return text
+
+
+_FENCE_LINE = re.compile(r"[ \t]*`{3,}[^`]*")
 
 
 _MAX_TITLE = 120
@@ -551,7 +561,14 @@ def _raise_for_status(resp: httpx.Response, url: str) -> None:
         raise Refused(
             429, f"429 at {url}: rate limited. Back off, or use a different source.", resp.headers
         )
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError:
+        # The request went to the pinned address (`_stream`), so httpx's words
+        # name an IP the person never typed; theirs is `url`.
+        raise httpx.HTTPStatusError(
+            f"{resp.status_code} {httpx.codes.get_reason_phrase(resp.status_code)} at {url}",
+            request=resp.request, response=resp) from None
 
 
 def content_type(resp: httpx.Response) -> str:
@@ -762,7 +779,7 @@ def fetch_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
     # which takes the HTML path below.
     from silica.sources import site_fetch
 
-    if (site := site_fetch.page(url)) is not None:
+    if (site := site_fetch.page(url, headers)) is not None:
         return site
     if host_matches(url, *_WP_DOMAINS):
         # Cites the requested URL, not the redirect target: it is what resolves
@@ -771,6 +788,12 @@ def fetch_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
         if article:
             extract, title = article
             return Page(_render(url, truncate(extract)), title)
+    return html_page(url, headers)
+
+
+def html_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
+    """The page at `url` read as a page: HTML as its text, plain text and JSON
+    as they are. Also `site_fetch`'s, for a GitHub address the API does not know."""
     resp, final_url = fetch(url, headers)
     # the type gate already ran in fetch, on the headers, before the body
     ctype = content_type(resp)

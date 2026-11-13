@@ -203,6 +203,20 @@ def _peek_dir(vault: str | None) -> str | None:
     return str(p)
 
 
+def _holds_notes() -> bool:
+    """Whether the active vault has a note for a store to hold. Asked only when
+    no store answered, so an empty vault (a new hosted tenant's, which nothing
+    ever indexes) reads as empty and not as an index missing (ADR-0173)."""
+    from silica.driver import DRIVER
+
+    try:
+        return bool(DRIVER.list_files(""))
+    except Exception:
+        # Tolerated: a vault that cannot be listed cannot be said to hold
+        # notes; the reply stays the plain empty one it was before.
+        return False
+
+
 def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
                     use_rerank: bool = True, leg_stats: dict | None = None,
                     use_memory: bool = True, vault: str | None = None,
@@ -236,6 +250,9 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
     embed here, ``rerank`` from ``rerank_related``, the first cause per leg
     winning. A leg that was never asked (no index, no reranker configured,
     gate 2b) is not degraded: that is configuration or design, not a failure.
+    Two absences are (ADR-0173): ``index`` when no store answered for a vault
+    that holds notes, ``building`` while the app makes the stores and
+    ``missing`` otherwise, and ``embed: building`` while it makes the vectors.
 
     ``vault`` (peek): the path of ANOTHER adopted vault whose stores stand in
     for the active legs, read-only and read as they lie on disk. The memory
@@ -253,6 +270,8 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
     from silica.kernel.recall.rerank import rerank_related
     from silica.kernel.recall.sync import sweep
 
+    from silica.kernel.recall import refresh
+
     peek = _peek_dir(vault)
     cooccur_store: CooccurStore | None
     if peek is None:
@@ -263,7 +282,9 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
         embed_store = get_store()
         try:
             loaded = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-            cooccur_store = loaded if len(loaded) else None  # empty store ⇒ abstain
+            # Empty ⇒ abstain; and while the app's first build fills this same
+            # singleton (ADR-0173), a part of the vault would read as all of it.
+            cooccur_store = loaded if len(loaded) and not refresh.building("cooccurrence") else None
         except Exception:
             cooccur_store = None
     else:
@@ -294,7 +315,19 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
                 leg_stats.setdefault("degraded", {}).setdefault("embed", why_of(exc))
 
     if query_vec is None and cooccur_store is None and mem_cooccur is None:
+        # A store of vectors that a failed query embed could not use is there:
+        # its line is the embedder's, already marked above, not "never built".
+        if leg_stats is not None and peek is None and (embed_store is None or len(embed_store) == 0):
+            cause = "building" if refresh.building() else "missing" if _holds_notes() else ""
+            if cause:
+                leg_stats.setdefault("degraded", {}).setdefault("index", cause)
         return None, None
+    if leg_stats is not None and peek is None and refresh.building("embeddings"):
+        # Not built yet is not "no embedder configured": the app is making the
+        # leg now (ADR-0173). Whether or not the query embedded: the store it
+        # fills chunk by chunk holds part of the vault, and a memory lane's
+        # vectors embed the query over an empty one.
+        leg_stats.setdefault("degraded", {}).setdefault("embed", "building")
 
     results = related_notes_for_query(
         query_vec=query_vec,

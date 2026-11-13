@@ -424,6 +424,13 @@ def answer(payload: dict):
                               force_model=payload.get("force_model"), pick=payload.get("pick"))
 
 
+@router.post("/help")
+def help_shown(payload: dict):
+    with _engine():
+        return session.help_shown(str(payload.get("id") or ""), payload.get("i"), options=payload.get("options"),
+                                  hints=payload.get("hints"))
+
+
 @router.post("/skip")
 def skip(payload: dict):
     with _engine():

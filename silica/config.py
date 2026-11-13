@@ -705,9 +705,10 @@ class SilicaConfig:
     # lmstudio/qwen3.5-9b"; empty keeps every call on its own model, as before.
     fallback_models: str = from_env("SILICA_FALLBACK_MODELS", doc=True, hosted=True)
 
-    # /council's members (ADR-0170): 2 to 5 comma-separated litellm ids, the
-    # syntax of the fallbacks above. Empty by design: Silica picks no models to
-    # spend the person's key on, and /council says how to name them.
+    # /council's members (ADR-0170): 2 to 5 comma-separated ids, each resolved
+    # on SILICA_PROVIDER as `model` is (commands/council.py). Empty by design:
+    # Silica picks no models to spend the person's key on, and /council says
+    # how to name them.
     council_models: str = from_env("SILICA_COUNCIL_MODELS", doc=True)
 
     # Distiller-only upstream-provider pin. Lets the constrained-decoding path

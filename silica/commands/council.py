@@ -16,7 +16,7 @@ from threading import Event
 
 from silica.command_table import Call, Result
 from silica.commands import answered
-from silica.config import CONFIG, demo, hosted
+from silica.config import CONFIG, PROVIDER_PREFIXES, demo, ensure_prefix, hosted
 from silica.prompts import GENERAL_HEAD, GENERAL_MARK
 
 logger = logging.getLogger(__name__)
@@ -29,12 +29,35 @@ MIN_MEMBERS, MAX_MEMBERS = 2, 5
 MEMBER_TIMEOUT_S = 180.0
 
 _LETTERS = "ABCDE"
+# Silica's provider prefixes that are also vendors in OpenRouter's ids
+# (`deepseek/deepseek-v4-flash-0731`). Gemini, Mistral and xAI are `google/`,
+# `mistralai/` and `x-ai/` there, so `gemini/` beside an OpenRouter chat still
+# names Gemini's own API.
+_OPENROUTER_VENDORS = frozenset({"deepseek", "openai"})
 
 
 def members() -> list[str]:
-    """The council's models, as SILICA_COUNCIL_MODELS names them. A model named
-    twice sits twice: two samples of one model are a council too."""
-    return [m.strip() for m in (CONFIG.council_models or "").split(",") if m.strip()]
+    """The council's models, as SILICA_COUNCIL_MODELS names them, each resolved
+    as the chat model's id is. A model named twice sits twice: two samples of
+    one model are a council too."""
+    return [_resolved(m.strip()) for m in (CONFIG.council_models or "").split(",") if m.strip()]
+
+
+def _resolved(model: str) -> str:
+    """`model` on the chat's provider, through the one rule the chat's own id
+    takes (config.ensure_prefix on SILICA_PROVIDER as set, never as derived),
+    so the chat's id as SILICA_MODEL holds it seats a member: raw, the
+    `deepseek/` of an OpenRouter id sent it to DeepSeek's own API (2026-11-13).
+    A member that names another of Silica's providers runs there, which no
+    chat model does (`lmstudio/qwen3.5-9b` beside an OpenRouter chat), except
+    one that is also an OpenRouter vendor under an OpenRouter chat (ADR-0170,
+    amendment 2026-11-13)."""
+    provider = CONFIG._provider
+    prefix = model.partition("/")[0] if "/" in model else ""
+    vendor = provider == "openrouter" and prefix in _OPENROUTER_VENDORS
+    if prefix in PROVIDER_PREFIXES and prefix != provider and not vendor:
+        return model
+    return ensure_prefix(model, provider)
 
 
 @dataclass
@@ -111,12 +134,34 @@ def _ask(heard: _Heard, messages: list[dict]) -> _Heard:
         # Any failure of one member (a refused key, a model its endpoint does
         # not have, a limit) is named under the answer and the others go on.
         logger.warning("council member %s failed: %s", heard.model, e)
-        heard.failed = type(e).__name__
+        heard.failed = _why(e)
         return heard
     heard.text = (resp.text or "").strip()
     heard.failed = "" if heard.text else "an empty answer"
     heard.tokens = _tokens(resp.usage)
     return heard
+
+
+def _why(e: Exception) -> str:
+    """A member's failure as the person reads it under the answer: what went
+    wrong in words, never the exception's class ("BadRequestError" named a
+    refused key, 2026-11-13) nor its text, which the log keeps."""
+    from silica.model import errors
+
+    status = errors.status_of(e)
+    if errors.refused_key(e):
+        return "its key was refused"
+    if errors.unknown_model(e):
+        return "its provider has no model by that id"
+    if status == 402:
+        return "its key has no credit left"
+    if status == 429:
+        return "its provider is rate-limiting it"
+    if status == 408:
+        return "its endpoint timed out"
+    if isinstance(e, ConnectionError) or (status or 0) >= 500:
+        return "its endpoint did not answer"
+    return "its provider refused the call"
 
 
 def _tokens(usage: dict | None) -> int | None:
@@ -148,21 +193,22 @@ def council(c: Call) -> Result:
     from silica.tools.graph import silica_recall
 
     out = c.out
+    # The refusals before the search are the same on every retry: none offers one.
     if hosted() or demo():
         return out.refused("/council is not on the server in this version: it is a model call per "
-                           "member and one more, which the account's count does not take yet")
+                           "member and one more, which the account's count does not take yet", retry=False)
     question = " ".join(c.args).strip()
     if not question:
-        return out.refused(f"Usage: {c.row.synopsis}")
+        return out.refused(f"Usage: {c.row.synopsis}", retry=False)
     names = members()
     if not names:
         return out.refused(
-            "/council has no members yet. Name 2 to 5 models in Settings › Brains › council models, "
-            "or as SILICA_COUNCIL_MODELS=<model>,<model> in ~/.silica/.env, as litellm ids (the "
-            "syntax of SILICA_FALLBACK_MODELS). Silica picks none for you: each one is a call on your key.")
+            f"/council has no members yet. Name {MIN_MEMBERS} to {MAX_MEMBERS} models in Settings › Brains › "
+            "Council models, comma-separated, each written as your chat model is. Silica picks none "
+            "for you: each one is a call on your key.", retry=False)
     if not MIN_MEMBERS <= len(names) <= MAX_MEMBERS:
-        return out.refused(f"/council takes {MIN_MEMBERS} to {MAX_MEMBERS} members, and "
-                           f"SILICA_COUNCIL_MODELS names {len(names)}")
+        return out.refused(f"/council takes {MIN_MEMBERS} to {MAX_MEMBERS} members, and Settings › Brains › "
+                           f"Council models names {len(names)}.", retry=False)
     found = answered(silica_recall, question)
     if "error" in found:
         return out.refused(f"the search of your notes failed: {found['error']}")
@@ -172,13 +218,18 @@ def council(c: Call) -> Result:
         heard = list(pool.map(lambda h: _ask(h, asked), heard))
     answering = [h for h in heard if h.text]
     if not answering:
-        return out.refused("no member answered: " + "; ".join(f"{h.name}, {h.failed}" for h in heard))
-    resp = call_llm(CONFIG.model, _synthesis_messages(question, answering))
-    synthesis = (resp.text or "").strip() or "(the synthesis came back empty: the members' answers are below)"
-    out.answer = _drawn(synthesis, answering)
-    notes = general_knowledge.general_notes(out.answer, looked=True, command=False)
-    notes += [_meter(f"member {h.name}", h) for h in heard]
-    tokens = _tokens(resp.usage)
-    notes.append({"kind": "council", "text": f"synthesis: 1 call{f', {tokens:,} tokens' if tokens else ''}"})
-    out.notes = turn_notes.ordered(notes)
+        return out.refused("No member answered: " + "; ".join(f"member {h.name}, {h.failed}" for h in heard) + ".")
+    meters = [_meter(f"member {h.name}", h) for h in heard]
+    if len(answering) == 1:
+        # One answer has nothing to agree or disagree with: a synthesis of it
+        # wrote an "agreement" of one voice (2026-11-13), and cost a call.
+        (h,) = answering
+        out.answer = f"Only member {h.name} answered, so there is nothing to compare. Its answer:\n\n{h.text}"
+    else:
+        resp = call_llm(CONFIG.model, _synthesis_messages(question, answering))
+        synthesis = (resp.text or "").strip() or "(the synthesis came back empty: the members' answers are below)"
+        out.answer = _drawn(synthesis, answering)
+        tokens = _tokens(resp.usage)
+        meters.append({"kind": "council", "text": f"synthesis: 1 call{f', {tokens:,} tokens' if tokens else ''}"})
+    out.notes = turn_notes.ordered(general_knowledge.general_notes(out.answer, command=False) + meters)
     return out

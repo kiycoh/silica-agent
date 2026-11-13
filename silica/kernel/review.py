@@ -52,7 +52,9 @@ class Kind:
     apply: Callable[[str, list[Proposal]], dict[str, str | None]]
     dismiss: Callable[[str, list[Proposal]], None] | None = None
     # Accepting runs the worker model: the GUI sends it through the chat, where
-    # a turn is counted, and never through a route.
+    # a turn is counted, and never through a route; `apply all` passes it over
+    # (ADR-0175): on a copy of the demo vault on 2026-11-13 "all" took 34
+    # proposals whose yes runs the worker (2 orphans, 32 duplicates), none named.
     spends_model: bool = False
     # `apply all` takes it. A stale note's yes says the note still holds, which
     # only a person who read it can say, so it is accepted by name or id alone.
@@ -113,6 +115,23 @@ def _settle(vault: str, kind: str, ids: set[str]) -> None:
         _write(path, [r for r in rows if not (isinstance(r, dict) and r.get("id") in ids)])
 
 
+def verdicts(vault: str) -> dict[str, dict]:
+    """The worker's verdicts on duplicate candidates, by the pair's proposal id
+    (ADR-0175): `notes`, the `hash` of both notes' text when it was asked,
+    `verdict`, `why`, the `claim` a "contradicts" quoted and `at`. A
+    "contradicts" waits here for the contradictions view (ADR-0166 point 6),
+    which does not read it yet."""
+    got = _read(_dir(vault) / "verdicts.json", {})
+    return got if isinstance(got, dict) else {}
+
+
+# shortcut: verdicts are never pruned, one row per pair ever judged (~300
+# bytes). At 10,000 rows drop those whose notes are gone.
+def remember(vault: str, rows: dict[str, dict]) -> None:
+    if rows:
+        _write(_dir(vault) / "verdicts.json", {**verdicts(vault), **rows})
+
+
 # shortcut: dismissals are never pruned. One is ~100 bytes; at 10,000 entries
 # drop those no kind lists any more, keeping the ones a recompute could revive.
 def dismissed(vault: str) -> dict[str, dict]:
@@ -134,17 +153,18 @@ def listing(vault: str) -> list[Proposal]:
     return out
 
 
-def pick(vault: str, words: list[str]) -> list[Proposal]:
+def pick(vault: str, words: list[str], *, paid_in_all: bool = False) -> list[Proposal]:
     """The proposals `words` name: ids (or 4+ leading characters of one, as
     /revert takes a run), kind names, or `all`, which skips a kind that is not
-    `in_all`."""
+    `in_all`, and one whose yes spends the model unless `paid_in_all`."""
     pending = listing(vault)
     chosen: dict[str, Proposal] = {}
     for w in (w.strip().lower() for w in words):
         if not w:
             continue
         if w == "all":
-            hits = [p for p in pending if KINDS[p.kind].in_all]
+            hits = [p for p in pending
+                    if KINDS[p.kind].in_all and (paid_in_all or not KINDS[p.kind].spends_model)]
         elif w in KINDS:
             hits = [p for p in pending if p.kind == w]
         elif len(w) >= 4:

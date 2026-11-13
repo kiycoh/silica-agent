@@ -583,3 +583,22 @@ def test_partial_run_record_never_counts_as_already_distilled(tmp_vault):
     append_record("lez.md", "sha-1", "run-2", ["Corso/A", "Corso/B"], vault_path=CONFIG.vault_path)
     assert already_distilled("lez.md", "sha-1", vault_path=CONFIG.vault_path) is True
     assert already_distilled("lez.md", "sha-other", vault_path=CONFIG.vault_path) is False
+
+
+def test_a_run_taken_back_is_not_already_distilled(tmp_vault):
+    """/revert of a /nucleate run takes its notes back and marks the journal's
+    run reverted, but the ledger still ended on that sha with notes: the next
+    /nucleate of the unchanged source skipped it as already in the vault."""
+    from silica.config import CONFIG
+    from silica.kernel.write import undo_journal
+    from silica.kernel.write.provenance import already_distilled, append_record
+
+    journal = undo_journal.get_undo_journal()
+    run = journal.start_run(source="lez.md", vault=CONFIG.vault_path, ledger_run_id="run-1")
+    append_record("lez.md", "sha-1", "run-1", ["Corso/A"], vault_path=CONFIG.vault_path)
+    assert already_distilled("lez.md", "sha-1", vault_path=CONFIG.vault_path) is True
+    journal.mark_reverted(run)
+    assert already_distilled("lez.md", "sha-1", vault_path=CONFIG.vault_path) is False
+    # A run the journal never saw (older than it, or pruned) still counts.
+    append_record("lez.md", "sha-1", "run-old", ["Corso/A"], vault_path=CONFIG.vault_path)
+    assert already_distilled("lez.md", "sha-1", vault_path=CONFIG.vault_path) is True

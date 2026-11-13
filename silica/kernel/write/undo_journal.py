@@ -186,6 +186,15 @@ class UndoJournalStore:
         query += " ORDER BY started_at DESC, rowid DESC"
         return [r["run_id"] for r in self._conn().execute(query, params).fetchall()]
 
+    def ledger_taken_back(self, ledger_run_id: str) -> bool:
+        """Whether every journal run opened under this ledger run id was
+        reverted. False when the journal never saw the id (a run older than
+        it, or a pruned one): absence is not a take-back."""
+        row = self._conn().execute(
+            "SELECT COUNT(*) AS n, SUM(reverted_at IS NULL) AS open FROM runs "
+            "WHERE ledger_run_id = ?", (ledger_run_id,)).fetchone()
+        return bool(row and row["n"] and not row["open"])
+
     def record(self, run_id: str, inverse: InverseOp, post_hash: str | None) -> None:
         conn = self._conn()
         conn.execute(

@@ -5,6 +5,8 @@
 construct a student writes, and anything else shown as its source, never guessed."""
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from silica.kernel.text import mhchem
@@ -67,6 +69,15 @@ def test_a_ce_beside_ordinary_math_keeps_both():
     out = mathml(r"\Delta H = -286\,\pu{kJ/mol} \text{ for } \ce{H2 + 1/2O2 -> H2O}", display=True)
     assert "math-err" not in out and "&#x02192;" not in out  # the long arrow, not \rightarrow
     assert "&#x027F6;" in out and "<mfrac>" in out
+
+
+@pytest.mark.parametrize("tex", [r"\ce{A + B -> C}", r"\ce{A ->[heat] B}", r"p \implies q", r"a \longleftrightarrow b"])
+def test_a_long_arrow_is_spaced_as_an_operator(tex):
+    """latex2mathml writes the long arrows as identifiers, which take no spacing:
+    `\\ce{A + B -> C}` drew B⟶C touching while `<=>` stood apart (2026-11-12, in Chrome)."""
+    out = mathml(tex, display=False)
+    assert "math-err" not in out and not re.search(r"<mi>&#x027F[0-9A-F];</mi>", out)
+    assert re.search(r"<mo>&#x027F[0-9A-F];</mo>", out)
 
 
 @pytest.mark.parametrize("tex", [r"\ce{H2O ?}", r"\ce{H2O", r"\pu{12 kJ#}", r"x + \ce{}"])

@@ -225,18 +225,23 @@
   // wikilink or inline math is the cell's own, as the server reads it
   // (render.py _escape_table_aliases), and `\|` always is. Where this and the
   // server's render count different cells, the grid stands down (paintGrid).
+  // Inline math where dollarmath reads it, as render.py _TABLE_MATH: no space inside
+  // either `$`, no digit before the first or after the last, never `$$`. So the `$5` of
+  // a price is text, and so is `$5 | $7`, two prices, whose `$` closes on a space.
+  const INLINE_MATH = /(?<![$\d\\])\$(?![$\s])[^$\n]*?(?<!\s)\$(?!\d)/;
+  const MATH_AT = new RegExp(INLINE_MATH.source, "y");
   function tableCells(line) {
     const cells = [], lead = /^\s*\|/.exec(line);
-    let start = lead ? lead[0].length : 0, math = false, wiki = 0;
+    let start = lead ? lead[0].length : 0, wiki = 0;
     for (let i = start; i < line.length; i++) {
       const ch = line[i];
       if (ch === "\\") i++;
-      // Math and a link open only where they close, as the server's patterns match:
-      // the `$5` of a price is text, and its cell ends at the next pipe.
-      else if (ch === "$") math = math ? false : line[i + 1] !== "$" && line[i - 1] !== "$" && line.indexOf("$", i + 2) > 0;
-      else if (!math && line.startsWith("[[", i) && line.indexOf("]]", i + 2) > 0) { wiki++; i++; }
-      else if (!math && wiki && line.startsWith("]]", i)) { wiki--; i++; }
-      else if (ch === "|" && !math && !wiki) { cells.push([start, i]); start = i + 1; }
+      // Math and a link open only where they close, as the server's patterns match;
+      // a formula's pipes are its own, so the scan steps over the whole of it.
+      else if (ch === "$") { MATH_AT.lastIndex = i; if (MATH_AT.test(line)) i = MATH_AT.lastIndex - 1; }
+      else if (line.startsWith("[[", i) && line.indexOf("]]", i + 2) > 0) { wiki++; i++; }
+      else if (wiki && line.startsWith("]]", i)) { wiki--; i++; }
+      else if (ch === "|" && !wiki) { cells.push([start, i]); start = i + 1; }
     }
     if (line.slice(start).trim()) cells.push([start, line.length]);
     return cells;
@@ -254,7 +259,7 @@
   const tableText = (m) => [m.head, m.aligns.map((a) => DELIM[a]), ...m.body].map(rowText).join("\n");
   // A cell shows its pipes bare and writes them escaped, inline math aside: there
   // `\|` is a norm, and the server already keeps a formula's bars in its cell.
-  const outsideMath = (t, f) => t.split(/(\$[^$\n]*\$)/).map((s, i) => (i % 2 ? s : f(s))).join("");
+  const outsideMath = (t, f) => t.split(new RegExp(`(${INLINE_MATH.source})`)).map((s, i) => (i % 2 ? s : f(s))).join("");
   const cellShown = (raw) => outsideMath(raw, (s) => s.replace(/\\\|/g, "|"));
   const cellRaw = (shown) => outsideMath(shown.trim(), (s) => s.replace(/\\\||\|/g, (m) => (m === "|" ? "\\|" : m)));
 
@@ -391,15 +396,18 @@
     el.classList.remove("cm-grid-off");
     const bar = document.createElement("div");
     bar.className = "cm-grid-bar";
+    // Labels short enough for one row in a 320 px drawer (ADR-0160, 2026-11-13); the full
+    // name is the tooltip and what a screen reader says.
     for (const [act, label, say] of [["row-add", "+ row", "add a row under this one"], ["row-del", "− row", "remove this row"],
-      ["col-add", "+ column", "add a column after this one"], ["col-del", "− column", "remove this column"],
-      ["align", "Align", "this column's alignment: left, centre, right, none"], ["text", "Edit as text", "edit the table as Markdown"]]) {
+      ["col-add", "+ col", "add a column after this one"], ["col-del", "− col", "remove this column"],
+      ["align", "Align", "align this column: left, centre, right, none"], ["text", "As text", "edit as text, the table's Markdown"]]) {
       const b = document.createElement("button");
       b.type = "button";
       b.dataset.act = act;
       b.className = act === "text" ? "" : "cm-grid-op";
       b.textContent = label;
       b.title = say;
+      b.setAttribute("aria-label", say);
       bar.append(b);
     }
     const table = document.createElement("table"), thead = table.createTHead(), tbody = table.createTBody();
@@ -953,11 +961,25 @@
             if (live) hide(n.from, n.from + 1); // `\*` reads as `*`
             return false;
           case "Link": {
-            const marks = node.getChildren("LinkMark"), url = node.getChild("URL");
-            if (!url || marks.length < 2) return; // `[x][ref]` and `[x]` stay text
+            const marks = node.getChildren("LinkMark");
+            if (marks.length < 2) return; // `[x][ref]` and `[x]` stay text
             const textFrom = marks[0].to, textTo = marks[1].from;
-            if (textTo > textFrom) add(linkMark({ "data-href": doc.sliceString(url.from, url.to) }, live), textFrom, textTo);
-            if (live) { hide(n.from, textFrom); hide(textTo, n.to); }
+            // The destination is the URL after `](`: GFM also finds an address in the words,
+            // and a pasted one's words are that address (ADR-0161), so the first URL child
+            // opened `a/_b` for `[a\_b](a_b)`. `<…>` is the syntax around an address with
+            // a parenthesis, not part of it.
+            const urls = node.getChildren("URL"), url = urls.find((u) => u.from > textTo);
+            if (!url) return;
+            const href = doc.sliceString(url.from, url.to).replace(/^<([^]*)>$/, "$1");
+            if (textTo > textFrom) add(linkMark({ "data-href": href }, live), textFrom, textTo);
+            if (live) {
+              hide(n.from, textFrom); hide(textTo, n.to);
+              // an address in the words is one node, with no Escape of its own to hide
+              for (const u of urls) {
+                if (u.to > textTo) continue;
+                for (const m of doc.sliceString(u.from, u.to).matchAll(/\\(?=[!-/:-@[-`{-~])/g)) hide(u.from + m.index, u.from + m.index + 1);
+              }
+            }
             return;
           }
           case "URL": {

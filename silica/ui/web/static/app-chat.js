@@ -1780,8 +1780,11 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         seg.el.innerHTML = ev.html || escapeHtml(ev.answer || "");
       } else if (segments === 1 && curText && (ev.html || ev.answer)) {
         curText.el.innerHTML = ev.html || escapeHtml(ev.answer || "");
+        // Copy takes what is drawn: the server may have held a block back (ADR-0169).
+        if (ev.answer) curText.raw = ev.answer;
       } else if (tail && ev.html && (ev.answer || "").startsWith(tail)) {
         curText.el.innerHTML = ev.html;
+        curText.raw = ev.answer;
       }
       close(""); // collapse any open thinking, end all segments
       drawDiagrams(body);
@@ -1803,7 +1806,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       // the agent as speech AND as a toast over the send button, and neither
       // offered a way to try again, so a failed turn ended the conversation
       // and took the typed question with it.
-      attachFailure(lastUserBody, said, ev.detail || "", retry);
+      attachFailure(lastUserBody, said, ev.detail || "", ev.retry === false ? null : retry);
       announce("the turn failed: " + said);
       if (typeof upgradeAtLimit === "function") upgradeAtLimit(ev, said);
     }

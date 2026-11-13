@@ -40,35 +40,65 @@ def test_a_wrong_option_that_repeats_the_answer_another_option_or_the_line_is_tu
     assert len(live["options"]) == 4 and "Memorize records ten kinds of question, and levels." not in live["options"]
 
 
+def test_a_set_whose_key_stands_out_by_length_is_asked_in_writing():
+    """Seen on the demo vault, 2026-11-13: the key was the grader's ANSWER, the
+    longest of the four in 23 items of 23. The cases are three of them."""
+    baroque = ("Baroque art is the style of painting, sculpture and architecture that appeared in Rome around 1600 "
+               "and dominated Europe until the mid-18th century.")
+    assert items.choices(baroque, ["It appeared in Florence around 1500.", "It appeared in Paris around 1700.",
+                                   "It appeared in Venice around 1550."], [baroque], even=True) == {}
+    logos = "The universe is ordered by a rational principle called the logos."
+    short = ["The arche.", "The nous.", "The pneuma."]
+    assert items.choices(logos, short, [logos], even=True) == {}         # three wrong ones under half the key
+    assert len(items.choices("The logos.", short, [logos], even=True)["options"]) == 4
+    # within the margin: a key a few characters longer than the longest wrong one
+    eisen = "Elizabeth Eisenstein argued that printing transformed European thought by making texts fixed and widely available."
+    near = ["She argued that printing had little effect because early books were unreliable and depended on social context.",
+            "She argued that printing caused the Reformation by directly translating the Bible into every language.",
+            "She argued that printing was merely a faster version of woodblock printing with no new consequences."]
+    assert len(items.choices(eisen, near, [eisen], even=True)["options"]) == 4
+    # by characters, as the eye takes a line's length: level by words (11 against 9, 8 and 6), 72 characters against 46
+    descartes = "Descartes adopted the Stoic maxim to master himself rather than fortune."
+    assert items.choices(descartes, ["To live in agreement with nature at all costs.", "To accept all events as fated and unavoidable.",
+                                     "To seek pleasure while avoiding pain."], [descartes], even=True) == {}
+    # a cloze's options are terms of its note, not written to a length: the check is the model's set only
+    assert len(items.choices(logos, short, [logos])["options"]) == 4
+
+
 REPLY = """ITEM 1
 PATH: ML/Margine geometrico.md
 KIND: {kind}
 LEVEL: 1
 ANCHOR: Margine geometrico
 SPAN: Il margine geometrico e' la distanza del punto piu' vicino dall'iperpiano.
-ANSWER: La distanza del punto piu' vicino dall'iperpiano.
+ANSWER: La distanza del punto piu' vicino dall'iperpiano, che il classificatore rende la piu' grande possibile.
 Q: Che cosa misura il margine geometrico di un classificatore?
 CRITERIA: the distance of the closest point
 H1: Pensa al punto piu' vicino.
-WRONG1: La distanza media dei punti dall'origine.
+{choice}WRONG1: La distanza media dei punti dall'origine.
 WRONG2: Il numero di errori sul training set.
 WRONG3: L'angolo tra due iperpiani separatori.
 END
 """
+CHOICE = "La distanza del punto piu' vicino."
 
 
-@pytest.mark.parametrize("kind,choosable", [("recall", True), ("explain", False)])
-def test_the_options_come_with_the_item_in_the_one_call_for_the_four_kinds_only(vault, monkeypatch, kind, choosable):
+@pytest.mark.parametrize("kind,choice,choosable", [("recall", f"CHOICE: {CHOICE}\n", True), ("recall", "", False),
+                                                   ("explain", f"CHOICE: {CHOICE}\n", False)])
+def test_the_options_come_with_the_item_in_the_one_call_for_the_four_kinds_only(vault, monkeypatch, kind, choice, choosable):
     calls = []
-    monkeypatch.setattr(items, "ask_model", lambda prompt, n: (calls.append(prompt), (REPLY.format(kind=kind), "stop"))[1])
+    reply = REPLY.format(kind=kind, choice=choice)
+    monkeypatch.setattr(items, "ask_model", lambda prompt, n: (calls.append(prompt), (reply, "stop"))[1])
     built = items.build_session([{"path": "ML/Margine geometrico.md", "kind": kind, "level": 1, "pool": "due"}])
-    assert len(calls) == 1 and "WRONG1" in calls[0]
+    assert len(calls) == 1 and "WRONG1" in calls[0] and "CHOICE:" in calls[0]
     it = built[0]
-    assert it["kind"] == kind and it["grader"] == "model" and "wrong" not in it
+    assert it["kind"] == kind and it["grader"] == "model" and "wrong" not in it and "choice" not in it
+    # the key is the CHOICE line, written with the wrong ones; ANSWER stays the written path's reference
+    assert it["answer"].startswith("La distanza del punto piu' vicino dall'iperpiano, che")
     if choosable:
-        assert it["options"][it["key"]] == "La distanza del punto piu' vicino dall'iperpiano." and len(it["options"]) == 4
+        assert it["options"][it["key"]] == CHOICE and len(it["options"]) == 4 and it["answer"] not in it["options"]
     else:
-        assert "options" not in it
+        assert "options" not in it   # no CHOICE line: ANSWER is never the key, the item is asked in writing
     # the page gets the four unmarked; the REPL model gets none of them (G5)
     assert "options" not in items.cue_payload(built)[0]
     page = json.dumps(items.cue_payload(built, options=True))
@@ -102,6 +132,14 @@ def test_a_cloze_takes_its_wrong_options_from_its_own_note_with_no_call(tmp_vaul
                                             "agente basato sull'utilità", "Ambiente"])
     assert it["wrong_why"]["Ambiente"] == "This note links to Ambiente, another note."
     assert "under Tipi" in it["wrong_why"]["agente basato su obiettivi"]
+
+
+def test_a_cloze_option_is_a_note_name_or_one_bold_term_never_link_syntax_or_the_text_between_two():
+    # seen 2026-11-12 on the docs vault: "Nucleate#The Sources block" and "menu (" were offered as answers
+    tmp = "Un **agente reattivo** non ricorda, vedi [[Ambiente#Tipi di ambiente]].\n\nIl **+** menu (**riassumi**, **spiega**) e [[#Tipi]].\n"
+    wrong, why = items._cloze_wrong("AI/Agenti.md", tmp)
+    assert wrong == ["agente reattivo", "riassumi", "spiega", "Ambiente"]
+    assert why["Ambiente"] == "This note links to Ambiente, another note."
 
 
 def test_a_pick_is_graded_by_its_key_with_the_caps_of_a_recognition():
@@ -173,3 +211,115 @@ def test_a_missed_pick_comes_back_on_the_same_four_in_a_new_order(client, monkey
     assert sorted(added["options"]) == sorted(OPTS) and "key" not in added and added["retest"] is True
     again = live["items"][-1]
     assert again["options"][again["key"]] == RIGHT and again["q"] == first["q"]
+
+
+def _precise(monkeypatch):
+    monkeypatch.setattr(grade, "_llm", lambda *a, **k: (
+        "GRADE: recalled\nPRECISE: yes\nRUBRIC: all there\nFEEDBACK: Right.\nPARAPHRASE: yes\nMISCONCEPTION: none\n"
+        "NOTE_DEFECT: none\n", "stop"))
+
+
+def test_a_written_answer_after_the_options_were_shown_is_with_help_and_a_reload_keeps_it(client, tmp_path, monkeypatch):
+    """The owner, 2026-11-13: a written answer given after a hint is with help,
+    otherwise without, and the four options are a hint. Seen in the running
+    app the same day: the options shown, then "Answer by writing", was met
+    without help and Easy."""
+    from silica.kernel.learn import session as learn_session
+
+    c, _ = client
+    _precise(monkeypatch)
+    s = _start(c)
+    live = learn_session._LIVE
+    live["items"].append({**live["items"][0], "i": len(live["items"]) + 1})
+    shown, never = live["items"][0], live["items"][-1]
+    for it in (shown, never):
+        it.update(options=list(OPTS), key=2, grader="model", rungs=["H1"], hints=["Pensa alla distanza."])
+    assert c.post("/learn/help", json={"id": s["id"], "i": shown["i"], "options": True}).json()["options"] is True
+    # what a restart reads back: the help shown is the session's, not the tab's
+    learn_session._reset()
+    page = c.get("/learn/session", params={"id": s["id"]}).json()
+    assert page["help"] == {str(shown["i"]): {"options": True}}
+    v = c.post("/learn/answer", json={"id": s["id"], "i": shown["i"], "production": RIGHT, "conf": 90}).json()
+    assert v["correct"] is True and v["rating"] == grade.HARD and v["hints"] == 1   # the page sent no hint
+    # Easy from the page's "change" is not taken: a hint caps at Hard, and so do the options
+    r = c.post("/learn/rate", json={"id": s["id"], "i": shown["i"], "rating": 4}).json()
+    assert r["rating"] == grade.HARD and r["unassisted"] is False
+    line = json.loads((tmp_path / "quiz.jsonl").read_text().splitlines()[-1])
+    assert (line["grader"], line["hints"], line["rungs"]) == ("model", 1, ["options"])   # no H1 claimed as shown
+    # options the reader never saw are no help: the same answer, unassisted and Easy
+    v = c.post("/learn/answer", json={"id": s["id"], "i": never["i"], "production": RIGHT, "conf": 90}).json()
+    assert v["rating"] == grade.EASY and v["hints"] == 0
+    assert c.post("/learn/rate", json={"id": s["id"], "i": never["i"], "rating": 4}).json()["unassisted"] is True
+    rows = {x["i"]: x for x in c.post("/learn/close", json={"id": s["id"]}).json()["items"]}
+    assert (rows[shown["i"]]["status"], rows[shown["i"]]["marker"]) == ("assisted", "assisted")
+    assert rows[never["i"]]["status"] == "met"
+
+
+def test_a_hint_shown_before_a_reload_still_counts_and_a_pick_is_still_a_pick(client, tmp_path, monkeypatch):
+    from silica.kernel.learn import session as learn_session
+
+    c, _ = client
+    _precise(monkeypatch)
+    s = _start(c)
+    live = learn_session._LIVE
+    live["items"].append({**live["items"][0], "i": len(live["items"]) + 1})
+    first, second = live["items"][0], live["items"][-1]
+    for it in (first, second):
+        it.update(options=list(OPTS), key=2, grader="model", rungs=["H1", "lede"], hints=["Pensa alla distanza.", "Il lede."])
+    c.post("/learn/help", json={"id": s["id"], "i": first["i"], "hints": 1})
+    c.post("/learn/help", json={"id": s["id"], "i": first["i"], "hints": 9})       # never more than the item holds
+    assert c.get("/learn/session", params={"id": s["id"]}).json()["help"] == {str(first["i"]): {"hints": 2}}
+    v = c.post("/learn/answer", json={"id": s["id"], "i": first["i"], "production": RIGHT, "conf": 90, "hints": 0}).json()
+    assert v["hints"] == 2 and v["rating"] == grade.HARD
+    # a reload on the reveal shows what was written and how sure, where it read "(no answer)" (2026-11-13)
+    again = c.get("/learn/session", params={"id": s["id"]}).json()["verdicts"][str(first["i"])]
+    assert (again["production"], again["conf"], again["hints"]) == (RIGHT, 90, 2)
+    c.post("/learn/rate", json={"id": s["id"], "i": first["i"], "rating": v["rating"]})
+    assert json.loads((tmp_path / "quiz.jsonl").read_text().splitlines()[-1])["rungs"] == ["H1", "lede"]
+    # a pick after the options is graded by its key, as before: the options are its format, not an extra hint
+    c.post("/learn/help", json={"id": s["id"], "i": second["i"], "options": True})
+    v = c.post("/learn/answer", json={"id": s["id"], "i": second["i"], "pick": 2, "conf": 70}).json()
+    assert (v["grader"], v["rating"], v["hints"]) == ("choice", grade.GOOD, 0)
+
+
+def test_the_page_says_which_help_it_showed_where_a_reload_reads_it_back():
+    from tests.webassets import WEB
+
+    js = (WEB / "app-learn.js").read_text(encoding="utf-8")
+    options = js[js.index("function lrOptions("):js.index("function lrPick(")]
+    assert '"/learn/help"' in options and "options: true" in options
+    hint = js[js.index("function lrHint("):js.index("async function lrSkip(")]
+    assert '"/learn/help"' in hint
+    attach = js[js.index("async function lrAttach("):js.index("// --- the bar")]
+    assert "s.help" in attach
+    switch = js[js.index("function lrFormatSwitch("):js.index("function lrOptions(")]
+    assert "You saw the four options" in switch
+    # seen in the running app, 2026-11-13: the reveal read "Met, without help" over a Hard from the
+    # server, counting only the hints this tab had shown
+    say = js[js.index("function lrVerdictSay("):js.index("function lrRenderSession(")]
+    assert "v.hints ??" in say
+    # the change row offers no rating the server refuses, by click or by key
+    assert "seg(capped ? 2 : 4)" in js and "n = Math.min(n, 2)" in js[js.index("function lrChoose("):][:600]
+
+
+def test_a_pick_never_becomes_the_written_answer_and_a_reloaded_right_pick_reads_with_help():
+    """Seen in the running app, 2026-11-12: a pick, then "Answer by writing",
+    put the option's text in the box, and submitting it was graded by the model
+    as met without help and Easy. And after a reload the previous row of a
+    right pick read "met" with the full mark."""
+    from tests.webassets import WEB
+
+    js = (WEB / "app-learn.js").read_text(encoding="utf-8")
+    pick = js[js.index("function lrPick("):js.index("function lrConfParts(")]
+    assert "s.answers" not in pick
+    # the pick's text reaches the reveal and the previous row from the verdict, as after a reload
+    submit = js[js.index("async function lrSubmit("):js.index("async function lrSelfGradeFallback(")]
+    assert "s.answers[it.i] = v.options" in submit
+    # a pending pick is still something a reload or End session would lose
+    assert "picks?.[" in js[js.index("function lrEnd("):js.index("async function lrClose(")]
+    assert "picks?.[" in js[js.index('window.addEventListener("beforeunload"'):][:400]
+    prev = js[js.index("function lrPrevRow("):js.index("function lrInputParts(")]
+    assert "res.unassisted" in prev
+    # while a pick is posted the sheet says what was chosen, and promises no 20 s self-rating
+    grading = js[js.index("function lrGradingParts("):js.index("function lrMic(")]
+    assert '"you chose"' in grading and "if (picked === undefined) g.append(bar" in grading

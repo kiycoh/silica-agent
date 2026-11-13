@@ -96,6 +96,14 @@ def _baseline(rel: str, prior: str | None) -> None:
         session_changes.touched(rel, prior)
 
 
+def _stamped(rel: str, content: str, loss: preserve.Loss | None) -> str:
+    """The OKF §4.1 `type` stamped where the frontmatter has none, except on a
+    restore: those are bytes captured before an earlier write, and stamping
+    them kept the `type: Note` that write had added, so no revert gave back
+    the note it found (Examine, /revert and /undo alike, 2026-11-13)."""
+    return content if loss is preserve.Loss.RESTORE else stamp_type(rel, content)
+
+
 def _retarget(rel: str, text: str, old: str, new: str, *,
               name_links: bool, path_form: bool) -> str | None:
     """A referrer's text with its links on `new`, None when it has none to
@@ -123,7 +131,7 @@ class Vault:
                free=()) -> NoteRef:
         """Create a new note at the given vault-relative path."""
         rel = self.transport.claim(path)
-        content = stamp_type(rel, content)   # OKF §4.1 `type`, if absent
+        content = _stamped(rel, content, loss)
         # A path the chat deleted earlier in this turn: the body that delete
         # saved is the before-state (ADR-0093 decision 4). If the plugin folds
         # the path into a key note_key does not, the lookup misses and the
@@ -136,7 +144,7 @@ class Vault:
                   free=()) -> NoteRef:
         """Overwrite an existing note in-place."""
         note = self.transport.prior_for_overwrite(path)
-        content = stamp_type(note.rel, content)   # OKF §4.1 `type`, if absent
+        content = _stamped(note.rel, content, loss)
         preserve.check_write(note.rel, note.text, content, loss=loss, free=free)
         _baseline(note.rel, note.text)
         return self.transport.write_over(note, content)

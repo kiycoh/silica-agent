@@ -150,8 +150,8 @@ class TestLive:
                 name="silica_recall", args={}, call_id="c1",
                 result=json.dumps({"notes": ["Concepts/RAG.md"]}), duration_s=0.0, iteration=1,
             ))
-            messages.append({"role": "assistant", "content": "You wrote about it."})
-            return "You wrote about it."
+            messages.append({"role": "assistant", "content": "You wrote about it in [[RAG]]."})
+            return "You wrote about it in [[RAG]]."
 
         monkeypatch.setattr("silica.session.turn.run_agent", found)
         done = _read_sse(tc.post("/chat", json={"text": "what about RAG?"}))[-1]

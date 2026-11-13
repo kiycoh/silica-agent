@@ -43,11 +43,15 @@ window.fetch = (url, opts) => {
 
 
 @pytest.fixture
-def app(tmp_vault):
+def app(tmp_vault, monkeypatch):
     import uvicorn
 
     import silica.cli  # noqa: F401  # fills the tool registry the graph export runs through
-    from silica.ui.web import server
+    from silica.ui.web import server, settings_routes
+
+    # The page answers /chat itself, so no model is needed; with none configured
+    # the setup card (ADR-0172) would hold every question in the box instead.
+    monkeypatch.setattr(settings_routes, "setup_needed", lambda: False)
     from silica.ui.web.session import SESSION
 
     capo = "[[Capo XIV - Della risoluzione del contratto]]"

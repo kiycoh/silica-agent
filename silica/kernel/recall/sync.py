@@ -26,7 +26,9 @@ semantics). The mtime is only the pre-filter; the embed content signature is
 the correctness backstop for lying mtimes.
 
 Cold indexes stay cold: the sweep maintains stores that exist, it never
-builds one — /embed, /cooccur and /lexical own their first build. The
+builds one. /embed, /cooccur and /lexical own their first build, and so does
+the app when it opens a vault that lacks them (refresh.build_missing,
+ADR-0173), and the sweep stands down while that runs. The
 personal-memory lane (ADR-0019) is out of scope: its vault is not behind
 DRIVER, and its stores are refreshed by their own capture path.
 
@@ -183,6 +185,13 @@ def sweep(*, force: bool = False, uncapped: bool = False) -> SweepStats:
         return stats
     now = time.monotonic()
     if not force and now - _last_sweep < _MIN_INTERVAL:
+        stats.skipped = True
+        return stats
+    from silica.kernel.recall import refresh
+
+    if refresh.building():
+        # The first build's first chunk of vectors would read here as a seeded
+        # store, and the sweep would embed the rest inline beside it.
         stats.skipped = True
         return stats
     _last_sweep = now
