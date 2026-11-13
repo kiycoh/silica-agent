@@ -86,7 +86,8 @@ class Result:
 
     The rest says how the command ended. With none of them set it did the whole
     job. `directive`: the model is asked this. `error`: why the line cannot run,
-    shown as an error and asked of nobody. `answer`: Markdown that is the reply
+    shown as an error and asked of nobody; `retry` False when the same line
+    would be refused again (a setting is missing), so no surface offers it. `answer`: Markdown that is the reply
     itself, which a code block would not render (the formulas on a card); `notes`
     are the lines under it (agent.turn_notes), /council's meter. `saved`:
     a write to memory, `user_memory.save`'s record, which the browser draws with its
@@ -97,6 +98,7 @@ class Result:
     lines: list[tuple[tuple, dict]] = field(default_factory=list)
     directive: str | None = None
     error: str | None = None
+    retry: bool = True
     answer: str | None = None
     notes: list[dict] = field(default_factory=list)
     saved: dict | None = None
@@ -126,8 +128,8 @@ class Result:
         self.directive = directive or None
         return self
 
-    def refused(self, why: str) -> Result:
-        self.error = why
+    def refused(self, why: str, *, retry: bool = True) -> Result:
+        self.error, self.retry = why, retry
         return self
 
 

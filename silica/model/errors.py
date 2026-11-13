@@ -54,3 +54,17 @@ def unreadable_reply(exc: BaseException) -> bool:
     read ("does not match the expected peg-native format"). Asked the same way,
     the same reply comes back; a retry has to ask differently."""
     return server_fault(exc) and "does not match the expected" in str(exc)
+
+
+def refused_key(exc: BaseException) -> bool:
+    """The endpoint did not take the key: a 401 or a 403, by status and never
+    by class, since litellm raised DeepSeek's 401 ("Authentication Fails") as a
+    BadRequestError (measured 2026-11-13)."""
+    return status_of(exc) in (401, 403)
+
+
+def unknown_model(exc: BaseException) -> bool:
+    """The endpoint has no model by the id it was asked for: a 404, or the 400
+    OpenRouter answers an id it does not list with, "is not a valid model ID"
+    (measured 2026-11-13)."""
+    return status_of(exc) == 404 or "not a valid model" in str(exc)

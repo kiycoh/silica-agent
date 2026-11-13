@@ -1806,7 +1806,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       // the agent as speech AND as a toast over the send button, and neither
       // offered a way to try again, so a failed turn ended the conversation
       // and took the typed question with it.
-      attachFailure(lastUserBody, said, ev.detail || "", retry);
+      attachFailure(lastUserBody, said, ev.detail || "", ev.retry === false ? null : retry);
       announce("the turn failed: " + said);
       if (typeof upgradeAtLimit === "function") upgradeAtLimit(ev, said);
     }
