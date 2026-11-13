@@ -153,17 +153,18 @@ def listing(vault: str) -> list[Proposal]:
     return out
 
 
-def pick(vault: str, words: list[str]) -> list[Proposal]:
+def pick(vault: str, words: list[str], *, paid_in_all: bool = False) -> list[Proposal]:
     """The proposals `words` name: ids (or 4+ leading characters of one, as
     /revert takes a run), kind names, or `all`, which skips a kind that is not
-    `in_all` or whose yes spends the model."""
+    `in_all`, and one whose yes spends the model unless `paid_in_all`."""
     pending = listing(vault)
     chosen: dict[str, Proposal] = {}
     for w in (w.strip().lower() for w in words):
         if not w:
             continue
         if w == "all":
-            hits = [p for p in pending if KINDS[p.kind].in_all and not KINDS[p.kind].spends_model]
+            hits = [p for p in pending
+                    if KINDS[p.kind].in_all and (paid_in_all or not KINDS[p.kind].spends_model)]
         elif w in KINDS:
             hits = [p for p in pending if p.kind == w]
         elif len(w) >= 4:

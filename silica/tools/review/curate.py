@@ -127,7 +127,7 @@ def _named(why: str, concept: str, candidate: str) -> str:
     candidate note", 2026-11-13), which no one reading the queue was told. A name
     the reason gives after the prompt's word is taken in, or it would read twice."""
     for words, name in ((r"the incoming (?:concept|excerpt|note)", concept), (r"the candidate(?: note)?", candidate)):
-        why = re.sub(rf"\b{words}(?:\s+\(?{re.escape(name)}\)?)?(?!\w)", lambda _m, n=name: n, why,
+        why = re.sub(rf"\b{words}(?:\s+\(?{re.escape(name)}\)?)?(?!\w)", name.replace("\\", "\\\\"), why,
                      flags=re.IGNORECASE)
     return why
 

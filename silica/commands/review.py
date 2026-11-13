@@ -33,7 +33,16 @@ def review(c: Call) -> Result:
             # A yes writes the demo's vault and may run the worker model,
             # neither of which the door counts (ADR-0139 point 6).
             return out.refused(f"'/review {verb}' is not part of the demo")
-        chosen = queue.pick(vault, words)
+        # A no costs nothing, so `dismiss all` still takes a kind whose yes runs the model.
+        chosen = queue.pick(vault, words, paid_in_all=verb == "dismiss")
+        if verb == "apply" and "all" in (w.strip().lower() for w in words):
+            # Said, because "nothing pending" with five proposals listed reads
+            # as a broken queue (2026-11-13, two orphans and three duplicates).
+            taken = {p.id for p in chosen}
+            passed = sorted({p.kind for p in queue.listing(vault) if p.id not in taken})
+            if passed:
+                out.print(f"  [bold]all[/] passes over {', '.join(passed)}: a yes there runs the worker model "
+                          f"or says a note still holds, so name it, e.g. [bold]/review apply {passed[0]}[/].")
         if not chosen:
             out.print(f"  Nothing pending answers to {escape(' '.join(words)) or 'that'}.")
             return out

@@ -210,6 +210,26 @@ def test_apply_all_passes_over_a_kind_whose_yes_spends_the_model(tmp_vault, monk
     assert [p.kind for p in queue.pick(vault, ["all"])] == ["cheap"]
     assert [p.kind for p in queue.pick(vault, ["paid"])] == ["paid"]
     assert [p.kind for p in queue.pick(vault, ["pppp"])] == ["paid"]
+    # A no costs nothing: dismissing all takes it.
+    assert {p.kind for p in queue.pick(vault, ["all"], paid_in_all=True)} == {"cheap", "paid"}
+
+
+def test_the_command_says_what_apply_all_passed_over(tmp_vault, kinds):
+    from silica.commands import dispatch
+    from silica.config import CONFIG
+    from silica.kernel.review import Proposal, proposal_id
+
+    vault = CONFIG.vault_path
+    tmp_vault.note("A.md", "# A\n")
+    queue.offer(vault, "duplicate", [Proposal(
+        id=proposal_id("duplicate", "A.md", "B.md"), kind="duplicate", title="A and B", why="same",
+        notes=("A.md", "B.md"), data={"target": "A.md", "partner": "B.md", "score": 0.9, "reason": "90% similar"})])
+    out = dispatch("/review apply all", [])
+    said = "\n".join(str(o) for objects, _ in out.lines for o in objects)
+    assert "passes over duplicate" in said and "/review apply duplicate" in said
+    assert "Nothing pending answers to all" in said
+    dispatch("/review dismiss all", [])
+    assert queue.listing(vault) == []
 
 
 def test_curate_says_how_many_pairs_were_judged_and_how_many_wait(tmp_vault, kinds, judge, monkeypatch):
