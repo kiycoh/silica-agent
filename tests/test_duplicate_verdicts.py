@@ -183,8 +183,18 @@ def test_the_judge_reads_both_notes_makes_one_call_and_writes_nothing(tmp_vault,
     assert call["response_schema"] is DedupVerdict and call["reasoning"] is False
     text = call["messages"][0]["content"]
     assert "Virtue is the only good." in text and "They held virtue alone to be good." in text
-    assert 'Write "rationale" in English, calling the two notes' in text
+    assert 'Write "rationale" in English.' in text
     assert (tmp_vault.read(a), tmp_vault.read(b)) == before
+
+
+def test_a_reason_calls_the_notes_by_their_names_once():
+    from silica.tools.review.curate import _named
+
+    assert _named("The incoming concept is an exact copy of the candidate note.", "Copy", "Press") == (
+        "Copy is an exact copy of Press.")
+    # The worker named the note after the prompt's word (2026-11-13).
+    assert _named("the same folders that the candidate note Files and folders lists", "Inbox",
+                  "Files and folders") == "the same folders that Files and folders lists"
 
 
 def test_apply_all_passes_over_a_kind_whose_yes_spends_the_model(tmp_vault, monkeypatch):

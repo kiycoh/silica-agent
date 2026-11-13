@@ -709,9 +709,11 @@ def _decide_dedup(
     prompt = load_prompt("dedup_prompt.txt")
     if reason_language:
         # "The language of the CANDIDATE NOTE" was not enough: on 2026-11-13 two
-        # of six reasons on English notes came back in German and Italian.
-        prompt += (f"\n\nWrite \"rationale\" in {reason_language}, calling the two notes"
-                   f" {concept} and {candidate_name}.")
+        # of six reasons on English notes came back in German and Italian. The
+        # line names the language only: asked to name the notes as well, one run
+        # judged a hub and its child page a duplicate, which the runs before and
+        # after it, without that request, judged distinct (one run each, n=6).
+        prompt += f"\n\nWrite \"rationale\" in {reason_language}."
     if author_spoke:
         # Judge+author (C2): the same call that judges "distinct" also
         # authors the spoke note — a second pass would just re-read the
