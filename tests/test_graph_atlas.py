@@ -228,7 +228,9 @@ def test_the_renderer_and_the_layout_cache_start_over_once():
     assert "if (rebuild && remember) try { localStorage.setItem(MODE_KEY, m); }" in FRAME_JS
     # -4: a hit is shown as it stands, so a layout saved before the overlap pass
     # or under a force slider would be shown for good (ADR-0152)
-    assert 'const LAYOUT_KEY = "silica-graph-layout-4";' in FRAME_JS
+    # -5: a layout spread at full disc size is a packed ball on a dense vault,
+    # and a hit would show it for good (ADR-0152, amendment 2026-11-13)
+    assert 'const LAYOUT_KEY = "silica-graph-layout-5";' in FRAME_JS
 
 
 def test_with_the_atlas_on_a_line_shows_for_the_note_in_hand_only():
