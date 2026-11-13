@@ -21,6 +21,14 @@ from fastapi.testclient import TestClient  # noqa: E402
 THIN = {"kind": "retrieval", "text": THIN_COVERAGE_HINT}
 
 
+@pytest.fixture(autouse=True)
+def _no_uncited_line(monkeypatch):
+    """These tests pin the numbers channel, and their answers cite no note: the
+    line ADR-0174 adds under every such answer would stand in each list they
+    compare. tests/test_general_knowledge.py holds that line."""
+    monkeypatch.setattr("silica.session.turn.uncited_notes", lambda answer, reads=(): [])
+
+
 def _note(*numbers: str) -> dict:
     return {"kind": "numbers", "text": "numbers not in what this turn read: " + " · ".join(numbers)}
 
