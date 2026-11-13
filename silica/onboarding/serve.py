@@ -360,9 +360,11 @@ def base_urls(cfg) -> dict[str, str]:
 
 
 def chat_base_url(cfg) -> str:
-    """Where the chat provider is served — the preset URL unless one is pinned."""
-    if cfg.provider_base_url:
-        return cfg.provider_base_url
+    """Where the chat's calls really go: the provider's own address, and the
+    pinned URL only for a provider without one (`custom`), as llm.py's api_base
+    and doctor's chat check read it. Pin first, a local URL left from a local
+    setup kept starting a Qwen3.5-9B on :1237 under OpenRouter that no call ever
+    reached, 8.5 GiB of VRAM (2026-11-12)."""
     from silica.model.limits import base_url
 
-    return base_url(cfg.provider)
+    return base_url(cfg.provider) or cfg.provider_base_url or ""
