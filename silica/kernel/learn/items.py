@@ -53,8 +53,9 @@ LEVEL_OF = {"cloze": 1, "recall": 1, "predict": 1, "structure": 3, "explain": 3,
 CHOICE_KINDS = ("recall", "cloze", "contrast", "predict")
 # How far the right option may run past the longest wrong one, as a share of
 # its characters (items._even). Measured 2026-11-13 on 23 sets the CHOICE
-# prompt wrote on three demo notes: at 0.15 the key was the longest in 5 of
-# the 16 kept (31 percent, chance 25), at 0.2 in 8 of 19, unchecked in 12 of 23.
+# prompt wrote on three demo notes, with this check alone: at 0.15 the key was
+# the longest in 5 of the 16 kept (31 percent, chance 25), at 0.2 in 8 of 19,
+# unchecked in 12 of 23; with every check of `choices`, 5 of the 14 kept.
 EVEN_MARGIN = 0.15
 
 _FOOTNOTE_RE = re.compile(r"\[\^([A-Za-z0-9_-]+)\]")
