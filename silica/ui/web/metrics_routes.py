@@ -220,7 +220,7 @@ def _duplicates(report) -> list[dict]:
 
     `band` says what the review queue makes of the pair (ADR-0175): the
     worker's verdict where it stands for the notes as they are, "to judge" for
-    a candidate /curate has not asked about yet, "link" for the borderline
+    a candidate /curate has not asked about yet, "related" for the borderline
     cosine band, which is never a duplicate candidate."""
     from silica.tools.review.curate import verdict_of
 
@@ -234,7 +234,7 @@ def _duplicates(report) -> list[dict]:
             "a": note_parts.clean_name(d.source), "b": note_parts.clean_name(d.target),
             "a_path": d.source, "b_path": d.target, "score": d.score, "confirmed": confirmed,
             "similarity": similarity_percent(d.score) if d.cosine else None,
-            "band": ((vault and verdict_of(vault, d.source, d.target)) or "to judge") if candidate else "link"})
+            "band": ((vault and verdict_of(vault, d.source, d.target)) or "to judge") if candidate else "related"})
     return out
 
 

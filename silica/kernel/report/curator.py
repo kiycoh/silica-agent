@@ -16,7 +16,7 @@ Finding → item (spec-hermes-coherence §5):
     orphan                     → orphan    WorkItem
     confirmed or same-wording  → dedup     WorkItem (ternary verdict incl.
     pair                                    contradicts → contested sweep)
-    borderline cosine pair     → autolink  (related, not the same: ADR-0175)
+    borderline cosine pair     → nothing   (related, not the same: ADR-0175)
 
 Pure & kernel-legal: reads only graph_report dataclasses, no I/O, no
 router/capabilities import (import-linter boundary). It is the curator's twin
@@ -239,29 +239,24 @@ def compose_curation_plan(report: VaultReport) -> CurationPlan:
     #    borderline list on a scale of its own). The borderline cosine band is
     #    "related but distinct" (ADR-0175): 26 of the demo vault's 32 candidates
     #    on 2026-11-13, while its paraphrase and its copy both cleared the high
-    #    bar. So it is a link candidate at most, which the review queue offers
-    #    only where one note names the other.
-    def pair_key(a: str, b: str) -> tuple[str, ...]:
-        return tuple(sorted((_norm_note_path(a), _norm_note_path(b))))
-
-    linked = {pair_key(i.target, i.partner) for i in items if i.kind == "autolink"}
+    #    bar. It is no item: a link between such notes is the co-occurrence
+    #    rule's to propose (step 1), and sent to the link check as well it
+    #    offered none of the 26 while /curate --apply would have autolinked
+    #    every title in 26 notes.
     seen_pairs: set[tuple[str, ...]] = set()
     bands = ([(dp, True) for dp in report.confirmed_duplicate_pairs]
              + [(dp, False) for dp in report.duplicate_pairs])
     for dp, confirmed in bands:
         if _is_vault_artifact(dp.source) or _is_vault_artifact(dp.target):
             continue
-        pair = pair_key(dp.source, dp.target)
+        if dp.cosine and not confirmed:
+            continue
+        pair = tuple(sorted((_norm_note_path(dp.source), _norm_note_path(dp.target))))
         if pair in seen_pairs:
             continue
         seen_pairs.add(pair)
         reason = (f"{similarity_percent(dp.score)}% similar" if dp.cosine
                   else "shares most of its wording")
-        if dp.cosine and not confirmed:
-            if pair not in linked:
-                items.append(CurationItem(kind="autolink", target=dp.source, partner=dp.target,
-                                          score=dp.score, reason=reason))
-            continue
         items.append(CurationItem(
             kind="dedup",
             target=dp.source,

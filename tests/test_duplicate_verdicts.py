@@ -4,7 +4,7 @@
 bar and on the pairs that share their wording; only a "duplicate" becomes a
 proposal. A verdict is remembered per pair and per the bytes of both notes, so
 the next /curate asks again only about a pair whose note changed. The
-borderline band is a link at most, and `/review apply all` never spends the
+borderline band is no candidate, and `/review apply all` never spends the
 model.
 """
 from __future__ import annotations
@@ -59,17 +59,15 @@ def _pair(a: str, b: str, score: float = 0.9) -> CurationItem:
     return CurationItem("dedup", a, b, score, f"{round(score * 100)}% similar")
 
 
-def test_only_the_high_band_and_same_wording_are_judged_and_the_borderline_is_a_link_at_most():
-    """The borderline band is "related but distinct": it is no duplicate, and
-    becomes a link candidate, which the queue offers only where a note names
-    the other (ADR-0165 point 6)."""
+def test_only_the_high_band_and_same_wording_are_candidates_and_the_borderline_is_none():
+    """The borderline band is "related but distinct": no duplicate candidate,
+    and no item at all, so /curate --apply no longer sends it to the worker."""
     report = _report(
         confirmed_duplicate_pairs=[DuplicatePair("A.md", "B.md", 0.9)],
         duplicate_pairs=[DuplicatePair("C", "D", 0.75), DuplicatePair("E.md", "F.md", 0.7, cosine=False)])
     plan = compose_curation_plan(report)
-    assert [(i.target, i.partner) for i in plan.by_kind("dedup")] == [("A.md", "B.md"), ("E.md", "F.md")]
-    (link,) = plan.by_kind("autolink")
-    assert (link.target, link.partner, link.reason) == ("C", "D", "75% similar")
+    assert [(i.target, i.partner) for i in plan.items] == [("A.md", "B.md"), ("E.md", "F.md")]
+    assert {i.kind for i in plan.items} == {"dedup"}
 
 
 def test_only_a_duplicate_verdict_is_offered_and_every_verdict_is_remembered(tmp_vault, kinds, judge):
@@ -251,7 +249,7 @@ def test_curate_says_how_many_pairs_were_judged_and_how_many_wait(tmp_vault, kin
 
 def test_examine_names_each_pair_as_the_queue_does(tmp_vault, kinds, judge):
     """The Duplicate pairs view's Band: the verdict where one stands for the
-    notes as they are, "to judge" where /curate has not asked yet, "link" for
+    notes as they are, "to judge" where /curate has not asked yet, "related" for
     the borderline band, never a duplicate the queue does not hold."""
     from silica.config import CONFIG
     from silica.tools.review.curate import offer_plan
@@ -266,6 +264,6 @@ def test_examine_names_each_pair_as_the_queue_does(tmp_vault, kinds, judge):
         confirmed_duplicate_pairs=[DuplicatePair("A", "B", 0.93), DuplicatePair("C", "D", 0.9),
                                    DuplicatePair("E", "F", 0.88)],
         duplicate_pairs=[DuplicatePair("G.md", "H.md", 0.7, cosine=False), DuplicatePair("A", "C", 0.75)])
-    assert [r["band"] for r in _duplicates(report)] == ["duplicate", "distinct", "to judge", "to judge", "link"]
+    assert [r["band"] for r in _duplicates(report)] == ["duplicate", "distinct", "to judge", "to judge", "related"]
     tmp_vault.note("B.md", "# B\n\nEdited.\n")
     assert _duplicates(report)[0]["band"] == "to judge"
