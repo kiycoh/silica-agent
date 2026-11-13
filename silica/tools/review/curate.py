@@ -20,6 +20,7 @@ import hashlib
 import logging
 import re
 import time
+from contextvars import ContextVar
 
 from silica.kernel.report.curator import CurationItem, CurationPlan
 from silica.kernel.review import (Kind, Proposal, dismissed, offer, offered, proposal_id, register, remember,
@@ -32,6 +33,11 @@ logger = logging.getLogger(__name__)
 # calls, and the demo vault's high band held 6 pairs on 2026-11-13, so 20 covers
 # a vault several times its size in one run; the rest wait for the next.
 JUDGE_CAP = 20
+
+# Set by the /curate command: a verdict is a model call, spent only when the
+# person typed /curate (owner, 2026-11-13). The chat model calling silica_curate
+# reads the verdicts already given and leaves new pairs waiting.
+PERSON_ASKED: ContextVar[bool] = ContextVar("curate_person_asked", default=False)
 
 
 def _link(src: str, dst: str, titles: list[str]) -> tuple[str, str] | None:
@@ -67,7 +73,7 @@ def _md(path: str) -> str:
     return path if path.endswith(".md") else path + ".md"
 
 
-def offer_plan(vault: str, plan: CurationPlan) -> dict[str, int]:
+def offer_plan(vault: str, plan: CurationPlan, judge: bool = True) -> dict[str, int]:
     """The dry run's plan as proposals of the three kinds, in place of the last,
     and how the worker's verdicts on its duplicate candidates came out."""
     from silica.driver import DRIVER
@@ -90,7 +96,7 @@ def offer_plan(vault: str, plan: CurationPlan) -> dict[str, int]:
         id=proposal_id("orphan", _md(it.target)), kind="orphan",
         title=f"Connect {clean_name(it.target)}", why="nothing links to it",
         notes=(_md(it.target),), data={"target": it.target}) for it in plan.by_kind("orphan")])
-    duplicates, judged = _judged_duplicates(vault, plan.by_kind("dedup"))
+    duplicates, judged = _judged_duplicates(vault, plan.by_kind("dedup"), judge)
     offer(vault, "duplicate", duplicates)
     return judged
 
@@ -139,7 +145,8 @@ def _named(why: str, concept: str, candidate: str) -> str:
     return why
 
 
-def _judged_duplicates(vault: str, items: list[CurationItem]) -> tuple[list[Proposal], dict[str, int]]:
+def _judged_duplicates(vault: str, items: list[CurationItem],
+                       judge: bool = True) -> tuple[list[Proposal], dict[str, int]]:
     """The candidates the worker judged duplicates. It is asked only about a
     pair with no verdict for its notes as they are, at most JUDGE_CAP a run."""
     from silica import capabilities
@@ -161,7 +168,7 @@ def _judged_duplicates(vault: str, items: list[CurationItem]) -> tuple[list[Prop
             continue  # a note gone, or a pair a yes already merged: nothing left to judge
         row = known.get(pid)
         if not row or row.get("hash") != digest:
-            if not reachable or said["asked"] >= JUDGE_CAP:
+            if not judge or not reachable or said["asked"] >= JUDGE_CAP:
                 said["waiting"] += 1
                 continue
             said["asked"] += 1

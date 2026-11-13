@@ -259,6 +259,31 @@ def test_curate_says_how_many_pairs_were_judged_and_how_many_wait(tmp_vault, kin
     assert "Judged 1 pair" in text and "1 duplicate" in text and "1 pair waits" in text
 
 
+def test_only_the_persons_curate_spends_verdicts_and_the_chat_model_leaves_them_waiting(
+        tmp_vault, kinds, judge, monkeypatch):
+    """Owner, 2026-11-13: a verdict is a model call the person asks for by
+    typing /curate. The chat model calling silica_curate reads the verdicts
+    already given and leaves new pairs waiting, saying who can judge them."""
+    from silica.commands import dispatch
+    from silica.tools import curate as curation
+
+    said, calls = judge
+    for n in "ABCD":
+        tmp_vault.note(f"{n}.md", f"# {n}\n")
+    said[frozenset("AB")] = ("duplicate", "Same.", "")
+    monkeypatch.setattr(curation, "compute_report", lambda **kw: _report(
+        confirmed_duplicate_pairs=[DuplicatePair("A.md", "B.md", 0.93), DuplicatePair("C.md", "D.md", 0.86)]))
+
+    res = curation.silica_curate()
+    assert calls == [] and res["judged"]["waiting"] == 2
+    assert "/curate" in res["hint"]
+
+    dispatch("/curate", [])
+    assert len(calls) == 2
+    calls.clear()
+    res = curation.silica_curate()
+    assert calls == [] and res["judged"]["duplicate"] == 1 and "hint" not in res
+
 def test_examine_names_each_pair_as_the_queue_does(tmp_vault, kinds, judge):
     """The Duplicate pairs view's Band: the verdict where one stands for the
     notes as they are, "to judge" where /curate has not asked yet, "related" for

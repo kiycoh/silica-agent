@@ -168,8 +168,9 @@ def silica_curate(
     """Curate the vault: turn the report's findings (autolinks, orphans,
     near-duplicates, oversized/lean notes) into executed maintenance work.
     Default is a dry-run returning the plan; apply=True executes with undo
-    journaling. A whole-vault dry run also has the worker judge up to 20
-    duplicate candidates for the review queue. Raw audit alone:
+    journaling. A whole-vault dry run offers the review queue the duplicate
+    pairs the worker judged; new pairs are judged only when the person types
+    /curate. Raw audit alone:
     silica_vault_report.
 
     Narrow with `kinds` (e.g. ["dedup"]) and `targets` (paths) — both shape
@@ -194,9 +195,9 @@ def silica_curate(
         # candidates are judged on the way in, so the queue holds verdicts
         # (ADR-0175).
         from silica.config import CONFIG
-        from silica.tools.review.curate import offer_plan
+        from silica.tools.review.curate import PERSON_ASKED, offer_plan
 
-        judged = offer_plan(CONFIG.vault_path or "", plan)
+        judged = offer_plan(CONFIG.vault_path or "", plan, judge=PERSON_ASKED.get())
     available = plan.counts()                    # pre-filter shape (no_matches honesty)
     # Computed pre-filter: a bare `x.md` target that hit several folders would
     # otherwise apply to notes the caller never named, invisibly.
@@ -216,6 +217,9 @@ def silica_curate(
         result["ambiguous_targets"] = ambiguous
     if judged:
         result["judged"] = judged
+        if judged.get("waiting") and not PERSON_ASKED.get():
+            result["hint"] = (f"{judged['waiting']} duplicate pair(s) wait for the worker's verdict, "
+                              "which only /curate typed by the person asks for; tell them so.")
 
     if plan.is_empty():
         # A filter that emptied a non-empty plan is `no_matches`, not
