@@ -134,7 +134,13 @@ def curate(c: Call) -> Result:
         out.print(f"  Curate on [bold]{scope}[/] — applying via the worker seam…")
     else:
         out.print(f"  Curate on [bold]{scope}[/] — dry-run (nothing is written)…")
-    res = answered(curation.silica_curate, apply=apply, folder=folder)
+    from silica.tools.review.curate import PERSON_ASKED
+
+    asked = PERSON_ASKED.set(True)
+    try:
+        res = answered(curation.silica_curate, apply=apply, folder=folder)
+    finally:
+        PERSON_ASKED.reset(asked)
     if "error" in res:
         out.print(f"  [yellow]{res['error']}[/]")
         return out
