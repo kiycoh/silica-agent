@@ -144,14 +144,26 @@ def test_an_unreadable_reply_or_a_failed_call_is_not_remembered(tmp_vault, kinds
     assert queue.verdicts(vault) == {}
 
 
-def test_a_pair_already_merged_is_not_judged_again(tmp_vault, kinds, judge):
+def test_a_pair_merged_or_dismissed_is_not_judged_again(tmp_vault, kinds, judge):
     from silica.config import CONFIG
     from silica.tools.review.curate import offer_plan
 
-    _said, calls = judge
+    said, calls = judge
+    vault = CONFIG.vault_path
     tmp_vault.note("A.md", "# A\n")
     tmp_vault.note("B.md", '---\nsuperseded_by: "[[A]]"\n---\n# B\n')
-    assert offer_plan(CONFIG.vault_path, CurationPlan(items=[_pair("A.md", "B.md")]))["asked"] == 0
+    assert offer_plan(vault, CurationPlan(items=[_pair("A.md", "B.md")]))["asked"] == 0
+    assert calls == []
+    # A no is for good, so an edit to the pair asks nothing and counts nothing.
+    tmp_vault.note("C.md", "# C\n")
+    tmp_vault.note("D.md", "# D\n")
+    said[frozenset("CD")] = ("duplicate", "Same.", "")
+    plan = CurationPlan(items=[_pair("C.md", "D.md")])
+    offer_plan(vault, plan)
+    queue.dismiss(vault, [p for p in queue.listing(vault) if p.kind == "duplicate"])
+    tmp_vault.note("D.md", "# D\n\nEdited.\n")
+    calls.clear()
+    assert offer_plan(vault, plan) == {"asked": 0, "duplicate": 0, "distinct": 0, "contradicts": 0, "waiting": 0}
     assert calls == []
 
 

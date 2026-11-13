@@ -146,7 +146,7 @@ def _judged_duplicates(vault: str, items: list[CurationItem]) -> tuple[list[Prop
     from silica.config import CONFIG
     from silica.kernel.recall.duplicates import pairs_to_items
 
-    known = verdicts(vault)
+    known, gone = verdicts(vault), dismissed(vault)
     rows: dict[str, dict] = {}
     out: list[Proposal] = []
     said = {"asked": 0, "duplicate": 0, "distinct": 0, "contradicts": 0, "waiting": 0}
@@ -154,6 +154,8 @@ def _judged_duplicates(vault: str, items: list[CurationItem]) -> tuple[list[Prop
     for it in items:
         a, b = sorted((_md(it.target), _md(it.partner)))
         pid = proposal_id("duplicate", a, b)
+        if pid in gone:
+            continue  # a no is for good (ADR-0165 point 7): a verdict would buy nothing
         digest = pair_hash(a, b)
         if digest is None or _merged(a) or _merged(b):
             continue  # a note gone, or a pair a yes already merged: nothing left to judge
