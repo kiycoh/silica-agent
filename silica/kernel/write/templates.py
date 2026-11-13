@@ -14,7 +14,7 @@ import yaml
 
 from silica.kernel.base import frontmatter
 from silica.kernel.base.frontmatter import clean_tag  # canonical; do not redefine
-from silica.kernel.base.syntax import EMBED_TOKEN, FILE_UNSAFE_RE, WIKILINK_TOKEN
+from silica.kernel.base.syntax import EMBED_TOKEN, WIKILINK_TOKEN, slugify
 from silica.kernel.base.noteshape import (
     LEGACY_PROVENANCE_HEADER_PREFIX,
     PROVENANCE_HEADER_PREFIX,
@@ -28,12 +28,6 @@ from silica.kernel.base.noteshape import (
 logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
-
-def slugify(s: str) -> str:
-    s = FILE_UNSAFE_RE.sub('', s)
-    s = re.sub(r'\s+', ' ', s)
-    return s.strip()
-
 
 def _link_name(name: str) -> str:
     """Bare note name for a wikilink target — strips brackets the distiller may

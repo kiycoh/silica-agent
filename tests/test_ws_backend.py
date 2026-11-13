@@ -415,7 +415,6 @@ def test_rpc_timeout_drops_pending_entry(wbe):
 
 
 def test_rollback_round_trips_prior_content(wbe, monkeypatch):
-    from silica.kernel.write.notetype import stamp_type
     from silica.kernel.write.ops import InverseOp, InverseOpKind
     from silica.kernel.write import gate
 
@@ -429,7 +428,7 @@ def test_rollback_round_trips_prior_content(wbe, monkeypatch):
         InverseOp(kind=InverseOpKind.delete_created, path=created.path),
     ])
     assert res["success"], res
-    # The undo goes through the public seam, which stamps the derived `type`.
-    assert wbe.read_note(ref).content == stamp_type(ref.path, original)
+    # A restore is the bytes the write found: the seam stamps no `type` on it.
+    assert wbe.read_note(ref).content == original
     with pytest.raises(RuntimeError):
         wbe.read_note(created)

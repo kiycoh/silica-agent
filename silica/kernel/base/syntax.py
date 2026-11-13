@@ -209,3 +209,13 @@ FILE_UNSAFE = r'\\/:*?"<>|'
 LINK_UNSAFE = r"#^\[\]"
 FILE_UNSAFE_RE = re.compile(rf"[{FILE_UNSAFE}]")
 NAME_UNSAFE_RE = re.compile(rf"[{FILE_UNSAFE}{LINK_UNSAFE}]+")
+_SEPARATOR_RE = re.compile(r"[\\/]")
+
+
+def slugify(s: str) -> str:
+    """`s` as a file's name: what a filesystem refuses dropped, every run of
+    whitespace one space. A path separator becomes a space, because it stood
+    between two words: dropped, a GitHub fetch of python/cpython was named
+    `pythoncpython.md` (2026-11-13). Here and not in kernel.write, so a
+    distilled title (kernel.text.sanitize) takes the same rule."""
+    return " ".join(FILE_UNSAFE_RE.sub("", _SEPARATOR_RE.sub(" ", s)).split())

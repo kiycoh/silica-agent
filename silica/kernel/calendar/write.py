@@ -28,14 +28,14 @@ def _event_stem(title: str, start: str, rrule: str) -> tuple[str, str]:
     from silica.kernel.write import templates as tpl
 
     # Recurring events keep a date-free stem: the series has no single day.
-    # slugify strips every path separator, so the stem cannot steer the write out
+    # slugify spaces every path separator, so the stem cannot steer the write out
     # of the calendar folder — but a recurring title leads the stem, and every
     # reader of the calendar (scan_events, the timeline walk, ignore_matcher)
     # skips a path part starting with "." as vault plumbing. A leading dot would
     # therefore write the note, report success, and leave an event no agenda,
     # update or reminder can ever see again. A title of nothing but dots and
     # stripped characters has no filename left at all.
-    safe_title = tpl.slugify(title).lstrip(".")
+    safe_title = tpl.slugify(title).lstrip(". ")
     if not safe_title:
         return "", f"title {title!r} has no usable characters for a filename"
     return (safe_title if rrule else f"{start.strip()[:10]} {safe_title}"), ""

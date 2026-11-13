@@ -164,7 +164,8 @@ def sections() -> dict[str, tuple[Row, ...]]:
             Row("SILICA_FALLBACK_MODELS", "fallback models", "text",
                 "comma-separated · tried in order when a model's endpoint fails"),
             Row("SILICA_COUNCIL_MODELS", "council models", "text",
-                "comma-separated · 2 to 5 models that each answer /council from the same notes"),
+                "comma-separated · 2 to 5 models that each answer /council from the same notes · "
+                "each written as the model is" + (f", e.g. {CONFIG.model}, {CONFIG.model}" if CONFIG.model else "")),
             Row("SILICA_TAVILY_API_KEY", "web search key", "secret",
                 "tavily, the backstop when duckduckgo challenges us"),
             *_hosted_key_rows(),

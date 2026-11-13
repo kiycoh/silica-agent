@@ -226,6 +226,22 @@ def test_slugify_normalizes_whitespace():
     assert slugify("Performance\r\nElement  negli   agenti") == "Performance Element negli agenti"
 
 
+@pytest.mark.parametrize("raw, name", [
+    ("python/cpython", "python cpython"),
+    ("this.py (python/cpython)", "this.py (python cpython)"),
+    ("C:\\Users\\me", "C Users me"),
+    ("TCP / IP", "TCP IP"),
+])
+def test_slugify_keeps_a_path_separator_as_a_space(raw, name):
+    """A GitHub fetch of python/cpython was `pythoncpython.md` (2026-11-13)."""
+    assert slugify(raw) == name
+
+
+def test_a_distilled_title_keeps_its_separator_as_a_space():
+    (op,) = normalize_ops([{"op": "write", "path": "Net/x.md", "title": "TCP/IP"}])
+    assert op["title"] == "TCP IP"
+
+
 # ---------------------------------------------------------------------------
 # strip_degenerate_runs — collapses 5+ identical consecutive chars to 1
 # ---------------------------------------------------------------------------

@@ -346,7 +346,8 @@ async def run_turn(ask: Ask) -> AsyncIterator[dict]:
                 return
             if result.error is not None:
                 line.outcome = "error"
-                yield callback.error_frame(failures.said(result.error))
+                yield callback.error_frame({**failures.said(result.error),
+                                            **({} if result.retry else {"retry": False})})
                 return
             if result.directive is None:
                 # Appended only once the verdict is in: a directive falls through

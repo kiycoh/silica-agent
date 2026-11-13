@@ -307,7 +307,7 @@ def undo(c: Call) -> Result:
     try:
         DRIVER.overwrite(note_path, content, loss=Loss.RESTORE)
         try:
-            store.settle(note_path, DRIVER.read_note(note_path).content)  # what landed, stamp included
+            store.settle(note_path, DRIVER.read_note(note_path).content)  # what landed
         except UNREADABLE:
             pass  # the undo landed; an unsettled top only labels the next write as an outside edit
         depth = store.depth(note_path)
