@@ -80,14 +80,15 @@ def test_only_a_duplicate_verdict_is_offered_and_every_verdict_is_remembered(tmp
     vault = CONFIG.vault_path
     for n in "ABCDEF":
         tmp_vault.note(f"{n}.md", f"# {n}\n\nText of {n}.\n")
-    said[frozenset("AB")] = ("duplicate", "Both describe the same school.", "")
+    # The prompt's words for the two sides, as the worker wrote them on 2026-11-13.
+    said[frozenset("AB")] = ("duplicate", "The incoming concept is an exact copy of the candidate note.", "")
     said[frozenset("EF")] = ("contradicts", "They date the founding differently.", "Founded in 280 BC.")
     plan = CurationPlan(items=[_pair("A.md", "B.md"), _pair("C.md", "D.md"), _pair("E.md", "F.md")])
 
     got = offer_plan(vault, plan)
     assert got == {"asked": 3, "duplicate": 1, "distinct": 1, "contradicts": 1, "waiting": 0}
     (p,) = [x for x in queue.listing(vault) if x.kind == "duplicate"]
-    assert p.notes == ("A.md", "B.md") and p.why == "90% similar: Both describe the same school."
+    assert p.notes == ("A.md", "B.md") and p.why == "90% similar: A is an exact copy of B."
     kept = {tuple(r["notes"]): r for r in queue.verdicts(vault).values()}
     assert kept[("C.md", "D.md")]["verdict"] == "distinct"
     assert kept[("E.md", "F.md")]["verdict"] == "contradicts"

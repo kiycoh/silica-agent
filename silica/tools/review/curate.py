@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 
 from silica.kernel.report.curator import CurationItem, CurationPlan
@@ -119,6 +120,15 @@ def _merged(path: str) -> bool:
     return follow_superseded(path) != path
 
 
+def _named(why: str, concept: str, candidate: str) -> str:
+    """The judge's reason with the two notes called by their names. The dedup
+    prompt sets a pair out as an incoming concept against a candidate note, and
+    the reasons kept its words ("The incoming concept is an exact copy of the
+    candidate note", 2026-11-13), which no one reading the queue was told."""
+    why = re.sub(r"\bthe incoming (?:concept|excerpt|note)\b", concept, why, flags=re.IGNORECASE)
+    return re.sub(r"\bthe candidate(?: note)?\b", candidate, why, flags=re.IGNORECASE)
+
+
 def _judged_duplicates(vault: str, items: list[CurationItem]) -> tuple[list[Proposal], dict[str, int]]:
     """The candidates the worker judged duplicates. It is asked only about a
     pair with no verdict for its notes as they are, at most JUDGE_CAP a run."""
@@ -158,7 +168,9 @@ def _judged_duplicates(vault: str, items: list[CurationItem]) -> tuple[list[Prop
                 # would hide a duplicate until one of the notes changed.
                 said["waiting"] += 1
                 continue
-            row = {"notes": [a, b], "hash": digest, "verdict": decision.verdict, "why": decision.rationale,
+            job = work[0].context
+            row = {"notes": [a, b], "hash": digest, "verdict": decision.verdict,
+                   "why": _named(decision.rationale, job.concept, job.candidate),
                    "claim": decision.addition if decision.verdict == "contradicts" else "", "at": time.time()}
             rows[pid] = row
         said[row["verdict"]] = said.get(row["verdict"], 0) + 1
