@@ -1251,7 +1251,7 @@ function arrivalDone() {
 // The layout as it settled gives the fit a disc is counted from (KREF), at the
 // frame's size on a 1440px window so a layout does not depend on the window it
 // was computed in, and the overlap pass moves the notes apart at that size (see
-// spreadDiscs), once the discs fit the room the forces left them (discScale).
+// spreadDiscs) where the discs fit the room the forces left them (discScale).
 // A ghost is the far end of a link and hidden until asked for: it pushes nothing.
 function spreadLayout() {
   const notes = RAW_NODES.filter(n => n.type !== "ghost");
@@ -1264,6 +1264,13 @@ function spreadLayout() {
   // as fitting, and the factor would go back to 1.
   DISC_SCALE = 1;
   DISC_SCALE = discScale(x, y, notes.map(nodeRadius), partsOf(notes.length, pairs));
+  // A crowded vault keeps the forces' places and its discs overlap (Decision 1
+  // over O4, the owner 2026-11-13). Its core is a pile at any size a reader sees:
+  // on alex_second_brain 74% of the notes sat inside another's disc at the 0.5
+  // factor, and the pass to no overlap moved the median note 56 px and took the
+  // share of a note's ten nearest in its own area from 0.63 to 0.28. Before
+  // ADR-0152 that vault drew the forces' places at 0.646.
+  if (DISC_SCALE < 1) return;
   spreadDiscs(x, y, notes.map(nodeRadius), 1.4 / KREF);
   notes.forEach((n, i) => { n.x = x[i]; n.y = y[i]; });
 }

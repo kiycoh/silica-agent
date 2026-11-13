@@ -101,6 +101,14 @@ def test_discs_shrink_until_they_fill_half_the_room_the_forces_left_a_part():
     assert parts[0] == parts[1] == parts[2] and parts[3] == parts[4] and parts[0] != parts[3]
 
 
+def test_a_crowded_vault_keeps_the_forces_places():
+    """The pass to no overlap mixed alex_second_brain's areas at every size a
+    reader sees (0.63 to 0.28 at the 0.5 factor), so a scaled vault skips it."""
+    body = FRAME[FRAME.index("function spreadLayout() {"):]
+    body = body[:body.index("\n}\n")]
+    assert body.index("if (DISC_SCALE < 1) return;") < body.index("spreadDiscs(")
+
+
 @needs_node
 def test_the_circle_runs_in_area_order_clockwise_from_the_top():
     at = _pure("""
