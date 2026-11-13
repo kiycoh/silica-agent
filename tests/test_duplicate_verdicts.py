@@ -267,3 +267,8 @@ def test_examine_names_each_pair_as_the_queue_does(tmp_vault, kinds, judge):
     assert [r["band"] for r in _duplicates(report)] == ["duplicate", "distinct", "to judge", "to judge", "related"]
     tmp_vault.note("B.md", "# B\n\nEdited.\n")
     assert _duplicates(report)[0]["band"] == "to judge"
+    # A no leaves the queue, and so does a yes that merged the pair.
+    queue.dismiss(CONFIG.vault_path, [p for p in queue.listing(CONFIG.vault_path) if p.kind == "duplicate"])
+    assert _duplicates(report)[0]["band"] == "dismissed"
+    tmp_vault.note("D.md", '---\nsuperseded_by: "[[C]]"\n---\n# D\n')
+    assert _duplicates(report)[1]["band"] == "merged"

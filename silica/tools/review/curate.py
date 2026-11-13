@@ -22,7 +22,8 @@ import re
 import time
 
 from silica.kernel.report.curator import CurationItem, CurationPlan
-from silica.kernel.review import Kind, Proposal, offer, offered, proposal_id, register, remember, verdicts
+from silica.kernel.review import (Kind, Proposal, dismissed, offer, offered, proposal_id, register, remember,
+                                  verdicts)
 from silica.kernel.text.note_parts import clean_name
 
 logger = logging.getLogger(__name__)
@@ -106,12 +107,18 @@ def pair_hash(a: str, b: str) -> str | None:
     return hashlib.sha1("\0".join(texts).encode()).hexdigest()[:16]
 
 
-def verdict_of(vault: str, a: str, b: str) -> str | None:
-    """The worker's verdict on the pair for the notes as they are now, None
-    when it has not judged them so. Examine's Band column reads it."""
+def band_of(vault: str, a: str, b: str) -> str:
+    """What the queue makes of a duplicate candidate, as Examine's Band column
+    says it: "merged" once a yes landed, "dismissed" after a no, else the
+    worker's verdict for the notes as they are now, or "to judge"."""
     a, b = sorted((_md(a), _md(b)))
-    row = verdicts(vault).get(proposal_id("duplicate", a, b))
-    return row["verdict"] if row and row.get("hash") == pair_hash(a, b) else None
+    pid = proposal_id("duplicate", a, b)
+    if _merged(a) or _merged(b):
+        return "merged"
+    if pid in dismissed(vault):
+        return "dismissed"
+    row = verdicts(vault).get(pid)
+    return row["verdict"] if row and row.get("hash") == pair_hash(a, b) else "to judge"
 
 
 def _merged(path: str) -> bool:

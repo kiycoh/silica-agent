@@ -218,11 +218,11 @@ def _duplicates(report) -> list[dict]:
     happens here. `similarity` is the cosine as the card prints it, None for a
     pair the MinHash leg proposed, whose score is no cosine (ADR-0164).
 
-    `band` says what the review queue makes of the pair (ADR-0175): the
-    worker's verdict where it stands for the notes as they are, "to judge" for
-    a candidate /curate has not asked about yet, "related" for the borderline
+    `band` says what the review queue makes of the pair (ADR-0175): "merged"
+    once a yes landed, "dismissed" after a no, else the worker's verdict for
+    the notes as they are or "to judge", and "related" for the borderline
     cosine band, which is never a duplicate candidate."""
-    from silica.tools.review.curate import verdict_of
+    from silica.tools.review.curate import band_of
 
     vault = CONFIG.vault_path or ""
     rows = ([(d, True) for d in report.confirmed_duplicate_pairs]
@@ -234,7 +234,7 @@ def _duplicates(report) -> list[dict]:
             "a": note_parts.clean_name(d.source), "b": note_parts.clean_name(d.target),
             "a_path": d.source, "b_path": d.target, "score": d.score, "confirmed": confirmed,
             "similarity": similarity_percent(d.score) if d.cosine else None,
-            "band": ((vault and verdict_of(vault, d.source, d.target)) or "to judge") if candidate else "related"})
+            "band": (band_of(vault, d.source, d.target) if vault else "to judge") if candidate else "related"})
     return out
 
 

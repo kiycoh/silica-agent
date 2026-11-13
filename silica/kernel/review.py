@@ -54,7 +54,7 @@ class Kind:
     # Accepting runs the worker model: the GUI sends it through the chat, where
     # a turn is counted, and never through a route; `apply all` passes it over
     # (ADR-0175): on a copy of the demo vault on 2026-11-13 "all" took 34
-    # proposals that each sent the worker a job, none of them named.
+    # proposals whose yes runs the worker (2 orphans, 32 duplicates), none named.
     spends_model: bool = False
     # `apply all` takes it. A stale note's yes says the note still holds, which
     # only a person who read it can say, so it is accepted by name or id alone.
