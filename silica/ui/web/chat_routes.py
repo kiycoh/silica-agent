@@ -333,6 +333,7 @@ def get_messages():
                      "story": m.get("silica_story") or None,
                      "thinking": thinking, "images": images,
                      "notes": turn_notes.of(m) if m["role"] == "assistant" else [],
+                     "said": m.get("silica_said") is True,
                      "html": "" if not content else
                      render.answer_html(content, m.get(READS_KEY) or read_refs(messages, at + 1), graph)
                      if m["role"] == "assistant" and not m.get("tool_calls") else

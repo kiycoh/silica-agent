@@ -31,7 +31,7 @@ from silica.session import meter, seed
 from silica.session import turn as session_turn
 from silica.session.turn import Turn, UsageLine
 from silica.session.words import command_word
-from silica.term.console import plain
+from silica.term.console import markdown
 from silica.tools import tool_failed
 from silica.ui.web import callback, failures, render, session
 from silica.ui.web.failures import explain as _failure
@@ -210,25 +210,32 @@ def _drawn_in_the_answer(out):
     return closing(make_progress_callback(out))
 
 
-def _drawn(result: Result) -> tuple[str, Callable[[], str], dict]:
-    """A finished command as this surface draws it: the answer, the HTML of it for
-    off the loop, and what rides the frame. What it said goes in a code block; an
-    `answer` is the reply itself, whose formulas a code block would not render; a
-    save is a Saved line the chat draws with its Undo (ADR-0076 §6)."""
+def _drawn(result: Result) -> tuple[Callable[[], tuple[str, str]], dict]:
+    """A finished command as this surface draws it: the answer and its HTML, both
+    for off the loop since the notes are read to link them, and what rides the
+    frame. What it said is prose, a line it made bold a link where a note has
+    that name (ADR-0178); an `answer` is the reply itself; a save is a Saved line
+    the chat draws with its Undo (ADR-0076 §6)."""
     if result.saved is not None:
         from silica.kernel import user_memory
 
         saved = user_memory.describe(result.saved)
-        return saved, lambda: render.linkify(saved, remote_images=False), {"memory": user_memory.undo_payload(result.saved)}
+        return (lambda: (saved, render.linkify(saved, remote_images=False)),
+                {"memory": user_memory.undo_payload(result.saved)})
     if (answer := result.answer) is not None:
-        return answer, lambda: render.answer_html(answer, []), {"notes": result.notes}
-    shown = plain(result.lines)
-    block = f"```text\n{shown}\n```" if shown else "```text\n(done)\n```"
-    return block, lambda: render.linkify(block, note_resolver(), remote_images=False), {}
+        return (lambda: (answer, render.answer_html(answer, []))), {"notes": result.notes}
+
+    def said() -> tuple[str, str]:
+        resolve = note_resolver()
+        prose = markdown(result.lines, resolve)
+        return prose, render.linkify(prose, resolve, remote_images=False)
+    # `said`: the page numbers an answer's note links as its citations, and a
+    # command's links are what it made or found, not what it stands on.
+    return said, {"said": True}
 
 
 def _answered(messages: list[dict], typed: dict, answer: str, *, narrated: bool = False,
-              notes: Sequence[dict] = ()) -> None:
+              notes: Sequence[dict] = (), said: bool = False) -> None:
     """A command's whole exchange, which no model answered, with the lines under
     it stored on the answer, as a turn's are (turn_notes), before the beat."""
     from silica.agent import turn_notes
@@ -237,7 +244,7 @@ def _answered(messages: list[dict], typed: dict, answer: str, *, narrated: bool 
     messages.append(typed)
     if not narrated:
         session.narrate_user_turn(typed)
-    messages.append({"role": "assistant", "content": answer})
+    messages.append({"role": "assistant", "content": answer, **({"silica_said": True} if said else {})})
     turn_notes.attach(messages, list(notes))
     _narr.NARRATOR.turn(messages[-1])
 
@@ -363,12 +370,14 @@ async def run_turn(ask: Ask) -> AsyncIterator[dict]:
             if result.directive is None:
                 # Appended only once the verdict is in: a directive falls through
                 # to the agent below, which appends the expanded turn itself.
-                answer, html, extra = _drawn(result)
-                _answered(messages, typed, answer, narrated=bool(told), notes=result.notes)
+                drawn, extra = _drawn(result)
+                answer, html = await off_loop(drawn)
+                _answered(messages, typed, answer, narrated=bool(told), notes=result.notes,
+                          said=bool(extra.get("said")))
                 if result.answer is not None:
                     meter.update_context_tokens(messages)
                 line.outcome = "done"
-                yield callback.done_frame(answer, await off_loop(html), session.ctx_meter(), **extra)
+                yield callback.done_frame(answer, html, session.ctx_meter(), **extra)
                 return
             t.content = result.directive
 

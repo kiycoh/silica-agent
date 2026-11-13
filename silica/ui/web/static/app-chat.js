@@ -1787,6 +1787,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         curText.raw = ev.answer;
       }
       close(""); // collapse any open thinking, end all segments
+      if (ev.said) body.dataset.said = "1";
       drawDiagrams(body);
       const notes = turnNotes(ev.notes);
       if (notes) ledger.appendChild(notes);
@@ -2024,7 +2025,9 @@ function finishLedger(msg, led, { steps, secs, reads, cited, found = [] }) {
 // One end for the live turn and the replayed one: number the citations, then
 // state the line with the reads the answer did not cite.
 function finishTurn(body, ledger, touched, meta) {
-  const cited = citeTurn(body);
+  // A command's answer (ADR-0178) links what it made or found: those are not
+  // citations, and numbering them put a "1" beside every row of /changes.
+  const cited = body.dataset.said ? new Set() : citeTurn(body);
   const reads = uniqueReads([...touched].filter(([, e]) => e === "read").map(([r]) => r));
   finishLedger(body.closest(".msg"), ledger, { ...meta, reads, cited });
 }

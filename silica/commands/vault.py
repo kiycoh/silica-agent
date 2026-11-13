@@ -157,7 +157,8 @@ def settings(c: Call) -> Result:
         out.print(f"  [bold]{mf}[/]")
         body = _yaml.safe_dump(data, allow_unicode=True, sort_keys=False).rstrip() \
             if data else "(defaults — no vault.yaml yet)"
-        out.print(f"  {body}")
+        # YAML, whose indent is its structure: a layout, kept a block in the chat (ADR-0178).
+        out.print(f"  {body}", markup=False, highlight=False)
         out.print(f"  Keys: {', '.join(sorted(_KEYS))} — {c.row.name} {c.row.form('')}")
         return out
     if len(args) != 2 or args[0] not in _KEYS:

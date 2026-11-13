@@ -83,6 +83,7 @@ async function loadVault() {
         d.querySelector(".thinking-body").textContent = m.thinking;
         turn.body.appendChild(d);
       }
+      if (m.said) turn.body.dataset.said = "1";
       if (m.content) {
         const seg = document.createElement("div");
         seg.className = "stream-text";

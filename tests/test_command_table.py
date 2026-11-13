@@ -12,7 +12,7 @@ from rich.errors import MarkupError
 
 from silica.command_table import COMMANDS, ROWS, TURN_COMMANDS, Result
 from silica.commands import dispatch
-from silica.term.console import CONSOLE, plain
+from silica.term.console import plain
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -61,17 +61,16 @@ def test_to_model_of_nothing_leaves_the_command_finished():
     assert Result().to_model("").directive is None and Result().to_model("go").directive == "go"
 
 
-def test_the_browser_s_text_wraps_where_the_terminal_does():
+def test_the_browser_s_text_is_not_cut_at_the_terminal_width():
+    """The browser wraps at its own measure (ADR-0178): cut at CONSOLE's width
+    as well, a line broke twice, mid-sentence."""
     long = "  [bold]" + "word " * 30 + "[/]"
-    with CONSOLE.capture() as cap:
-        CONSOLE.print(long)
-        CONSOLE.print("  a line kept [bold]whole[/] " + "x" * 200, soft_wrap=True)
-        CONSOLE.print("  [red]no markup[/] here", markup=False)
     out = Result()
     out.print(long)
     out.print("  a line kept [bold]whole[/] " + "x" * 200, soft_wrap=True)
     out.print("  [red]no markup[/] here", markup=False)
-    assert plain(out.lines) == cap.get().strip()
+    assert [ln.rstrip() for ln in plain(out.lines).splitlines()] == [
+        ("word " * 30).rstrip(), "  a line kept whole " + "x" * 200, "  [red]no markup[/] here"]
 
 
 def test_the_turn_captures_no_console():
