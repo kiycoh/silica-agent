@@ -252,6 +252,14 @@ def test_a_blob_is_the_raw_file_fenced_when_it_is_not_markdown(served):
     assert "psf/requests: main/src/requests/api.py\n\n```py\ndef get(url):\n    return 1\n```" in page.text
 
 
+def test_a_long_blob_kept_as_a_note_is_whole(served):
+    table, _ = served
+    table["https://raw.githubusercontent.com/"] = _resp(text="x = 1\n" * 10_000, ctype="text/plain")
+    with wf.for_a_note():
+        text = sf.page("https://github.com/o/r/blob/main/big.py").text
+    assert "[truncated at" not in text and text.count("x = 1") == 10_000
+
+
 def test_a_long_blob_is_cut_inside_its_fence_and_the_fence_closes(served):
     table, _ = served
     table["https://raw.githubusercontent.com/"] = _resp(text="x = 1\n" * 10_000, ctype="text/plain")
@@ -278,6 +286,19 @@ def test_an_issue_gives_its_state_author_body_and_every_comment_in_order(served)
     assert "The fix." in text and "All 2 comments." in text
     assert text.index("**@a** · 2025-06-04\none") < text.index("**@b** · 2025-06-05\ntwo")
     assert not any("pulls" in url or ".diff" in url for url, _ in seen)  # the conversation, never the diff
+
+
+def test_an_issue_kept_as_a_note_reads_at_most_ten_pages_of_comments(served):
+    """A note's ceiling never runs out, so the pages are bounded: each one is a
+    read of the 60 an hour GitHub allows without a token."""
+    table, seen = served
+    base = "https://api.github.com/repos/o/r/issues/1"
+    table[base + "/comments"] = _resp([{"user": {"login": "a"}, "body": "same"}] * sf._GH_PAGE)
+    table[base] = _resp({"title": "t", "state": "open", "comments": 5000, "user": {"login": "x"}})
+    with wf.for_a_note():
+        text = sf.page("https://github.com/o/r/issues/1").text
+    assert sum("/comments?" in url for url, _ in seen) == sf._GH_PAGES
+    assert "1,000 of 5,000 comments; 4,000 left out." in text
 
 
 def test_an_issue_closed_as_not_planned_says_so(served):

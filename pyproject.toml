@@ -159,6 +159,15 @@ stt = ["faster-whisper>=1.2"]
 # on the first PDF. Local only: sources/pdf_tables.py is a no-op on hosted,
 # installed there or not.
 tables = ["onnxruntime>=1.20"]
+# YouTube captions for /fetch and Discover (sources/web_fetch.py), which shell
+# out to yt-dlp as they did when it was only on PATH; `web_fetch.ytdlp` looks in
+# this environment first, since a uv tool's scripts are not on PATH. Unlike
+# [pdf] below it needs no pin and weighs a few MB, and it upgrades with silica
+# (`uv tool upgrade silica-agent`) instead of with a distribution, whose yt-dlp
+# was eight months old on 2026-11-13. curl-cffi because yt-dlp's YouTube
+# extractor asks to impersonate a browser for the caption request and warns
+# without it; no measurement showed it changing a result.
+youtube = ["yt-dlp[default,curl-cffi]"]
 # There is no [pdf] extra. It was removed on 2026-09-02: it installed the mineru
 # CLI, which nothing here imports — sources/convert.py shells out to it, exactly
 # as it shells out to soffice, ffmpeg and whisper-cli, none of which we install
@@ -171,7 +180,7 @@ tables = ["onnxruntime>=1.20"]
 # same project. Note it inherits [rerank], so it pulls torch and downloads
 # ~2 GB of weights on first rerank, [stt], ~480 MB on first dictation, and
 # [tables], ~76 MB on the first PDF converted.
-all = ["silica-agent[gui,connect,mcp,connectors,rerank,stt,tables]"]
+all = ["silica-agent[gui,connect,mcp,connectors,rerank,stt,tables,youtube]"]
 
 [project.scripts]
 silica = "silica.entry:main"

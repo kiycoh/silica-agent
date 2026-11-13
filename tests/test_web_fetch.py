@@ -405,6 +405,16 @@ def test_web_fetch_truncates_long_pages(monkeypatch):
     assert len(out) < wf._MAX_CHARS + 200
 
 
+def test_a_page_kept_as_a_note_keeps_what_the_models_ceiling_cuts(monkeypatch):
+    body = "<p>" + ("word " * 40_000) + "</p>"
+    _serve(monkeypatch, _Resp(text=body), _Resp(text=body))
+    with wf.for_a_note():
+        kept = wf.fetch_page("https://example.com/long").text
+    assert "[truncated at" not in kept and kept.count("word") == 40_000
+    assert wf.ceiling() == wf._MAX_CHARS  # restored for the next reader, a model
+    assert "[truncated at" in wf.web_fetch("https://example.com/long")
+
+
 def test_web_fetch_rejects_a_private_target_before_any_request(monkeypatch):
     called = {"n": 0}
 
@@ -442,20 +452,56 @@ second line &amp; more
 
 
 def test_vtt_to_text_strips_timings_markup_and_rolling_duplicates():
-    assert wf.vtt_to_text(_VTT).splitlines() == [
-        "hello world",
-        "second line & more",
-    ]
+    assert wf.vtt_to_text(_VTT) == "hello world second line & more"
 
 
-def test_youtube_without_ytdlp_prescribes_the_install(monkeypatch):
-    monkeypatch.setattr(wf.shutil, "which", lambda name: None)
-    with pytest.raises(ValueError, match="yt-dlp"):
+def _cues(*lines: str) -> str:
+    """Back-to-back cues, as YouTube's rolling captions come: no pause anywhere."""
+    return "WEBVTT\n\n" + "\n\n".join(
+        f"00:00:{i:02d}.000 --> 00:00:{i + 1:02d}.000\n{ln}" for i, ln in enumerate(lines))
+
+
+def test_a_speaker_change_starts_a_paragraph_without_its_marker():
+    """`>>` at a line's start was a nested quote that held the rest of the
+    transcript (97% of W4PIkmjwGsQ, 2026-11-14)."""
+    out = wf.vtt_to_text(_cues("so that was the", "deal. &gt;&gt; Yeah.", "&gt;&gt; Like how many",
+                               "do you need?", "&gt;&gt;&gt; Next story."))
+    assert out == "so that was the deal. >> Yeah.\n\nLike how many do you need?\n\nNext story."
+    assert not any(p.startswith(">") for p in out.split("\n\n"))
+
+
+def test_a_long_run_is_cut_at_a_sentence_end_and_without_one_at_twice_the_size():
+    # 199 characters each, and distinct, or the rolling dedup takes them
+    said = wf.vtt_to_text(_cues(*[f"w{i:02d} " + "word " * 38 + "ends." for i in range(12)]))
+    assert [len(p) for p in said.split("\n\n")] == [999, 999, 399]
+    # no sentence ends: unpunctuated auto-captions
+    unsaid = wf.vtt_to_text(_cues(*[f"w{i:02d} " + "word " * 38 + "words" for i in range(12)]))
+    paras = unsaid.split("\n\n")
+    assert len(paras) == 2 and all(len(p) <= 2 * wf._VTT_PARAGRAPH_CHARS for p in paras)
+
+
+def test_ytdlp_is_silicas_own_before_the_one_on_path(monkeypatch, tmp_path):
+    """A uv tool's scripts are not on PATH, and the PATH one can be stale."""
+    own, path = tmp_path / "own", tmp_path / "path"
+    for d in (own, path):
+        d.mkdir()
+        (d / "yt-dlp").write_text("#!/bin/sh\n")
+        (d / "yt-dlp").chmod(0o755)
+    monkeypatch.setenv("PATH", str(path))
+    monkeypatch.setattr(wf.sysconfig, "get_path", lambda name: str(own))
+    assert wf.ytdlp() == str(own / "yt-dlp")
+    (own / "yt-dlp").unlink()
+    assert wf.ytdlp() == str(path / "yt-dlp")
+
+
+def test_youtube_without_ytdlp_prescribes_the_extra(monkeypatch):
+    monkeypatch.setattr(wf, "ytdlp", lambda: None)
+    with pytest.raises(ValueError, match=r"`youtube` extra"):
         wf.web_fetch("https://www.youtube.com/watch?v=abc")
 
 
 def test_youtube_never_takes_the_http_path(monkeypatch):
-    monkeypatch.setattr(wf.shutil, "which", lambda name: None)
+    monkeypatch.setattr(wf, "ytdlp", lambda: None)
 
     def boom(*a, **kw):
         raise AssertionError("no HTTP request must run for a YouTube URL")
@@ -465,16 +511,27 @@ def test_youtube_never_takes_the_http_path(monkeypatch):
         wf.web_fetch("https://youtu.be/abc")
 
 
-def _fake_ytdlp(monkeypatch, *, writes=True, stderr=""):
-    monkeypatch.setattr(wf.shutil, "which", lambda name: "/usr/bin/yt-dlp")
+def _fake_ytdlp(monkeypatch, *, writes=True, stderr="", stdout="", vtt=_VTT):
+    monkeypatch.setattr(wf, "ytdlp", lambda: "/usr/bin/yt-dlp")
 
     def fake_run(argv, **kw):
         if writes:
             out = Path(argv[argv.index("-o") + 1])
-            out.with_suffix(".en.vtt").write_text(_VTT, encoding="utf-8")
-        return SimpleNamespace(returncode=0, stdout="", stderr=stderr)
+            out.with_suffix(".en.vtt").write_text(vtt, encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr=stderr)
 
     monkeypatch.setattr(wf.subprocess, "run", fake_run)
+
+
+def test_fetch_keeps_a_long_transcript_whole_in_the_note(monkeypatch, tmp_vault):
+    """A 28-minute video's 53,386 characters became a note cut at 56% (2026-11-14)."""
+    from silica.config import CONFIG
+    from silica.sources.web_research import fetch_to_inbox
+
+    _fake_ytdlp(monkeypatch, vtt=_cues(*[f"line {i} of a long talk." for i in range(4000)]))
+    note = (Path(CONFIG.vault_path) / fetch_to_inbox("https://youtu.be/abc")).read_text(encoding="utf-8")
+    assert len(note) > 2 * wf._MAX_CHARS
+    assert "line 3999 of a long talk." in note and "[truncated at" not in note
 
 
 def test_youtube_returns_the_transcript(monkeypatch):
@@ -490,7 +547,7 @@ def test_youtube_channel_or_playlist_url_is_bounded_to_one_item(monkeypatch):
     is a video *inside* a playlist, not when the URL *is* the collection, so
     `--playlist-items 1` must be present to keep yt-dlp bounded to a single
     item instead of enumerating the whole channel/playlist."""
-    monkeypatch.setattr(wf.shutil, "which", lambda name: "/usr/bin/yt-dlp")
+    monkeypatch.setattr(wf, "ytdlp", lambda: "/usr/bin/yt-dlp")
     captured = {}
 
     def fake_run(argv, **kw):
@@ -512,10 +569,54 @@ def test_youtube_channel_or_playlist_url_is_bounded_to_one_item(monkeypatch):
     assert argv[-1] == "https://www.youtube.com/@someone"
 
 
-def test_youtube_without_subtitles_reports_the_stderr_tail(monkeypatch):
-    _fake_ytdlp(monkeypatch, writes=False, stderr="ERROR: no subtitles available")
-    with pytest.raises(ValueError, match="no subtitles available"):
+_YT_WARNINGS = (
+    "WARNING: [youtube] No supported JavaScript runtime could be found. Only deno is enabled\n"
+    "WARNING: The extractor specified to use impersonation for this download, but no "
+    "impersonate target is available. If you encounter errors, then see "
+    "https://github.com/yt-dlp/yt-dlp#impersonation for information on installing the "
+    "required dependencies\n"
+)
+
+
+def test_youtube_without_subtitles_reports_ytdlps_error_line_whole(monkeypatch):
+    """The last 300 characters of stderr began mid-word in a warning and put
+    the ERROR on a second line (2026-11-13): one line, the ERROR's, whole."""
+    _fake_ytdlp(monkeypatch, writes=False,
+                stderr=_YT_WARNINGS + "ERROR: [youtube] abc: Video unavailable\n")
+    with pytest.raises(ValueError) as caught:
         wf.web_fetch("https://youtu.be/abc")
+    said = str(caught.value)
+    assert said.endswith(": [youtube] abc: Video unavailable")
+    assert "\n" not in said and "impersonation" not in said and "ERROR" not in said
+
+
+def test_youtube_with_no_tracks_says_so_and_not_a_warning(monkeypatch):
+    """yt-dlp's notice is on stdout and its warnings on stderr."""
+    _fake_ytdlp(monkeypatch, writes=False, stderr=_YT_WARNINGS,
+                stdout="[info] There are no subtitles for the requested languages\n")
+    with pytest.raises(ValueError, match="There are no subtitles for the requested languages$"):
+        wf.web_fetch("https://youtu.be/abc")
+
+
+_YT_429 = "WARNING: Unable to download video subtitles for 'it': HTTP Error 429: Too Many Requests\n"
+
+
+def test_a_refused_track_does_not_cost_the_tracks_that_came(monkeypatch):
+    """2026-11-13, W4PIkmjwGsQ: `en` and `it` came back 429 and `en-orig` did
+    not; without `--ignore-errors` yt-dlp stopped at the first refusal."""
+    seen = {}
+    _fake_ytdlp(monkeypatch, stderr=_YT_429)
+    run = wf.subprocess.run
+    monkeypatch.setattr(wf.subprocess, "run", lambda argv, **kw: seen.setdefault("argv", argv) and run(argv, **kw))
+    assert "second line & more" in wf.web_fetch("https://youtu.be/abc")
+    assert "--ignore-errors" in seen["argv"]
+
+
+def test_every_track_refused_is_youtubes_refusal_in_words(monkeypatch):
+    _fake_ytdlp(monkeypatch, writes=False, stderr=_YT_WARNINGS + _YT_429)
+    with pytest.raises(wf.SiteRefused) as caught:
+        wf.web_fetch("https://youtu.be/abc")
+    assert "every subtitle track" in caught.value.said and "429" in caught.value.said
 
 
 def test_youtube_signs_in_with_a_copy_of_the_operators_cookies(monkeypatch, tmp_path):
@@ -524,7 +625,7 @@ def test_youtube_signs_in_with_a_copy_of_the_operators_cookies(monkeypatch, tmp_
     jar = tmp_path / "cookies.txt"
     jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
     monkeypatch.setenv(wf.YOUTUBE_COOKIES_ENV, str(jar))
-    monkeypatch.setattr(wf.shutil, "which", lambda name: "/usr/bin/yt-dlp")
+    monkeypatch.setattr(wf, "ytdlp", lambda: "/usr/bin/yt-dlp")
     seen = {}
 
     def fake_run(argv, **kw):
@@ -584,7 +685,7 @@ def test_youtube_userinfo_on_a_real_host_does_not_reach_ytdlp(monkeypatch):
     (`x@youtube.com`). The YouTube branch shells out to yt-dlp with no
     `_validated()` call of its own, so `host_matches` is the only gate; without
     the guard this URL would route straight to `subprocess.run`."""
-    monkeypatch.setattr(wf.shutil, "which", lambda name: "/usr/bin/yt-dlp")
+    monkeypatch.setattr(wf, "ytdlp", lambda: "/usr/bin/yt-dlp")
 
     def boom(*a, **kw):
         raise AssertionError("subprocess.run must not run: host_matches should reject userinfo")

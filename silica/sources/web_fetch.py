@@ -25,10 +25,13 @@ import re
 import shutil
 import socket
 import subprocess
+import sysconfig
 import tempfile
+import textwrap
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -53,6 +56,31 @@ _HTTP_TIMEOUT = 30
 # URL OOMs the process while `truncate` waits its turn. ~270x the char ceiling,
 # so no real page meets it.
 MAX_BODY_BYTES = 8 * 1024 * 1024
+# The ceiling in force: _MAX_CHARS for text a model reads (the agent's tool, the
+# research loop, Discover), the body ceiling for a page the person asked to keep
+# as a note (`for_a_note`). /fetch had the model's until 2026-11-14, when a
+# 28-minute video's transcript (53,386 characters) became a note cut at 56%
+# (ADR-0162 amendment 2026-11-14).
+_CEILING: ContextVar[int] = ContextVar("web_fetch_ceiling", default=_MAX_CHARS)
+
+
+def ceiling() -> int:
+    """How many characters a fetched page keeps here: see `_CEILING`."""
+    return _CEILING.get()
+
+
+@contextmanager
+def for_a_note() -> Iterator[None]:
+    """Fetch for a note, not for a model: only the body ceiling holds. A
+    ContextVar like site_fetch.PERSON_ASKED, because the ceiling is applied five
+    calls down (a transcript, a page, a Reddit thread, a GitHub file)."""
+    token = _CEILING.set(MAX_BODY_BYTES)
+    try:
+        yield
+    finally:
+        _CEILING.reset(token)
+
+
 # `timeout` is per socket operation, not a deadline: an endless stream dripping
 # one byte before each timeout window never trips it and never ends, so the body
 # gets its own wall clock.
@@ -77,6 +105,14 @@ _YT_TIMEOUT = 120
 # cookies expired. The renewal is the operator's (silica-hosted
 # bin/youtube-cookies), so it is named in the log and not to the student.
 _YT_SIGN_IN = "Sign in to confirm"
+# YouTube refusing a subtitle file, not the page. Measured 2026-11-13 on
+# W4PIkmjwGsQ from a home address: `en` and `it` came back 429 while
+# `en-orig`, the track `--list-subs` names "(Original)", downloaded in the
+# same run (the video has no uploaded subtitles), with yt-dlp
+# 2026.03.17 and 2026.10.26 plus curl_cffi alike. A refused track is
+# therefore a warning (`--ignore-errors`), and this is said only when every
+# requested track was refused.
+_YT_TOO_MANY = "HTTP Error 429"
 YOUTUBE_COOKIES_ENV = "SILICA_YOUTUBE_COOKIES"
 
 
@@ -119,6 +155,18 @@ def youtube_cookies() -> Path | None:
     raw = live_env(YOUTUBE_COOKIES_ENV)
     path = Path(raw) if raw else None
     return path if path is not None and os.access(path, os.R_OK) else None
+
+
+def ytdlp() -> str | None:
+    """yt-dlp as silica's `youtube` extra installed it, else the one on PATH.
+
+    The extra's first: a uv tool or pipx environment keeps its scripts off PATH,
+    so `shutil.which` alone never finds what the extra installed, and the one on
+    PATH can be a distribution's that went stale (apt's was 2026.03.17 on
+    2026-11-13). The script and not `python -m yt_dlp`, which puts the working
+    directory first on sys.path, and silica's is the vault.
+    """
+    return shutil.which("yt-dlp", path=sysconfig.get_path("scripts")) or shutil.which("yt-dlp")
 _WP_DOMAINS: tuple[str, ...] = ("wikipedia.org",)
 _WP_PREFIX = "/wiki/"
 WP_API_PATH = "/w/api.php"
@@ -392,8 +440,10 @@ def extract_text(html: str) -> str:
     return "\n".join(lines).strip()
 
 
-def truncate(text: str, limit: int = _MAX_CHARS) -> str:
-    """Hard ceiling with a visible marker, so the model knows it saw a prefix."""
+def truncate(text: str, limit: int | None = None) -> str:
+    """Hard ceiling with a visible marker, so the model knows it saw a prefix.
+    `limit` defaults to the ceiling in force, which /fetch lifts."""
+    limit = ceiling() if limit is None else limit
     if len(text) <= limit:
         return text
     # A cut inside a code block closes it, or the truncation marker (and, in
@@ -848,40 +898,67 @@ def _cue_times(line: str) -> tuple[float, float] | None:
     return start, end
 
 
+# A paragraph ends at the first sentence end past this many characters, about a
+# minute of speech at 150 words a minute, and at the first line past twice that
+# when no sentence ends (auto-captions can come unpunctuated). YouTube's rolling
+# cues carry no pause to cut on: 0 gaps over 2,987 cues on W4PIkmjwGsQ
+# (2026-11-14), so without this a transcript was one paragraph.
+_VTT_PARAGRAPH_CHARS = 1000
+_VTT_SPEAKER = ">>"
+
+
 def vtt_to_text(vtt: str, paragraph_gap_s: float = 0.0) -> str:
-    """VTT to plain lines: drop cue timings and inline markup, and collapse the
-    rolling duplication auto-subs produce (each cue repeats the line before it).
+    """VTT to prose paragraphs: drop cue timings and inline markup, collapse the
+    rolling duplication auto-subs produce (each cue repeats the line before it),
+    and join a paragraph's caption lines with spaces, as `_paragraphs_at_pauses`
+    does for a verbose_json transcript.
+
+    Lines were joined by newlines until 2026-11-14: a 40-character line per row
+    in Obsidian, and in the page one paragraph whose first `>>` opened a nested
+    quote holding 97% of the text (W4PIkmjwGsQ). YouTube's `>>`, a change of
+    speaker, now starts a paragraph and is dropped.
 
     ponytail: adjacent-equal dedup, not a diff of overlapping cues. It clears
     the common rolling case; upgrade to longest-common-suffix trimming only if
     real transcripts come out visibly doubled.
 
-    `paragraph_gap_s` > 0 inserts a blank line wherever the speaker paused for
+    `paragraph_gap_s` > 0 also ends a paragraph wherever the speaker paused for
     at least that long, which matters for a transcript headed into the vault: a
     text with no blank line anywhere is ONE paragraph, `_split_by_size` leaves an
     oversized paragraph whole, and a two-hour talk would land as a single inbox
-    note whose concepts RECON caps at 40. A pause is the one paragraph boundary
-    a transcript actually carries. 0 (the default, and the YouTube path) keeps
-    the original single-newline join.
+    note whose concepts RECON caps at 40.
     """
-    lines: list[str] = []
-    prev_end: float | None = None
+    paras: list[str] = []
+    para: list[str] = []
+    size, last, pause, prev_end = 0, "", False, None
     for raw in vtt.splitlines():
         s = raw.strip()
         if not s or s.isdigit() or s.startswith(_VTT_NOISE):
             continue
         if "-->" in s:
-            times = _cue_times(s)
-            if paragraph_gap_s and times and prev_end is not None:
-                if times[0] - prev_end >= paragraph_gap_s and lines and lines[-1]:
-                    lines.append("")
-            if times:
+            if times := _cue_times(s):
+                pause = pause or bool(paragraph_gap_s and prev_end is not None
+                                      and times[0] - prev_end >= paragraph_gap_s)
                 prev_end = times[1]
             continue
         s = unescape(_VTT_TAG_RE.sub("", s)).strip()
-        if s and (not lines or lines[-1] != s):
-            lines.append(s)
-    return "\n".join(lines)
+        if not s or s == last:
+            continue
+        last = s
+        turn = s.startswith(_VTT_SPEAKER)
+        if para and (pause or turn or size >= 2 * _VTT_PARAGRAPH_CHARS
+                     or (size >= _VTT_PARAGRAPH_CHARS and para[-1].endswith((".", "?", "!")))):
+            paras.append(" ".join(para))
+            para, size = [], 0
+        pause = False
+        # Every leading `>`, not the two of `>>`: a `>>>` (a change of topic in
+        # broadcast captions) left one, and a paragraph opening with it is a quote.
+        if s := s.lstrip(">").strip():
+            para.append(s)
+            size += len(s) + 1
+    if para:
+        paras.append(" ".join(para))
+    return "\n\n".join(paras)
 
 
 def _youtube_transcript(url: str) -> Page:
@@ -896,17 +973,18 @@ def _youtube_transcript(url: str) -> Page:
     nucleated from them inherits that noise, so the sources/ leaf matters more
     here than usual.
 
-    ponytail: no installer and no doctor for one optional binary. A clear
-    prescription at call time beats a health-check subsystem. If stale-venv
+    ponytail: the `youtube` extra installs yt-dlp, and no doctor checks it. A
+    clear prescription at call time beats a health-check subsystem. If stale-venv
     shims start confusing users, the upgrade is Agent-Reach's probe taxonomy
     (missing / broken / timeout / error), not an installer.
     """
-    exe = shutil.which("yt-dlp")
+    exe = ytdlp()
     if not exe:
         raise ValueError(
-            "reading YouTube needs yt-dlp on PATH: install it with "
-            '`python -m pip install -U "yt-dlp[default]"`. The watch page '
-            "itself is a JavaScript shell with no transcript in the HTML."
+            "reading YouTube needs yt-dlp: install silica with its `youtube` extra "
+            '(`"silica-agent[gui,mcp,youtube]"`, your install command\'s extras plus '
+            "`youtube`), or put yt-dlp on PATH. The watch page itself is a "
+            "JavaScript shell with no transcript in the HTML."
         )
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "sub"
@@ -921,6 +999,10 @@ def _youtube_transcript(url: str) -> Page:
             [
                 exe, "--skip-download", "--write-auto-sub", "--write-sub",
                 "--write-info-json", *signed_in,
+                # Without it the first refused track (a 429 on a translation)
+                # ends yt-dlp before the tracks after it and before the info
+                # file, the note's title: see _YT_TOO_MANY.
+                "--ignore-errors",
                 "--sub-lang", _YT_SUB_LANGS, "--sub-format", "vtt",
                 "--no-playlist", "--playlist-items", "1", "-o", str(out), "--", url,
             ],
@@ -939,14 +1021,30 @@ def _youtube_transcript(url: str) -> Page:
             else:
                 logger.warning("youtube: sign-in wall with no cookies: set SILICA_YOUTUBE_COOKIES")
             raise YoutubeBlocked(f"YouTube asked to sign in before it would show {url}")
+        if not files and _YT_TOO_MANY in (proc.stderr or ""):
+            raise SiteRefused(f"YouTube refused every subtitle track of {url} with HTTP 429, "
+                              "too many requests: try again later")
         if not files:
-            tail = (proc.stderr or proc.stdout or "").strip()[-300:]
-            raise ValueError(
-                f"yt-dlp found no subtitles for {url}" + (f": {tail}" if tail else "")
-            )
+            raise ValueError(f"no subtitles came back from yt-dlp for {url}"
+                             + (f": {said}" if (said := _ytdlp_said(proc)) else ""))
         text = vtt_to_text(files[0].read_text(encoding="utf-8", errors="replace"))
         title = _yt_info_title(Path(tmp))
     return Page(_render(url, truncate(text)), title)
+
+
+def _ytdlp_said(proc) -> str:
+    """The one line of yt-dlp's output that says why no subtitles came: its last
+    `ERROR:`, else its "There are no subtitles" notice, else its last line.
+
+    Not the last 300 characters of stderr, which it was until 2026-11-13: that
+    cut a warning mid-word ("se impersonation") and carried the ERROR as a
+    second line the chat drew as a box of its own. The notice is on stdout and
+    the warnings on stderr, so stderr alone hid it behind a JS-runtime warning.
+    """
+    lines = [ln.strip() for ln in f"{proc.stdout or ''}\n{proc.stderr or ''}".splitlines() if ln.strip()]
+    said = next((ln for ln in reversed(lines) if ln.startswith("ERROR:") or "no subtitles" in ln),
+                lines[-1] if lines else "")
+    return textwrap.shorten(said.removeprefix("ERROR:").removeprefix("[info]"), 300, placeholder="…")
 
 
 def _yt_info_title(tmp: Path) -> str:

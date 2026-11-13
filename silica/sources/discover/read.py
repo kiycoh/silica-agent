@@ -15,7 +15,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import shutil
 import subprocess
 import threading
 import time
@@ -115,9 +114,10 @@ def _yt_list(url: str) -> list[dict]:
     descriptive agent), so this is the list when the feed is gone. A flat
     listing carries no upload date: a video is dated when it was first seen.
     """
-    exe = shutil.which("yt-dlp")
+    exe = wf.ytdlp()
     if not exe:
-        raise ValueError("YouTube's channel feed answered 404; listing a channel needs yt-dlp on PATH")
+        raise ValueError("YouTube's channel feed answered 404; listing a channel needs yt-dlp: "
+                         "silica's `youtube` extra, or yt-dlp on PATH")
     base = url.rstrip("/")
     proc = subprocess.run(
         [exe, "--flat-playlist", "--playlist-items", f"1-{_YT_LIST}", "-J", "--", base + "/videos"],

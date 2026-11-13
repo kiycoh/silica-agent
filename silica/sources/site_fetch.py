@@ -53,6 +53,11 @@ _GH_API = "https://api.github.com"
 _GH_RAW = "https://raw.githubusercontent.com"
 # GitHub's largest page of comments; more pages follow while the ceiling has room.
 _GH_PAGE = 100
+# And at most this many pages, 1,000 comments: a sixth of the 60 reads an hour
+# GitHub allows without a token. The model's 30k ran out within a page or two;
+# a note's ceiling (wf.for_a_note, ADR-0162 amendment 2026-11-14) never would,
+# and a refusal halfway through writes no note at all.
+_GH_PAGES = 10
 # Set by `fetch_to_inbox` around the person's own /fetch: only an address they
 # typed carries their GITHUB_TOKEN. The model's web_fetch, Discover and the
 # check reach `fetch_page` too, on addresses a page or a feed named, and a
@@ -98,8 +103,8 @@ def _bounded(head: str, blocks: list[str], total: int, how: str = "") -> str:
     read before the comments it counts. A fence left open closes where its
     post or comment ends, as the site draws it, or every comment after it
     reads as code."""
-    head = wf.close_fence(wf.truncate(head, wf._MAX_CHARS - _HEAD_ROOM))
-    room = wf._MAX_CHARS - len(head) - _HEAD_ROOM
+    head = wf.close_fence(wf.truncate(head, wf.ceiling() - _HEAD_ROOM))
+    room = wf.ceiling() - len(head) - _HEAD_ROOM
     kept: list[str] = []
     for block in map(wf.close_fence, blocks):
         room -= len(block) + 2
@@ -275,7 +280,7 @@ def _gh_repo(url: str, owner: str, repo: str, headers: dict[str, str]) -> wf.Pag
         doc = readme.json()
         text = base64.b64decode(str(doc.get("content") or "")).decode("utf-8", "replace")
         file = str(doc.get("name") or "README")
-        head = f"{head}\n\n## {file}\n\n{_verbatim(file, text, wf._MAX_CHARS - len(head) - _HEAD_ROOM)}"
+        head = f"{head}\n\n## {file}\n\n{_verbatim(file, text, wf.ceiling() - len(head) - _HEAD_ROOM)}"
     return wf.Page(wf._render(url, head), name)
 
 
@@ -286,7 +291,7 @@ def _gh_blob(url: str, owner: str, repo: str, rest: str) -> wf.Page:
     resp = _gh_found(f"{_GH_RAW}/{owner}/{repo}/{rest}", "file")
     name = rest.rsplit("/", 1)[-1]
     head = f"{owner}/{repo}: {rest}"
-    text = _verbatim(name, resp.text, wf._MAX_CHARS - len(head) - _HEAD_ROOM)
+    text = _verbatim(name, resp.text, wf.ceiling() - len(head) - _HEAD_ROOM)
     return wf.Page(wf._render(url, f"{head}\n\n{text}"), f"{name} ({owner}/{repo})")
 
 
@@ -308,8 +313,8 @@ def _gh_issue(url: str, owner: str, repo: str, number: str) -> wf.Page:
         head = f"{head}\n\n{body}"
     total = int(issue.get("comments") or 0)
     blocks: list[str] = []
-    room, n = wf._MAX_CHARS - len(head), 1
-    while len(blocks) < total and room > 0:
+    room, n = wf.ceiling() - len(head), 1
+    while len(blocks) < total and room > 0 and n <= _GH_PAGES:
         rows = _gh_found(f"{base}/comments?{urlencode({'per_page': _GH_PAGE, 'page': n})}",
                          "issue or pull request").json()
         for c in rows:

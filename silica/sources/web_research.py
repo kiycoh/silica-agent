@@ -1756,10 +1756,12 @@ def fetch_to_inbox(url: str) -> str:
     from silica.sources.site_fetch import PERSON_ASKED
 
     # The person typed this address: theirs is the one fetch that may carry
-    # their GITHUB_TOKEN (ADR-0162 point 5).
+    # their GITHUB_TOKEN (ADR-0162 point 5). Its text is a note and not a
+    # model's reading, so the model's ceiling does not cut it.
     asked = PERSON_ASKED.set(True)
     try:
-        page = _web_fetch.fetch_page(url)
+        with _web_fetch.for_a_note():
+            page = _web_fetch.fetch_page(url)
     finally:
         PERSON_ASKED.reset(asked)
     text = page.text.strip()
