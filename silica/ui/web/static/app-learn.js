@@ -2636,7 +2636,9 @@ function lrVerdictSay(it, v, s) {
   if (v.told) return { mark: "open", word: "Told", sub: "the point stays open" };
   if (v.grader === "choice") return v.correct ? { mark: "half", word: "Right choice", sub: "recognised among four, not counted as met without help" }
     : { mark: "open", word: "Wrong choice", sub: "the point stays open" };
-  const used = (s.shown[it.i] || []).length;
+  // the server's count: it holds the hints read before a reload and the four
+  // options seen before writing, which this tab may never have shown
+  const used = v.hints ?? (s.shown[it.i] || []).length;
   if (v.grade === "recalled") return used ? { mark: "half", word: "Met with help", sub: "not counted as without help" } : { mark: "full", word: "Met", sub: "without help" };
   if (it.kind === "predict") return { mark: "open", word: "First attempt", sub: "graded as such" };
   if (v.grade === "partial") return { mark: "open", word: "Partly met", sub: "the point stays open" };

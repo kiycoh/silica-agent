@@ -429,7 +429,7 @@ def _item(s: dict, i: Any) -> dict:
 def _verdict_payload(v: dict, it: dict) -> dict:
     out = {k: v.get(k) for k in ("grade", "rating", "correct", "feedback_line", "rubric_notes", "grader",
                                  "paraphrase", "misconception", "note_defect", "skip", "needs_self_grade", "told", "pick",
-                                 "hints")}
+                                 "hints", "production", "conf")}
     out.update({"claim": it.get("claim", ""), "answer": it.get("answer", ""), "criteria": it.get("criteria", ""),
                 "span": {**(it.get("source") or {}), "text": it.get("span", "")}, "path": it["path"],
                 "title": it.get("title", ""), "kind": it["kind"], "level": it["level"],

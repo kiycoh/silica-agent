@@ -271,6 +271,9 @@ def test_a_hint_shown_before_a_reload_still_counts_and_a_pick_is_still_a_pick(cl
     assert c.get("/learn/session", params={"id": s["id"]}).json()["help"] == {str(first["i"]): {"hints": 2}}
     v = c.post("/learn/answer", json={"id": s["id"], "i": first["i"], "production": RIGHT, "conf": 90, "hints": 0}).json()
     assert v["hints"] == 2 and v["rating"] == grade.HARD
+    # a reload on the reveal shows what was written and how sure, where it read "(no answer)" (2026-11-13)
+    again = c.get("/learn/session", params={"id": s["id"]}).json()["verdicts"][str(first["i"])]
+    assert (again["production"], again["conf"], again["hints"]) == (RIGHT, 90, 2)
     c.post("/learn/rate", json={"id": s["id"], "i": first["i"], "rating": v["rating"]})
     assert json.loads((tmp_path / "quiz.jsonl").read_text().splitlines()[-1])["rungs"] == ["H1", "lede"]
     # a pick after the options is graded by its key, as before: the options are its format, not an extra hint
@@ -291,6 +294,10 @@ def test_the_page_says_which_help_it_showed_where_a_reload_reads_it_back():
     assert "s.help" in attach
     switch = js[js.index("function lrFormatSwitch("):js.index("function lrOptions(")]
     assert "You saw the four options" in switch
+    # seen in the running app, 2026-11-13: the reveal read "Met, without help" over a Hard from the
+    # server, counting only the hints this tab had shown
+    say = js[js.index("function lrVerdictSay("):js.index("function lrRenderSession(")]
+    assert "v.hints ??" in say
 
 
 def test_a_pick_never_becomes_the_written_answer_and_a_reloaded_right_pick_reads_with_help():
