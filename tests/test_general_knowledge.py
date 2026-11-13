@@ -11,6 +11,7 @@ import pytest
 
 from silica.agent import general_knowledge as gk
 from silica.agent import turn_notes
+from silica.agent.recall_watch import RecallWatch
 from silica.config import CONFIG
 from silica.obs.events import ToolCompleteEvent
 from silica.prompts import GENERAL_HEAD, VAULT_ONLY, system_prompt
@@ -49,11 +50,17 @@ class TestBlock:
         assert "1648" not in rest and "Westphalia" in rest and "/web" in rest
 
     def test_the_notes_say_the_label_and_warn_only_when_due(self):
-        label = {"kind": "general", "text": gk.LABEL}
+        """ADR-0174: "partly" only beside cited prose. An answer that is the
+        block and the one line saying the notes lack it was labelled partly."""
+        whole = {"kind": "general", "text": gk.UNCITED}
         assert gk.general_notes("no block here", command=False) == []
-        assert gk.general_notes(ANSWER, command=False) == [label]
+        assert gk.general_notes(ANSWER, command=False) == [whole]
         assert gk.general_notes(ANSWER, command=True) == [
-            label, {"kind": "general", "text": gk.IN_COMMAND}]
+            whole, {"kind": "general", "text": gk.IN_COMMAND}]
+        partly = "Westphalia is in [[Treaties]].\n\n" + ANSWER
+        assert gk.general_notes(partly, command=False) == [{"kind": "general", "text": gk.LABEL}]
+        assert gk.general_notes("Treaties says little.\n\n" + ANSWER, command=False,
+                                reads=["History/Treaties"]) == [{"kind": "general", "text": gk.LABEL}]
 
     def test_a_block_is_held_back_in_place_and_the_rest_stays(self):
         held = gk.held_back(ANSWER)
@@ -63,12 +70,40 @@ class TestBlock:
         assert gk.held_back("no block here") == "no block here"
         assert gk.held_back(f"{GENERAL_HEAD}\n> only the block") == gk.HELD_BACK
 
+    def test_a_block_after_a_search_without_its_index_says_so_when_held_back(self):
+        held = gk.held_back(ANSWER, gk.HELD_BACK_UNSURE)
+        assert gk.HELD_BACK_UNSURE in held and gk.HELD_BACK not in held and "1648" not in held
+
     def test_a_search_or_a_read_counts_as_looking_and_a_write_does_not(self):
         import silica.cli  # noqa: F401  registers every tool
 
         assert gk.looks_in_vault("silica_recall") and gk.looks_in_vault("silica_read_note")
         assert gk.looks_in_vault("silica_search_context")
         assert not gk.looks_in_vault("silica_write_note") and not gk.looks_in_vault("nope")
+
+
+class TestAnAnswerThatCitesNoNote:
+    """ADR-0174, the owner's 2026-11-13 decision: every chat answer that cites no
+    note and carries no block says under it that it is general knowledge."""
+
+    def test_it_gets_the_line_and_a_cited_one_does_not(self):
+        line = [{"kind": "general", "text": gk.UNCITED}]
+        assert gk.uncited_notes("Canberra is the capital of Australia.") == line
+        assert gk.uncited_notes("Hello! What shall we look at?") == line, "small talk too"
+        assert gk.uncited_notes("Galileo was born in 1564 [[Galileo Galilei]].") == []
+        assert gk.uncited_notes("Galileo was born in 1564 [[Science/Galileo Galilei|Galileo]].") == []
+        assert gk.uncited_notes("") == []
+        assert gk.uncited_notes(ANSWER) == [], "a block has its own label"
+
+    def test_a_read_notes_title_named_bare_is_a_citation_as_the_renderer_links_it(self):
+        """ADR-0127: the answer links a read note's title where it names it."""
+        said = "Galileo Galilei was born in Pisa in 1564."
+        assert gk.uncited_notes(said, ["Culture/Science/Galileo Galilei"]) == []
+        assert gk.uncited_notes(said, ["Culture/Art/Caravaggio.md"]) != []
+        assert gk.uncited_notes(said) != [], "a title the turn did not read is not a citation"
+
+    def test_a_figure_embed_is_no_citation(self):
+        assert gk.uncited_notes("Here it is.\n\n![[orbit.png]]") != []
 
 
 class TestCommandsStayInTheVault:
@@ -122,9 +157,88 @@ def test_a_searched_turn_is_labelled_and_its_block_years_are_not_flagged(client,
     monkeypatch.setattr("silica.session.turn.run_agent", _turn(ANSWER, MISS))
     done = _sse(client.post("/chat", json={"text": "what was the peace of westphalia?"}))[-1]
     general = [n for n in done["notes"] if n["kind"] == "general"]
-    assert general == [{"kind": "general", "text": gk.LABEL}]
+    assert general == [{"kind": "general", "text": gk.UNCITED}], "the label and no second line"
     assert not any(n["kind"] == "numbers" for n in done["notes"])
-    assert {"kind": "general", "text": gk.LABEL} in SESSION.chat.messages[-1][turn_notes.KEY]
+    assert {"kind": "general", "text": gk.UNCITED} in SESSION.chat.messages[-1][turn_notes.KEY]
+
+
+def _general(done: dict) -> list[str]:
+    return [n["text"] for n in done.get("notes", []) if n["kind"] == "general"]
+
+
+def test_an_uncited_answer_with_no_search_gets_the_line_live_on_reload_and_in_the_history(client, monkeypatch):
+    """"No need to check my notes, just tell me: capital of Australia?" reached
+    the person uncited and unlabelled (2026-11-13)."""
+    from silica.ui.web.session import SESSION
+
+    monkeypatch.setattr("silica.session.turn.run_agent", _turn("Canberra is the capital of Australia."))
+    done = _sse(client.post("/chat", json={"text": "No need to check my notes: capital of Australia?"}))[-1]
+    assert _general(done) == [gk.UNCITED]
+    assert gk.UNCITED not in done["answer"], "a line under the answer, not in it"
+    assert {"kind": "general", "text": gk.UNCITED} in SESSION.chat.messages[-1][turn_notes.KEY]
+    replayed = [m["notes"] for m in client.get("/messages").json() if m["role"] == "assistant"]
+    assert {"kind": "general", "text": gk.UNCITED} in replayed[-1]
+
+
+def test_a_cited_vault_answer_gets_no_line(client, monkeypatch):
+    read = ToolCompleteEvent(name="silica_recall", args={}, call_id="c1", result=json.dumps(
+        {"query": "galileo", "notes": ["Culture/Science/Galileo Galilei"]}), duration_s=0.0, iteration=1)
+    monkeypatch.setattr("silica.session.turn.run_agent",
+                        _turn("Galileo was born in Pisa in 1564 [[Galileo Galilei]].", read))
+    done = _sse(client.post("/chat", json={"text": "When was Galileo born?"}))[-1]
+    assert _general(done) == []
+
+
+def test_a_turn_that_wrote_reports_its_write_with_no_line(client, monkeypatch):
+    wrote = ToolCompleteEvent(name="silica_remember", args={}, call_id="c1", result=json.dumps(
+        {"saved": "exam on Thursday"}), duration_s=0.0, iteration=1)
+    monkeypatch.setattr("silica.session.turn.run_agent", _turn("Saved: your exam is on Thursday.", wrote))
+    done = _sse(client.post("/chat", json={"text": "my exam is on Thursday"}))[-1]
+    assert _general(done) == []
+
+
+def test_the_turn_step_leaves_out_commands_held_back_blocks_the_web_and_empty_answers(tmp_vault):
+    from silica.agent.sentinels import EMPTY_COMPLETION
+    from silica.session.conversation import Conversation
+    from silica.session.turn import Turn, note
+
+    def notes_of(answer: str, text: str = "capital of Australia?", **kw) -> list[str]:
+        conv = Conversation(messages=[{"role": "user", "content": text},
+                                      {"role": "assistant", "content": answer}])
+        t = Turn(conv=conv, text=text, answer=answer, read=RecallWatch(), **kw)
+        t.watch = t.read
+        note(t)
+        return [n["text"] for n in t.notes if n["kind"] == "general"]
+
+    assert notes_of("Canberra.") == [gk.UNCITED]
+    assert notes_of("Canberra.", text="/explain capitals") == []
+    assert notes_of(gk.HELD_BACK, held=True) == []
+    assert notes_of(EMPTY_COMPLETION, empty=True) == []
+    assert notes_of("Canberra.", stopped=True) == []
+    w = RecallWatch()
+    w.web_answer = True
+    conv = Conversation(messages=[{"role": "user", "content": "q"}, {"role": "assistant", "content": "Canberra."}])
+    t = Turn(conv=conv, text="q", answer="Canberra.", read=w)
+    t.watch = w
+    note(t)
+    assert not any(n["kind"] == "general" for n in t.notes), "a web answer cites its pages"
+    thin = RecallWatch()
+    thin(MISS)
+    t = Turn(conv=conv, text="q", answer="Your notes have nothing on that.", read=thin)
+    t.watch = thin
+    note(t)
+    assert [n["kind"] for n in t.notes] == ["retrieval"], "the thin line already says the notes had nothing"
+
+
+def test_a_degraded_search_that_found_nothing_holds_a_block_back_with_its_own_reason(client, monkeypatch):
+    from silica.ui.web.session import SESSION
+
+    unsure = ToolCompleteEvent(name="silica_recall", args={}, call_id="c1", result=json.dumps(
+        {"query": "westphalia", "degraded": {"index": "building"}, "notes": []}), duration_s=0.0, iteration=1)
+    monkeypatch.setattr("silica.session.turn.run_agent", _turn(ANSWER, unsure))
+    done = _sse(client.post("/chat", json={"text": "what was the peace of westphalia?"}))[-1]
+    assert "1648" not in done["answer"] and gk.HELD_BACK_UNSURE in SESSION.chat.messages[-1]["content"]
+    assert _general(done) == []
 
 
 def test_a_block_with_no_search_before_it_is_held_back_and_never_stored(client, monkeypatch):
