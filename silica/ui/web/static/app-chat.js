@@ -2299,13 +2299,13 @@ async function runFind(rest) {
     else if (part) tokens.push(part);
   }
   const query = tokens.join(" ");
-  if (!query) { body.textContent = "usage: /find <query> [--k=N]"; mirror(); return; }
+  if (!query) { body.textContent = "Type what to look for after /find, e.g. /find attention."; mirror(); return; }
   body.textContent = "searching…";
   try {
     const r = await fetch("/find?q=" + encodeURIComponent(query) + "&k=" + k);
     body.innerHTML = await r.text();
   } catch (e) {
-    body.textContent = "error: " + e;
+    body.textContent = "Search did not answer: " + e;
   }
   mirror();
 }
@@ -2694,11 +2694,15 @@ input.addEventListener("keydown", (e) => {
       updateCmdSel();
       return;
     } else if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
-      e.preventDefault();
-      if (cmdSelIdx >= 0 && cmdSelIdx < filteredCommands.length) {
-        pickCommand(filteredCommands[cmdSelIdx]);
+      const c = filteredCommands[cmdSelIdx];
+      // A command that takes nothing, typed whole, is sent by Enter: picking it
+      // again wrote the same name back and left the list open, so /contested
+      // never left the box (2026-11-13).
+      if (!(e.key === "Enter" && c && c.path === undefined && !c.usage && input.value.trim() === c.name)) {
+        e.preventDefault();
+        if (c) pickCommand(c);
+        return;
       }
-      return;
     } else if (e.key === "Escape") {
       e.preventDefault();
       box.hidden = true;

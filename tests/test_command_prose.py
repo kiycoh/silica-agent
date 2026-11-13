@@ -163,3 +163,27 @@ def test_one_line_without_markup_is_prose_with_its_brackets():
 def test_a_long_line_in_a_block_is_not_cut_at_the_terminal_width():
     long = "x" * 200 + "\nsecond"
     assert ("x" * 200) in md(((long,), {"markup": False}))
+
+
+def test_a_mark_that_spans_two_lines_keeps_both():
+    """Parsed line by line, the second line's closing tag raised, after the
+    command had run and before its answer was stored."""
+    out = md("  [dim]first line\nsecond line[/]", "  [yellow]one\ntwo[/]")
+    assert "first line\\\nsecond line" in out and "> two" in out
+
+
+def test_an_address_is_linked_whole():
+    page = html("  read https://en.wikipedia.org/wiki/Attention_(machine_learning) 1.2s")
+    assert 'href="https://en.wikipedia.org/wiki/Attention_(machine_learning)"' in page
+
+
+def test_an_address_hides_no_markdown():
+    page = html("  read " + escape("https://x.test/![a](https://evil.test/i.png)*b*") + " done")
+    assert "<img" not in page and "<em>" not in page and "evil.test/i.png%5D" not in page.split("href")[0]
+
+
+def test_a_bold_word_that_names_a_note_by_title_is_not_linked():
+    def by_title(ref):
+        return "Notes/All.md" if ref.lower() in ("all", "notes/all", "notes/all.md") else None
+    out = markdown(said("  [bold]all[/] passes over 3 kinds", "  see [bold]Notes/All.md[/]").lines, by_title)
+    assert out.startswith("**all**") and "[[Notes/All]]" in out

@@ -71,7 +71,10 @@ _ALWAYS = re.compile(r"([\\*\[\]$|~&])")
 _SIDE_UNDERSCORE = re.compile(r"(?<![0-9A-Za-z])_|_(?![0-9A-Za-z])")
 _HIDDEN = (("<!--", "&lt;!--"), ("%%", "%&#37;"), ("<", "\\<"))
 _LINE_START = re.compile(r"^(\s*)([#>+=-]|\d+[.)])")
-_CODE_SPAN = re.compile(r"(`[^`\n]+`)")
+# Passed as written: a code span is inert already, and an address the renderer
+# links would carry an escape's backslash into its href.
+_CODE_SPAN = re.compile(r"(`[^`\n]+`|https?://[^\s<>`]+)")
+_URL_MARKS = str.maketrans({c: f"%{ord(c):02X}" for c in "[]*$|~"})
 _COMMAND = re.compile(r"(?<![\w/.:-])(/[a-z][a-z-]*)(?![\w/-]|\.\w)")
 
 
@@ -81,7 +84,10 @@ def _escaped(text: str, commands: frozenset[str]) -> str:
     out = []
     for part in _CODE_SPAN.split(text):
         if _CODE_SPAN.fullmatch(part):
-            out.append(part)
+            # An address keeps its form, but for the marks Markdown would read
+            # in it, percent-encoded: the same address, and no link or image
+            # hidden inside one.
+            out.append(part if part.startswith("`") else part.translate(_URL_MARKS))
             continue
         for bit in _COMMAND.split(part):
             if bit in commands:
@@ -94,9 +100,8 @@ def _escaped(text: str, commands: frozenset[str]) -> str:
     return "".join(out)
 
 
-def _runs(line: str) -> list[tuple[str, frozenset[str]]]:
-    """A marked-up line as (text, style words) runs, a run per change of style."""
-    t = Text.from_markup(line)
+def _runs(t: Text) -> list[tuple[str, frozenset[str]]]:
+    """A line of styled text as (text, style words) runs, a run per change of style."""
     words: list[set[str]] = [set() for _ in t.plain]
     for span in t.spans:
         for i in range(span.start, min(span.end, len(words))):
@@ -119,8 +124,9 @@ def _inline(runs, resolve, commands) -> str:
             out.append(_escaped(text, commands))
             continue
         lead, tail = text[: len(text) - len(text.lstrip())], text[len(text.rstrip()):]
-        # A count or an id in bold is no note's name, however a vault names its notes.
-        key = (resolve(ref) if resolve and any(c.isalpha() for c in ref)
+        # Only a path is looked up: the handlers print a note as its path, and a
+        # bold title, word or count ("all", "Memory", 2026) could share a note's name.
+        key = (resolve(ref) if resolve and ("/" in ref or ref.endswith(".md"))
                and not any(c in ref for c in "|#^[]") else None)
         if key:
             out.append(f"{lead}[[{key[:-3] if key.endswith('.md') else key}]]{tail}")
@@ -147,9 +153,12 @@ def markdown(lines: list[tuple[tuple, dict]], resolve=None) -> str:
                 style.get("markup", True) is False and "\n" in said.strip("\n")):
             rows.append(("block", f"```text\n{plain([(objects, style)])}\n```"))
             continue
-        for raw in said.split("\n"):
-            runs = _runs(raw) if style.get("markup", True) else [(raw, frozenset())]
-            text = "".join(r[0] for r in runs)
+        # Parsed whole, then split: a mark may open on one line and close on the
+        # next (`[dim]a\nb[/]`), and the second line alone does not parse.
+        styled = Text.from_markup(said) if style.get("markup", True) else Text(said)
+        for piece in styled.split("\n", allow_blank=True):
+            runs = _runs(piece)
+            text = piece.plain
             if not text.strip():
                 rows.append(("line", 0, "gap", []))
                 continue

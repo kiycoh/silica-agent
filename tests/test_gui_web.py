@@ -1662,7 +1662,7 @@ def test_find_endpoint_requires_a_query(client):
     tc, _server = client
     r = tc.get("/find", params={"q": ""})
     assert r.status_code == 200
-    assert "usage: /find" in r.text
+    assert "Type what to look for after <code>/find</code>" in r.text
 
 
 def test_find_endpoint_reports_empty_index_gracefully(client, tmp_path, monkeypatch):
@@ -1671,7 +1671,7 @@ def test_find_endpoint_reports_empty_index_gracefully(client, tmp_path, monkeypa
     r = tc.get("/find", params={"q": "gears"})
     assert r.status_code == 200
     # Both legs empty (embed + co-occurrence) → the facade reports no index.
-    assert "No index available" in r.text
+    assert "Search has no index of this vault yet" in r.text
 
 
 def test_find_endpoint_renders_results_as_note_links(client, tmp_path, monkeypatch):

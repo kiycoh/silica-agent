@@ -222,19 +222,26 @@ def find(q: str = "", k: int = 5):
 
     q = q.strip()
     if not q:
-        return HTMLResponse("<p style='font-family:monospace;color:#8a93a3'>usage: /find &lt;query&gt; [--k=N]</p>")
+        # Sentences in the answer's own type, not mono (ADR-0178): they are what
+        # the person reads, as every other command's answer now is.
+        return HTMLResponse("<p>Type what to look for after <code>/find</code>, e.g. <code>/find attention</code>.</p>")
     try:
         parsed = facade_search(q, k=k)
     except Exception as exc:
         return HTMLResponse(
-            f"<p style='font-family:monospace'>find unavailable: {_html.escape(_failure(exc)['error'])}"
+            f"<p>Search is not available: {_html.escape(_failure(exc)['error'])}"
             f"<br><small>{_html.escape(_failure(exc)['detail'])}</small></p>"
         )
     if "error" in parsed:
-        return HTMLResponse(f"<p style='font-family:monospace;color:#8a93a3'>{_html.escape(parsed['error'])}</p>")
+        said = parsed["error"]
+        if said.startswith("No index available"):
+            # The search's words are the agent's, naming the tools it can run;
+            # the person types the commands that build the same indexes.
+            said = "Search has no index of this vault yet. /lexical builds the one by words, /embed the one by meaning."
+        return HTMLResponse(f"<p>{_html.escape(said)}</p>")
     results = parsed.get("results", [])
     if not results:
-        return HTMLResponse(f"<p style='font-family:monospace;color:#8a93a3'>no results for '{_html.escape(q)}'.</p>")
+        return HTMLResponse(f"<p>Nothing found for \u201c{_html.escape(q)}\u201d.</p>")
     rows = []
     for r in results:
         p = r.get("path") or r.get("name") or "?"
