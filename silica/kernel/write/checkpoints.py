@@ -223,8 +223,7 @@ class CheckpointStore:
 
     def settle(self, path: str, landed: str) -> None:
         """Make the newest live version the text the driver actually left: a
-        restore through overwrite gains the derived `type:` stamp, and a top
-        that is not the disk reads as an outside edit at the next write."""
+        top that is not the disk reads as an outside edit at the next write."""
         top = self._live(path, 1)
         if top and top[0]["content"] != landed:
             self._conn.execute("UPDATE checkpoints SET content = ? WHERE id = ?", (landed, top[0]["id"]))
