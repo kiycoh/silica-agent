@@ -117,6 +117,35 @@ def test_a_serve_command_in_the_environment_is_spawned(tmp_path, monkeypatch):
     assert spawned == ["lms server start"]
 
 
+def test_a_local_url_pinned_beside_a_hosted_provider_starts_nothing(tmp_path, monkeypatch):
+    """A hosted provider's calls go to its own address, so a local chat server
+    named beside it is never started; `custom` still reads the pin (2026-11-12)."""
+    import subprocess
+
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
+    monkeypatch.setenv("SILICA_PROVIDER_SERVE_CMD", "serve-chat")
+    monkeypatch.setattr(CONFIG, "provider_base_url", "http://127.0.0.1:1237/v1")
+    monkeypatch.setattr(serve, "ready", lambda url: False)
+    spawned: list[str] = []
+
+    class FakeProc:
+        def poll(self):
+            return 1
+
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda command, **kw: (spawned.append(command), FakeProc())[1],
+    )
+    monkeypatch.setattr(CONFIG, "provider", "openrouter")
+    serve.ensure_local_servers()
+    assert spawned == []
+    assert serve.chat_base_url(CONFIG) == "https://openrouter.ai/api/v1"
+
+    monkeypatch.setattr(CONFIG, "provider", "custom")
+    serve.ensure_local_servers()
+    assert spawned == ["serve-chat"]
+
+
 def test_cache_ram_caps_the_chat_server_by_its_gguf_and_zeroes_every_other(tmp_path, monkeypatch):
     """Two full-context entries for chat, at most 12% of RAM; 0 for the rest
     (an embedding server filled the default 8 GiB cache, 2026-10-08)."""
