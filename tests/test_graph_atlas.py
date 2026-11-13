@@ -230,7 +230,9 @@ def test_the_renderer_and_the_layout_cache_start_over_once():
     # or under a force slider would be shown for good (ADR-0152)
     # -5: a layout spread at full disc size is a packed ball on a dense vault,
     # and a hit would show it for good (ADR-0152, amendment 2026-11-13)
-    assert 'const LAYOUT_KEY = "silica-graph-layout-5";' in FRAME_JS
+    # -6: a crowded vault is spread by areas, and a hit would show the forces'
+    # pile for good (ADR-0152, amendment 2026-11-13)
+    assert 'const LAYOUT_KEY = "silica-graph-layout-6";' in FRAME_JS
 
 
 def test_with_the_atlas_on_a_line_shows_for_the_note_in_hand_only():
