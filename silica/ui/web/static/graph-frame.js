@@ -832,6 +832,75 @@ function nearFolder(x, y, r, big, dirs, gap) {
   }
 }
 
+// The area a note is spread with: its own, or, for a note in no area of two or
+// more, the one most of its ties are in, through other such notes too. On
+// alex_second_brain 295 notes were each an area of one, 284 of them tied to the
+// rest by similarity alone; spread as discs of their own they stood a median
+// 11.9 px from the nearest note they are tied to, and 148 px at the 90th
+// percentile, where the forces left 4.4 and 17.6 (the owner: "le note non
+// linkate vanno nel loro vicino"). `pairs`: [i, j] ties. Returns one area per
+// note, below 0 for none.
+function adoptAreas(area, pairs) {
+  const size = new Map(), ties = area.map(() => []);
+  area.forEach(a => { if (a >= 0) size.set(a, (size.get(a) || 0) + 1); });
+  const out = area.map(a => a >= 0 && size.get(a) > 1 ? a : -1);
+  for (const [a, b] of pairs) { ties[a].push(b); ties[b].push(a); }
+  for (let moved = true; moved;) {
+    moved = false;
+    out.forEach((a, i) => {
+      if (a >= 0) return;
+      const count = new Map();
+      let best = -1, most = 0;
+      for (const j of ties[i]) if (out[j] >= 0) count.set(out[j], (count.get(out[j]) || 0) + 1);
+      count.forEach((n, k) => { if (n > most) { best = k; most = n; } });
+      if (best >= 0) { out[i] = best; moved = true; }
+    });
+  }
+  return out;
+}
+
+// A crowded vault spread by areas (ADR-0152, amendment 2026-11-13, the owner's
+// pick over the forces' places). The pass to no overlap mixed the areas because
+// a note pushed out of a crowded core lands in the area beside it. Here each
+// area grows about its own centre to the room its discs need packed at
+// AREA_PACK, never below what the forces gave it, its notes move apart only
+// among themselves, and then the areas move as rigid discs (95% of their extent,
+// so one note deep in a neighbour does not set it) until no two touch; a note
+// with no area is a disc of one. A node outside a big part (`held` false) does
+// not move: nearFolder places it after. What still touches is left to the
+// overlap pass. In place; `area[i]` below 0 is no area (see adoptAreas).
+const AREA_PACK = 0.7;
+function spreadAreas(x, y, r, area, held, gap) {
+  const groups = new Map();
+  x.forEach((_, i) => {
+    if (!held[i]) return;
+    const k = area[i] >= 0 ? area[i] : -1 - i;
+    if (groups.has(k)) groups.get(k).push(i); else groups.set(k, [i]);
+  });
+  const mid = ids => [ids.reduce((s, i) => s + x[i], 0) / ids.length, ids.reduce((s, i) => s + y[i], 0) / ids.length];
+  const bodies = [...groups.values()].map(ids => {
+    if (ids.length > 1) {
+      const [cx, cy] = mid(ids);
+      const need = Math.sqrt(ids.reduce((s, i) => s + (r[i] + gap) ** 2, 0) / AREA_PACK) + Math.max(...ids.map(i => r[i]));
+      const d = ids.map(i => Math.hypot(x[i] - cx, y[i] - cy)).sort((a, b) => a - b);
+      const have = d[Math.floor(d.length * 0.95)];
+      const s = have > 0 ? Math.max(1, need / have) : 1;
+      const lx = ids.map(i => cx + (x[i] - cx) * s), ly = ids.map(i => cy + (y[i] - cy) * s);
+      spreadDiscs(lx, ly, ids.map(i => r[i]), gap);
+      ids.forEach((i, j) => { x[i] = lx[j]; y[i] = ly[j]; });
+    }
+    const [cx, cy] = mid(ids);
+    const e = ids.map(i => Math.hypot(x[i] - cx, y[i] - cy) + r[i]).sort((a, b) => a - b);
+    return { ids, cx, cy, R: e[Math.floor((e.length - 1) * 0.95)] };
+  });
+  const bx = bodies.map(b => b.cx), by = bodies.map(b => b.cy);
+  // A grid sized for every body took 0.8 s off this pass on alex_second_brain,
+  // and moved the median node 226 px instead of 167: the order pairs are met in
+  // decides where the areas go.
+  spreadDiscs(bx, by, bodies.map(b => b.R), gap);
+  bodies.forEach((b, k) => b.ids.forEach(i => { x[i] += bx[k] - b.cx; y[i] += by[k] - b.cy; }));
+}
+
 // The circle the notes arrive on: rows [{id, area, links, r}] in area order,
 // biggest area first, most linked first inside one, clockwise from the top, so
 // the ring reads as arcs of one colour. Each note gets an arc its own size.
@@ -864,12 +933,12 @@ function clusterRing(groups, unit) {
   const G = groups.map(g => {
     let acc = 0, top = 0;
     const pos = g.r.map((r, j) => {
-      const d = j ? Math.sqrt(acc / 0.7) : 0;
+      const d = j ? Math.sqrt(acc / AREA_PACK) : 0;
       acc += (r + gap) ** 2;
       top = Math.max(top, r);
       return [d * Math.cos(j * GOLDEN), d * Math.sin(j * GOLDEN)];
     });
-    return { ...g, pos, R: Math.sqrt(acc / 0.7) + top };
+    return { ...g, pos, R: Math.sqrt(acc / AREA_PACK) + top };
   }).sort((a, b) => b.ids.length - a.ids.length || (a.name < b.name ? -1 : 1));
   const total = G.reduce((t, g) => t + 2 * g.R + pad, 0);
   let th = -Math.PI / 2;
@@ -1289,11 +1358,11 @@ function arrivalDone() {
 
 // The layout as it settled gives the fit a disc is counted from (KREF), at the
 // frame's size on a 1440px window so a layout does not depend on the window it
-// was computed in, and the overlap pass moves the notes apart at that size (see
-// spreadDiscs) where the discs fit the room the forces left them (discScale).
-// What links to nothing big is first put beside its folder (nearFolder), so the
-// fit is the big parts'. A ghost is the far end of a link and hidden until asked
-// for: it pushes nothing.
+// was computed in. A crowded vault is first spread by areas (spreadAreas), what
+// links to nothing big then goes beside its folder (nearFolder), so the fit is
+// the big parts', and the overlap pass moves the notes apart at that size
+// (spreadDiscs). A ghost is the far end of a link and hidden until asked for: it
+// pushes nothing.
 function spreadLayout() {
   const notes = RAW_NODES.filter(n => n.type !== "ghost");
   const x = notes.map(n => n.x || 0), y = notes.map(n => n.y || 0);
@@ -1312,17 +1381,22 @@ function spreadLayout() {
   // as fitting, and the factor would go back to 1.
   DISC_SCALE = 1;
   DISC_SCALE = discScale(x, y, notes.map(nodeRadius), part);
-  nearFolder(x, y, notes.map(nodeRadius), big, notes.map(n => {
+  const r = notes.map(nodeRadius), gap = 1.4 / KREF;
+  // A crowded vault is spread by areas, not note by note (Decision 1 gives way,
+  // the owner's pick of 2026-11-13). On alex_second_brain the pass to no overlap
+  // alone took the share of a note's ten nearest in its own area from 0.63 to
+  // 0.28; after the areas it is a last nudge. Measured there: the share is 0.89
+  // for the notes with an area of their own (0.73 as the forces left them), a
+  // note with none stands 6.7 px from the nearest note it is tied to (4.4), the
+  // median note moves 189 px, the notes' circle grows from 203 to 568 px and the
+  // median disc at the fit goes from 2.8 to 2.0 px. 1.2 s of the main thread,
+  // once: the layout cache holds it after.
+  if (DISC_SCALE < 1) spreadAreas(x, y, r, adoptAreas(notes.map(n => n.group == null ? -1 : n.group), pairs), big, gap);
+  nearFolder(x, y, r, big, notes.map(n => {
     const p = n.path || n.id;
     return p.slice(0, Math.max(0, p.lastIndexOf("/")));
-  }), 1.4 / KREF);
-  // A crowded vault keeps the forces' places and its discs overlap (Decision 1
-  // over O4, the owner 2026-11-13). Its core is a pile at any size a reader sees:
-  // on alex_second_brain 74% of the notes sat inside another's disc at the 0.5
-  // factor, and the pass to no overlap moved the median note 56 px and took the
-  // share of a note's ten nearest in its own area from 0.63 to 0.28. Before
-  // ADR-0152 that vault drew the forces' places at 0.646.
-  if (DISC_SCALE === 1) spreadDiscs(x, y, notes.map(nodeRadius), 1.4 / KREF);
+  }), gap);
+  spreadDiscs(x, y, r, gap);
   notes.forEach((n, i) => { n.x = x[i]; n.y = y[i]; });
 }
 
@@ -1892,7 +1966,9 @@ function WARMUP_TICKS() {
 // the overlap pass, or under a force slider, would be shown for good.
 // -5 since the discs fit the room the forces left (discScale): a layout spread
 // at full disc size is a packed ball on a dense vault, shown for good on a hit.
-const LAYOUT_KEY = "silica-graph-layout-5";
+// -6 since a crowded vault is spread by areas (spreadAreas): a hit would show
+// the forces' pile for good.
+const LAYOUT_KEY = "silica-graph-layout-6";
 const COLD_DECAY = 0.0228;   // d3's own: alpha 1 -> ALPHA_MIN in ~300 ticks
 const NODE_FP = (() => {
   let h = RAW_NODES.length;

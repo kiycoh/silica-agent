@@ -101,12 +101,54 @@ def test_discs_shrink_until_they_fill_half_the_room_the_forces_left_a_part():
     assert parts[0] == parts[1] == parts[2] and parts[3] == parts[4] and parts[0] != parts[3]
 
 
-def test_a_crowded_vault_keeps_the_forces_places():
+def test_a_crowded_vault_is_spread_by_areas():
     """The pass to no overlap mixed alex_second_brain's areas at every size a
-    reader sees (0.63 to 0.28 at the 0.5 factor), so a scaled vault skips it."""
+    reader sees (0.63 to 0.28 at the 0.5 factor), so a scaled vault is spread by
+    areas first and the pass is left a last nudge; what links to nothing big
+    goes beside its folder where the areas put it (ADR-0152 and ADR-0156,
+    amendments 2026-11-13)."""
     body = FRAME[FRAME.index("function spreadLayout() {"):]
     body = body[:body.index("\n}\n")]
-    assert "if (DISC_SCALE === 1) spreadDiscs(" in body
+    areas = body.index("if (DISC_SCALE < 1) spreadAreas(x, y, r, adoptAreas(")
+    assert areas < body.index("nearFolder(") < body.index("spreadDiscs(x, y, r, gap);")
+
+
+@needs_node
+def test_areas_laid_on_each_other_come_apart():
+    """Two areas laid on top of each other come out apart, a note of no area
+    and all, and a node outside a big part does not move; the overlap pass after
+    finds nothing to mix."""
+    xs, ys = _spiral(61, 10.0)
+    got = _pure(f"""
+      const x = {json.dumps(xs)}.concat([40]), y = {json.dumps(ys)}.concat([0]);
+      const area = x.map((_, i) => i < 60 ? i % 2 : -1);
+      const held = x.map((_, i) => i <= 60);
+      spreadAreas(x, y, x.map(() => 2), area, held, 0.5);
+      const loose = [x[61], y[61]];
+      spreadDiscs(x, y, x.map(() => 2), 0.5);
+      return [x, y, loose];
+    """)
+    x, y, loose = got
+    assert loose == [40, 0]
+    for i in range(len(x)):
+        for j in range(i):
+            assert math.hypot(x[i] - x[j], y[i] - y[j]) >= 4 - 1e-9
+    cen = [(sum(x[i] for i in range(k, 60, 2)) / 30, sum(y[i] for i in range(k, 60, 2)) / 30) for k in (0, 1)]
+    for i in range(60):
+        own, other = cen[i % 2], cen[1 - i % 2]
+        assert math.hypot(x[i] - own[0], y[i] - own[1]) < math.hypot(x[i] - other[0], y[i] - other[1])
+
+
+@needs_node
+def test_a_note_in_no_area_joins_the_area_of_its_ties():
+    """A note that is an area of one, or in none, is spread with the area most
+    of its ties are in, through such notes too; with no tie it stays alone
+    (the owner, 2026-11-13: "le note non linkate vanno nel loro vicino")."""
+    got = _pure("""
+      const area = [0, 0, 1, 1, -1, 5, -1, -1];
+      return adoptAreas(area, [[4, 0], [4, 1], [4, 2], [5, 2], [5, 3], [6, 4]]);
+    """)
+    assert got == [0, 0, 1, 1, 0, 1, 0, -1]
 
 
 @needs_node
