@@ -754,6 +754,45 @@ function spreadDiscs(x, y, r, gap) {
   }
 }
 
+// The room the forces left (ADR-0152, amendment 2026-11-13). A disc is counted
+// in pixels at the fit, so the room it needs does not shrink with the room the
+// layout gives it: alex_second_brain's notes needed 1.98 times the circle
+// ForceAtlas2 left them, and spreadDiscs, made for a last nudge, pushed the
+// median note 147 px and took the share of a note's ten nearest in its own area
+// from 0.63 to 0.13, a packed ball. Every disc is scaled down by one factor,
+// so that size still compares across the vault, until the discs fill at most
+// DISC_FILL of the circle round 95% of their part's notes, in the most crowded
+// part. Not pooled over the parts: there the 326 PDFs, at 0.31 of their own
+// circle, lent their room to the notes, which stayed at 0.62. 0.5 is the
+// owner's pick of 2026-11-13. A part under PART_MIN notes is left out: below 21
+// the 95th percentile is the farthest note, and one note alone would set the
+// circle. Returns the factor, 1 when nothing is crowded.
+const DISC_FILL = 0.5, PART_MIN = 21;
+function discScale(x, y, r, part) {
+  const parts = new Map();
+  part.forEach((p, i) => { if (parts.has(p)) parts.get(p).push(i); else parts.set(p, [i]); });
+  let fill = 0;
+  for (const ids of parts.values()) {
+    if (ids.length < PART_MIN) continue;
+    const cx = ids.reduce((s, i) => s + x[i], 0) / ids.length;
+    const cy = ids.reduce((s, i) => s + y[i], 0) / ids.length;
+    const d = ids.map(i => Math.hypot(x[i] - cx, y[i] - cy)).sort((a, b) => a - b);
+    const room = d[Math.floor(d.length * 0.95)] ** 2;
+    // A part on a single point has no room to measure, and says nothing.
+    if (room) fill = Math.max(fill, ids.reduce((s, i) => s + r[i] * r[i], 0) / room);
+  }
+  return fill > DISC_FILL ? Math.sqrt(DISC_FILL / fill) : 1;
+}
+
+// The connected parts of n notes over pairs [i, j] of their indices: a label
+// per note, equal for two notes of one part.
+function partsOf(n, pairs) {
+  const up = Array.from({ length: n }, (_, i) => i);
+  const root = i => { while (up[i] !== i) i = up[i] = up[up[i]]; return i; };
+  for (const [a, b] of pairs) up[root(a)] = root(b);
+  return up.map((_, i) => root(i));
+}
+
 // The circle the notes arrive on: rows [{id, area, links, r}] in area order,
 // biggest area first, most linked first inside one, clockwise from the top, so
 // the ring reads as arcs of one colour. Each note gets an arc its own size.
@@ -1212,13 +1251,19 @@ function arrivalDone() {
 // The layout as it settled gives the fit a disc is counted from (KREF), at the
 // frame's size on a 1440px window so a layout does not depend on the window it
 // was computed in, and the overlap pass moves the notes apart at that size (see
-// spreadDiscs). A ghost is the far end of a link and hidden until asked for: it
-// pushes nothing.
+// spreadDiscs), once the discs fit the room the forces left them (discScale).
+// A ghost is the far end of a link and hidden until asked for: it pushes nothing.
 function spreadLayout() {
   const notes = RAW_NODES.filter(n => n.type !== "ghost");
   const x = notes.map(n => n.x || 0), y = notes.map(n => n.y || 0);
   const span = v => Math.max(1, Math.max(...v) - Math.min(...v));
   KREF = Math.min(880 / span(x), 820 / span(y));
+  const at = new Map(notes.map((n, i) => [n.id, i]));
+  const pairs = RAW_EDGES.filter(e => at.has(e.from) && at.has(e.to)).map(e => [at.get(e.from), at.get(e.to)]);
+  // Measured at full size: discs already scaled by an earlier layout would read
+  // as fitting, and the factor would go back to 1.
+  DISC_SCALE = 1;
+  DISC_SCALE = discScale(x, y, notes.map(nodeRadius), partsOf(notes.length, pairs));
   spreadDiscs(x, y, notes.map(nodeRadius), 1.4 / KREF);
   notes.forEach((n, i) => { n.x = x[i]; n.y = y[i]; });
 }
@@ -1787,7 +1832,9 @@ function WARMUP_TICKS() {
 // one ForceAtlas2 reaches with it.
 // -4 since ADR-0152: a hit is now shown as it stands, and a layout saved before
 // the overlap pass, or under a force slider, would be shown for good.
-const LAYOUT_KEY = "silica-graph-layout-4";
+// -5 since the discs fit the room the forces left (discScale): a layout spread
+// at full disc size is a packed ball on a dense vault, shown for good on a hit.
+const LAYOUT_KEY = "silica-graph-layout-5";
 const COLD_DECAY = 0.0228;   // d3's own: alpha 1 -> ALPHA_MIN in ~300 ticks
 const NODE_FP = (() => {
   let h = RAW_NODES.length;
@@ -1816,6 +1863,7 @@ function loadLayout() {
   });
   if (hit !== RAW_NODES.length) return false;
   KREF = saved.kref || DISC_PX;
+  DISC_SCALE = saved.disc || 1;
   return true;
 }
 
@@ -1831,7 +1879,7 @@ function saveLayout() {
   });
   try {
     localStorage.setItem(LAYOUT_KEY + "-" + mode, JSON.stringify(
-      { fp: layoutFp(), pos: pos, kref: KREF }));
+      { fp: layoutFp(), pos: pos, kref: KREF, disc: DISC_SCALE }));
   } catch (e) { /* quota or blocked storage -> next load just re-settles */ }
 }
 
@@ -1848,10 +1896,12 @@ const NODE_REL_SIZE = 1.5;  // r = sqrt(val) * this — 16 => 6px, a 56 hub => 1
 // counted in pixels at the settled layout's fit: KREF is that fit's zoom, kept
 // with the layout, and DISC_PX puts 2 links at 3.4px and 51 at 10px, the sizes
 // the draft showed. Past the fit a disc grows with the root of the zoom, so a
-// note stays a note and the room round it opens up.
+// note stays a note and the room round it opens up. Those sizes hold where the
+// forces leave room for them; a crowded vault takes them down by DISC_SCALE,
+// also kept with the layout (discScale).
 const DISC_PX = 0.477;
-let KREF = DISC_PX;
-const nodeRadius = n => Math.sqrt(Math.max(0, n.size || 16)) * NODE_REL_SIZE * DISC_PX / KREF;
+let KREF = DISC_PX, DISC_SCALE = 1;
+const nodeRadius = n => Math.sqrt(Math.max(0, n.size || 16)) * NODE_REL_SIZE * DISC_PX * DISC_SCALE / KREF;
 const drawnRadius = (n, k) => nodeRadius(n) * (k > KREF ? Math.sqrt(KREF / k) : 1);
 
 // --- which names show (ADR-0152) --------------------------------------------
@@ -4231,7 +4281,7 @@ function buildGraph() {
   // Decided before the data lands: a cache hit is the picture, and the lib's
   // engine stops on its first frame without a tick, its cooldown already spent.
   const seeded = loadLayout();
-  if (!seeded) KREF = DISC_PX;
+  if (!seeded) { KREF = DISC_PX; DISC_SCALE = 1; }
   // A cold 3D build starts from the lib's own seed. With z left at the 0 a 2D
   // cache hit writes, it started flat on the 2D layout, stayed flat (median z 4
   // against a radius of 2,325) and was then kept for good. No z reseeds all three.

@@ -58,6 +58,49 @@ def test_the_overlap_pass_leaves_no_two_discs_overlapping():
             assert math.hypot(x[i] - x[j], y[i] - y[j]) >= r[i] + r[j]
 
 
+def _spiral(n: int, radius: float, cx: float = 0.0) -> tuple[list[float], list[float]]:
+    """n points spread evenly over a disc, the way a settled part fills its room."""
+    xs, ys = [], []
+    for i in range(n):
+        d, a = radius * math.sqrt((i + 0.5) / n), i * 2.399963
+        xs.append(cx + d * math.cos(a))
+        ys.append(d * math.sin(a))
+    return xs, ys
+
+
+@needs_node
+def test_discs_shrink_until_they_fill_half_the_room_the_forces_left_a_part():
+    """ADR-0152, amended 2026-11-13: discs counted in pixels at the fit needed
+    1.98 times the circle ForceAtlas2 left alex_second_brain's notes, and the
+    overlap pass mixed the areas. The most crowded part brings every disc down
+    to half its circle, and a sparse part does not lend it room; a sparse vault
+    keeps its discs; a part under 21 notes says nothing."""
+    xs, ys = _spiral(100, 100.0)
+    sx, sy = _spiral(5, 3.0, cx=1000.0)
+    fx, fy = _spiral(100, 100.0, cx=-1000.0)
+    got = _pure(f"""
+      const x = {json.dumps(xs)}, y = {json.dumps(ys)}, part = x.map(() => 0);
+      const dense = discScale(x, y, x.map(() => 10), part);
+      const sparse = discScale(x, y, x.map(() => 2), part);
+      const withSmall = discScale(x.concat({json.dumps(sx)}), y.concat({json.dumps(sy)}),
+        x.map(() => 10).concat([50, 50, 50, 50, 50]), part.concat([1, 1, 1, 1, 1]));
+      const withSparse = discScale(x.concat({json.dumps(fx)}), y.concat({json.dumps(fy)}),
+        x.map(() => 10).concat(x.map(() => 2)), part.concat(part.map(() => 2)));
+      const nowhere = discScale(x.map(() => 0), y.map(() => 0), x.map(() => 5), part);
+      return [dense, sparse, withSmall, withSparse, nowhere, partsOf(5, [[0, 1], [1, 2], [3, 4]])];
+    """)
+    dense, sparse, with_small, with_sparse, nowhere, parts = got
+    cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
+    r95 = sorted(math.hypot(a - cx, b - cy) for a, b in zip(xs, ys))[95]
+    assert dense < 1
+    assert dense ** 2 * 100 * 10 ** 2 / r95 ** 2 == pytest.approx(0.5)
+    assert sparse == 1
+    assert with_small == pytest.approx(dense)
+    assert with_sparse == pytest.approx(dense)
+    assert nowhere == 1
+    assert parts[0] == parts[1] == parts[2] and parts[3] == parts[4] and parts[0] != parts[3]
+
+
 @needs_node
 def test_the_circle_runs_in_area_order_clockwise_from_the_top():
     at = _pure("""
