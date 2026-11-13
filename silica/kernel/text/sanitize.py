@@ -4,7 +4,7 @@
 import logging
 import re
 
-from silica.kernel.base.syntax import FILE_UNSAFE_RE
+from silica.kernel.base.syntax import slugify
 from silica.model.reply import TruncatedArray, decode_json
 
 logger = logging.getLogger(__name__)
@@ -202,7 +202,7 @@ def normalize_ops(ops: list, *, verbatim_source: str | None = None) -> list:
             ]
 
         if isinstance(op.get("title"), str):
-            op["title"] = FILE_UNSAFE_RE.sub("", op["title"]).strip()
+            op["title"] = slugify(op["title"])
             if not op["title"]:
                 op["title"] = None
 
