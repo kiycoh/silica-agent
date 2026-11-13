@@ -314,7 +314,13 @@ async function lrAttach(id) {
     // a pick's text is the answer the previous row and the reveal show
     const picks = {}, answers = {};
     for (const [i, v] of Object.entries(verdicts)) if (v.pick != null) { picks[i] = v.pick; answers[i] = v.options?.[v.pick] || ""; }
-    lrSession = { ...s, cur: cur < 0 ? s.items.length - 1 : cur, answers, picks, verdicts, results, skipped, hintsUsed: {}, shown: {}, conf: null, told: false, state: "input", teachT };
+    // the hints read before the reload are on screen again, and still counted
+    const shown = {}, hintsUsed = {};
+    for (const it of s.items) {
+      const n = s.help?.[it.i]?.hints || 0;
+      if (n) { shown[it.i] = (it.hints || []).slice(0, n); hintsUsed[it.i] = n; }
+    }
+    lrSession = { ...s, cur: cur < 0 ? s.items.length - 1 : cur, answers, picks, verdicts, results, skipped, hintsUsed, shown, conf: null, told: false, state: "input", teachT };
     lrSession.choosing = lrFormats()[lrFormatKey(lrSession)] === "choice";
     const it = lrSession.items[lrSession.cur];
     if (it && verdicts[it.i]) { lrSession.state = "reveal"; lrSession.conf = verdicts[it.i].conf ?? null; lrSession.told = !!verdicts[it.i].told; }
@@ -2765,10 +2771,18 @@ function lrFormatSwitch(s, it) {
   if (s.choosing) row.appendChild(mkEl("span", "lr-help", lrAsChoice(s, it)
     ? "A right pick is Good at most and is not counted as met without help."
     : "No four options for this question: answer it in writing."));
+  else if (s.help?.[it.i]?.options) row.appendChild(mkEl("span", "lr-help", "You saw the four options: a written answer counts as met with help, Hard at most."));
   return row;
 }
 
 function lrOptions(s, it) {
+  // the four on screen are a hint to a written answer, kept by the server past
+  // a reload (ADR-0168 amended 2026-11-13); marked once the post lands
+  if (!s.help?.[it.i]?.options) {
+    apiPost("/learn/help", { id: s.id, i: it.i, options: true })
+      .then((h) => { (s.help ||= {})[it.i] = h; })
+      .catch(() => { /* not recorded: the next render of the four sends it again */ });
+  }
   const box = mkEl("div", "lr-choices");
   box.setAttribute("role", "radiogroup"); box.setAttribute("aria-label", "options");
   it.options.forEach((text, n) => {
@@ -2913,6 +2927,7 @@ function lrSaidWith(s, it) {
   if (s.conf !== null && s.conf !== undefined) bits.push(LR_CONF.find((c) => c[1] === s.conf)?.[0] || String(s.conf));
   const used = (s.shown[it.i] || []).length;
   if (used) bits.push(`${lrPlural(used, "hint")} used`);
+  if (s.help?.[it.i]?.options && s.verdicts[it.i]?.grader !== "choice") bits.push("after the four options");
   return bits;
 }
 
@@ -3031,6 +3046,8 @@ function lrHint() {
   if (!next || shown.length >= 2) return;
   shown.push(next);
   s.hintsUsed[it.i] = shown.length;
+  apiPost("/learn/help", { id: s.id, i: it.i, hints: shown.length })
+    .catch(() => { /* the answer still sends the count; only a reload before it loses the hint */ });
   lrRender();
 }
 

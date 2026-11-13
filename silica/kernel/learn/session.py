@@ -79,7 +79,7 @@ _LAST: dict | None = None
 LIVE_FILE = "learn-live.json"
 # JSON has no int keys and no sets: these fields are converted on the way out
 # and back, every other value is already plain JSON.
-_INT_KEYED = ("verdicts", "recorded", "teach", "aids")
+_INT_KEYED = ("verdicts", "recorded", "teach", "aids", "help")
 _SETS = ("skipped", "escalated", "dropped", "retested")
 _SAVE_LOCK = threading.Lock()
 _ITEMS_LOCK = threading.Lock()   # a retest is appended from a route and from its generator's thread
@@ -409,6 +409,7 @@ def reload(sid: str) -> dict:
     out["results"] = {str(i): r["result"] for i, r in s["recorded"].items()}
     # a teach-back in progress: the reader's words and the student's questions
     out["teach"] = {str(i): {"turn": t["turn"], "transcript": t["transcript"]} for i, t in s["teach"].items()}
+    out["help"] = {str(i): h for i, h in (s.get("help") or {}).items()}
     return out
 
 
@@ -427,7 +428,8 @@ def _item(s: dict, i: Any) -> dict:
 
 def _verdict_payload(v: dict, it: dict) -> dict:
     out = {k: v.get(k) for k in ("grade", "rating", "correct", "feedback_line", "rubric_notes", "grader",
-                                 "paraphrase", "misconception", "note_defect", "skip", "needs_self_grade", "told", "pick")}
+                                 "paraphrase", "misconception", "note_defect", "skip", "needs_self_grade", "told", "pick",
+                                 "hints")}
     out.update({"claim": it.get("claim", ""), "answer": it.get("answer", ""), "criteria": it.get("criteria", ""),
                 "span": {**(it.get("source") or {}), "text": it.get("span", "")}, "path": it["path"],
                 "title": it.get("title", ""), "kind": it["kind"], "level": it["level"],
@@ -447,8 +449,18 @@ def answer(sid: str, i: Any, *, conf=None, hints=0, told=False, production="", m
                                  and 0 <= pick < len(it.get("options") or [])):
         raise Refused(INVALID, "pick one of the item's options")
     conf = conf if conf in (90, 70, 50, 25) else None
-    hints = max(0, int(hints or 0))
+    # the help on screen is the session's record, not only the page's count:
+    # a reload sends hints 0 for a hint the reader read before it
+    shown = (s.get("help") or {}).get(it["i"]) or {}
+    hints = max(0, int(hints or 0), int(shown.get("hints") or 0))
     told = bool(told)
+    # The four options are a hint to a written answer (ADR-0168 amended
+    # 2026-11-13): written after them, an answer was met with help, as after
+    # H1. A pick is the choice it is, graded by its key.
+    seen = pick is None and not told and bool(shown.get("options"))
+    hints += seen
+    if pick is not None:
+        s.setdefault("help", {}).setdefault(it["i"], {})["options"] = True
     production = str(production or "")
     # Anything but "voice" is typed: the page sends voice once a dictation
     # landed in this answer, however much was typed around it (ADR-0049).
@@ -466,11 +478,34 @@ def answer(sid: str, i: Any, *, conf=None, hints=0, told=False, production="", m
     else:
         with _metered(s):
             v = grade.grade(it, production=production, conf=conf, hints=hints, told=told, spoken=modality == "voice")
-    v.update(conf=conf, hints=hints, told=told, production=production, modality=modality)
+    v.update(conf=conf, hints=hints, told=told, production=production, modality=modality, seen=seen)
     s["verdicts"][it["i"]] = v
     s["skipped"].discard(it["i"])
     _save()
     return _verdict_payload(v, it)
+
+
+def help_shown(sid: str, i: Any, *, options: Any = False, hints: Any = 0) -> dict:
+    """The help the page put on screen for an item before its answer: the four
+    options, and how many hints. Kept in the session, so an answer written
+    after a reload or a restart still counts the help it was given (the
+    owner, 2026-11-13: an answer after a hint is with help, otherwise
+    without); the page's own count dies with the tab."""
+    s = _live(sid)
+    it = _item(s, i)
+    try:
+        n = min(max(0, int(hints or 0)), len(it.get("hints") or []))
+    except (TypeError, ValueError):
+        raise Refused(INVALID, "hints is a count")
+    rec = dict((s.get("help") or {}).get(it["i"]) or {})
+    if options is True and it.get("options"):
+        rec["options"] = True
+    if n > int(rec.get("hints") or 0):
+        rec["hints"] = n
+    if rec:
+        s.setdefault("help", {})[it["i"]] = rec
+        _save()
+    return rec
 
 
 def skip(sid: str, i: Any) -> dict:
@@ -554,8 +589,11 @@ def ledger_entry(s: dict, it: dict, v: dict, correct: bool, rating: int, grader:
         entry.update(origin="placement", step=it["placement"]["step"], rank=it["placement"]["rank"])
     if it.get("retest"):
         entry["retest"] = True
-    if entry["hints"] and it.get("rungs"):
-        entry["rungs"] = it["rungs"][:entry["hints"]]   # which help, not only how much (ADR-0135 point 5)
+    # which help, not only how much (ADR-0135 point 5): the options first,
+    # then the hints in the order the page shows them
+    rungs = (["options"] if v.get("seen") else []) + list(it.get("rungs") or [])
+    if entry["hints"] and rungs:
+        entry["rungs"] = rungs[:entry["hints"]]
     return entry
 
 

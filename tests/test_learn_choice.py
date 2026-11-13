@@ -213,6 +213,86 @@ def test_a_missed_pick_comes_back_on_the_same_four_in_a_new_order(client, monkey
     assert again["options"][again["key"]] == RIGHT and again["q"] == first["q"]
 
 
+def _precise(monkeypatch):
+    monkeypatch.setattr(grade, "_llm", lambda *a, **k: (
+        "GRADE: recalled\nPRECISE: yes\nRUBRIC: all there\nFEEDBACK: Right.\nPARAPHRASE: yes\nMISCONCEPTION: none\n"
+        "NOTE_DEFECT: none\n", "stop"))
+
+
+def test_a_written_answer_after_the_options_were_shown_is_with_help_and_a_reload_keeps_it(client, tmp_path, monkeypatch):
+    """The owner, 2026-11-13: a written answer given after a hint is with help,
+    otherwise without, and the four options are a hint. Seen in the running
+    app the same day: the options shown, then "Answer by writing", was met
+    without help and Easy."""
+    from silica.kernel.learn import session as learn_session
+
+    c, _ = client
+    _precise(monkeypatch)
+    s = _start(c)
+    live = learn_session._LIVE
+    live["items"].append({**live["items"][0], "i": len(live["items"]) + 1})
+    shown, never = live["items"][0], live["items"][-1]
+    for it in (shown, never):
+        it.update(options=list(OPTS), key=2, grader="model", rungs=["H1"], hints=["Pensa alla distanza."])
+    assert c.post("/learn/help", json={"id": s["id"], "i": shown["i"], "options": True}).json()["options"] is True
+    # what a restart reads back: the help shown is the session's, not the tab's
+    learn_session._reset()
+    page = c.get("/learn/session", params={"id": s["id"]}).json()
+    assert page["help"] == {str(shown["i"]): {"options": True}}
+    v = c.post("/learn/answer", json={"id": s["id"], "i": shown["i"], "production": RIGHT, "conf": 90}).json()
+    assert v["correct"] is True and v["rating"] == grade.HARD and v["hints"] == 1   # the page sent no hint
+    # the page confirms the proposal; a change stays the reader's, logged beside it, as for any hint (ADR-0040)
+    r = c.post("/learn/rate", json={"id": s["id"], "i": shown["i"], "rating": v["rating"]}).json()
+    assert r["rating"] == grade.HARD and r["unassisted"] is False
+    line = json.loads((tmp_path / "quiz.jsonl").read_text().splitlines()[-1])
+    assert (line["grader"], line["hints"], line["rungs"]) == ("model", 1, ["options"])   # no H1 claimed as shown
+    # options the reader never saw are no help: the same answer, unassisted and Easy
+    v = c.post("/learn/answer", json={"id": s["id"], "i": never["i"], "production": RIGHT, "conf": 90}).json()
+    assert v["rating"] == grade.EASY and v["hints"] == 0
+    assert c.post("/learn/rate", json={"id": s["id"], "i": never["i"], "rating": 4}).json()["unassisted"] is True
+    rows = {x["i"]: x for x in c.post("/learn/close", json={"id": s["id"]}).json()["items"]}
+    assert (rows[shown["i"]]["status"], rows[shown["i"]]["marker"]) == ("assisted", "assisted")
+    assert rows[never["i"]]["status"] == "met"
+
+
+def test_a_hint_shown_before_a_reload_still_counts_and_a_pick_is_still_a_pick(client, tmp_path, monkeypatch):
+    from silica.kernel.learn import session as learn_session
+
+    c, _ = client
+    _precise(monkeypatch)
+    s = _start(c)
+    live = learn_session._LIVE
+    live["items"].append({**live["items"][0], "i": len(live["items"]) + 1})
+    first, second = live["items"][0], live["items"][-1]
+    for it in (first, second):
+        it.update(options=list(OPTS), key=2, grader="model", rungs=["H1", "lede"], hints=["Pensa alla distanza.", "Il lede."])
+    c.post("/learn/help", json={"id": s["id"], "i": first["i"], "hints": 1})
+    c.post("/learn/help", json={"id": s["id"], "i": first["i"], "hints": 9})       # never more than the item holds
+    assert c.get("/learn/session", params={"id": s["id"]}).json()["help"] == {str(first["i"]): {"hints": 2}}
+    v = c.post("/learn/answer", json={"id": s["id"], "i": first["i"], "production": RIGHT, "conf": 90, "hints": 0}).json()
+    assert v["hints"] == 2 and v["rating"] == grade.HARD
+    c.post("/learn/rate", json={"id": s["id"], "i": first["i"], "rating": v["rating"]})
+    assert json.loads((tmp_path / "quiz.jsonl").read_text().splitlines()[-1])["rungs"] == ["H1", "lede"]
+    # a pick after the options is graded by its key, as before: the options are its format, not an extra hint
+    c.post("/learn/help", json={"id": s["id"], "i": second["i"], "options": True})
+    v = c.post("/learn/answer", json={"id": s["id"], "i": second["i"], "pick": 2, "conf": 70}).json()
+    assert (v["grader"], v["rating"], v["hints"]) == ("choice", grade.GOOD, 0)
+
+
+def test_the_page_says_which_help_it_showed_where_a_reload_reads_it_back():
+    from tests.webassets import WEB
+
+    js = (WEB / "app-learn.js").read_text(encoding="utf-8")
+    options = js[js.index("function lrOptions("):js.index("function lrPick(")]
+    assert '"/learn/help"' in options and "options: true" in options
+    hint = js[js.index("function lrHint("):js.index("async function lrSkip(")]
+    assert '"/learn/help"' in hint
+    attach = js[js.index("async function lrAttach("):js.index("// --- the bar")]
+    assert "s.help" in attach
+    switch = js[js.index("function lrFormatSwitch("):js.index("function lrOptions(")]
+    assert "You saw the four options" in switch
+
+
 def test_a_pick_never_becomes_the_written_answer_and_a_reloaded_right_pick_reads_with_help():
     """Seen in the running app, 2026-11-12: a pick, then "Answer by writing",
     put the option's text in the box, and submitting it was graded by the model
