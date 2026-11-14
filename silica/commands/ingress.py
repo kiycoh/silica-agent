@@ -151,20 +151,29 @@ def web_search(c: Call) -> Result:
 
 
 def fetch(c: Call) -> Result:
-    """/fetch <url> — one page (or video transcript) into an inbox note."""
+    """/fetch <url...>: each page (or video transcript) into an inbox note, in
+    turn: a profile's reels arrive as a list of addresses, and one refused
+    address must not cost the ones after it."""
     args, out = c.args, c.out
     from rich.markup import escape
 
     from silica.sources.web_research import fetch_to_inbox
-    url = " ".join(args).strip()
-    if not url:
+    urls = [a.strip() for a in args if a.strip()]
+    if not urls:
         return out.refused(f"/fetch requires a URL. Usage: {c.row.synopsis}")
 
-    try:
-        note_rel = fetch_to_inbox(url)
-        out.print(f"  Saved [bold]{escape(note_rel)}[/] in your Inbox. {_NEXT}")
-    except Exception as e:  # SSRF guard, bot wall, missing yt-dlp, network
-        out.print(f"  [yellow][bold]Not saved.[/bold] {_sentence(e)}[/]")
+    many, saved = len(urls) > 1, 0
+    for url in urls:
+        try:
+            note_rel = fetch_to_inbox(url)
+            saved += 1
+            out.print(f"  Saved [bold]{escape(note_rel)}[/] in your Inbox." + ("" if many else f" {_NEXT}"))
+        except Exception as e:  # SSRF guard, bot wall, missing yt-dlp, network
+            said = f"Not saved: {escape(url)}." if many else "Not saved."
+            out.print(f"  [yellow][bold]{said}[/bold] {_sentence(e)}[/]")
+    if many:
+        out.print(f"  {saved} of {len(urls)} saved."
+                  + (" Read them, then /nucleate turns them into notes." if saved else ""))
     return out
 
 

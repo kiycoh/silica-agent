@@ -2841,9 +2841,27 @@ def _asr_via_whispercpp(wav: Path) -> str:
                        paragraph_gap_s=_ASR_PARAGRAPH_GAP_S)
 
 
+def _asr_local(wav: Path) -> str:
+    """In process, through the `stt` extra's faster-whisper (agent/stt.py): the
+    one lane that needs neither a server nor a binary. Added 2026-11-14 for a
+    laptop that ran neither whisper-server nor whisper-cli, where a recording
+    and an Instagram reel both stopped at the endpoint's connection error."""
+    from silica.agent import stt
+
+    if not stt.has_local_stt():
+        raise ValueError("stt_provider=local needs faster-whisper: install silica with its "
+                         "`stt` extra, or set SILICA_STT_PROVIDER to endpoint or whispercpp")
+    units = [{"text": s.text, "start": s.start, "end": s.end}
+             for s in stt.local_segments(str(wav), lang=CONFIG.stt_lang,
+                                         model=stt.local_stt_model(CONFIG))]
+    return _paragraphs_at_pauses({"text": "".join(u["text"] for u in units), "segments": units},
+                                 _ASR_PARAGRAPH_GAP_S)
+
+
 ASR_PROVIDERS = {
     "endpoint": _asr_via_endpoint,
     "whispercpp": _asr_via_whispercpp,
+    "local": _asr_local,
 }
 
 
@@ -2855,6 +2873,20 @@ def _via_asr(src: Path, workdir: Path) -> tuple[str, Path]:
     write for free, and a three-hour talk is split like a book instead of
     landing as one note RECON caps at 40 concepts.
     """
+    text = transcribe_media(src, workdir)
+    images = workdir / "images"
+    images.mkdir(parents=True, exist_ok=True)  # none, but the tail expects a dir
+    # Empty, NOT a bare heading: the shared empty guard is what turns this
+    # into an error, and a heading would make silence look like success.
+    # A heading gives the segmenter a cut point and the note a title line; the
+    # stem is all the metadata a bare media file carries.
+    return (f"# {src.stem}\n\n{text}\n" if text.strip() else ""), images
+
+
+def transcribe_media(src: Path, workdir: Path) -> str:
+    """`src`'s speech as text, "" when none came: admission, demux, the
+    configured provider and the charge, for /convert and for /fetch of a
+    reel (web_fetch), which has no subtitle track to read instead."""
     if CONFIG.stt_provider not in ASR_PROVIDERS:
         raise ValueError(
             f"unknown stt_provider {CONFIG.stt_provider!r} "
@@ -2875,18 +2907,12 @@ def _via_asr(src: Path, workdir: Path) -> tuple[str, Path]:
         # the same file came back whole on the next call. One retry: a file
         # that really is silence pays one more upload.
         text = ASR_PROVIDERS["endpoint"](audio)
-    images = workdir / "images"
-    images.mkdir(parents=True, exist_ok=True)  # none, but the tail expects a dir
     if not text.strip():
-        # Empty, NOT a bare heading: the shared empty guard is what turns this
-        # into an error, and a heading would make silence look like success.
         # Not charged: after the retry it is as likely a provider that failed
         # twice as a file with no speech, and the minutes are the student's.
-        return "", images
+        return ""
     admission.charge(seconds)
-    # A heading gives the segmenter a cut point and the note a title line; the
-    # stem is all the metadata a bare media file carries.
-    return f"# {src.stem}\n\n{text}\n", images
+    return text
 
 
 def _mineru_error(stderr: str) -> str:

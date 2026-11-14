@@ -299,12 +299,14 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/fetch",
         group="direct",
-        usage="<url>",
-        summary="read one web address into a note in the Inbox, word for word: YouTube gives "
-                "its transcript, Reddit its thread, GitHub its README, file or issue",
+        usage="<url...>",
+        summary="read web addresses into notes in the Inbox, word for word: YouTube gives "
+                "its transcript, an Instagram reel its caption and transcribed speech, "
+                "Reddit its thread, GitHub its README, file or issue",
         examples=(
             "/fetch https://arxiv.org/abs/2005.11401",
             "/fetch https://www.youtube.com/watch?v=aircAruvnKk",
+            "/fetch https://arxiv.org/abs/2005.11401 https://youtu.be/aircAruvnKk",
             "/fetch https://github.com/psf/requests/issues/6000",
         ),
         handler="silica.commands.ingress:fetch", shlex=True, demo_off=True,

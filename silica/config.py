@@ -1095,8 +1095,9 @@ class SilicaConfig:
     )
     stt_api_key: str = from_env("SILICA_STT_API_KEY", "lm-studio", hosted=True)
 
-    # "endpoint" (the server above) or "whispercpp" (spawn the CLI locally).
-    # /convert honours this; dictation always goes to the endpoint, since the
+    # "endpoint" (the server above), "whispercpp" (spawn the CLI locally) or
+    # "local" (in process, the `stt` extra's faster-whisper on stt_local_model).
+    # /convert and /fetch of an Instagram reel honour this; dictation always goes to the endpoint, since the
     # browser is already talking to the server.
     stt_provider: str = from_env("SILICA_STT_PROVIDER", "endpoint", aliases=("SILICA_ASR_PROVIDER",))
     # Path to (or name on PATH of) the whisper.cpp CLI, for stt_provider=whispercpp.

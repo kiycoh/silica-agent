@@ -2336,3 +2336,18 @@ def test_another_failure_keeps_its_own_type(tmp_vault, monkeypatch):
     with pytest.raises(ValueError) as caught:
         conv.convert(src)
     assert type(caught.value) is ValueError
+
+
+def test_the_local_provider_cuts_paragraphs_at_pauses(monkeypatch, tmp_path):
+    """In process, no server: the lane for a machine that runs none."""
+    from silica.agent import stt
+
+    seg = types.SimpleNamespace
+    monkeypatch.setattr(stt, "has_local_stt", lambda: True)
+    monkeypatch.setattr(stt, "local_segments", lambda audio, lang, model: [
+        seg(text=" La Torre parla di crollo.", start=0.0, end=2.0),
+        seg(text=" E di rinascita.", start=2.2, end=3.5),
+        seg(text=" Passiamo alla Luna.", start=9.0, end=10.0),
+    ])
+    assert conv.ASR_PROVIDERS["local"](tmp_path / "audio.wav") == \
+        "La Torre parla di crollo. E di rinascita.\n\nPassiamo alla Luna."
