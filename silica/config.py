@@ -1113,6 +1113,9 @@ class SilicaConfig:
     # faster-whisper size, a HuggingFace repo id or a local CTranslate2
     # directory. Empty = agent.stt.LOCAL_STT_MODEL.
     stt_local_model: str = from_env("SILICA_STT_LOCAL_MODEL", doc=True)
+    # "cuda" runs it on the GPU in float16 (agent/stt.py `_device`, measured
+    # there); anything else is the CPU in int8.
+    stt_local_device: str = from_env("SILICA_STT_LOCAL_DEVICE", "cpu", doc=True)
     # The browser's own recognizer (Web Speech API), the last dictation lane when
     # neither transcriber answers. Off by default because Chrome's recognizer
     # sends the audio to Google unless asked not to: "on-device" allows only

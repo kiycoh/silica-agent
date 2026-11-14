@@ -1109,7 +1109,8 @@ def test_a_reel_typed_by_the_person_is_its_caption_and_its_transcribed_speech(mo
     rel = fetch_to_inbox("https://www.instagram.com/reel/DAbc123/")
     note = (Path(CONFIG.vault_path) / rel).read_text(encoding="utf-8")
 
-    assert "Il significato della Torre" in rel  # the caption's first worded line, not "Video by"
+    # the caption's first worded line and the day, not "Video by"
+    assert rel.endswith("Il significato della Torre 2026-11-02.md")
     assert "Posted by @patty_esoterica on 2026-11-02." in note
     assert "## Caption\n\n#tarocchi #esoterismo\nIl significato della Torre" in note
     assert "## Transcript\n\nCiao a tutti, oggi parliamo dei tarocchi." in note
@@ -1164,3 +1165,18 @@ def test_a_profile_is_refused_in_silicas_words_not_yt_dlps(monkeypatch):
                 wf.fetch_page(url)
     finally:
         wf_site().PERSON_ASKED.reset(token)
+
+
+def test_an_emoji_title_reads_back_as_itself():
+    """A JSON surrogate pair came back from PyYAML as two lone surrogates that
+    UTF-8 refuses (an Instagram caption's 🌀, 2026-11-14)."""
+    import yaml
+
+    from silica.sources.web_research import build_note
+
+    note = build_note("🌀 DOMANDE ALLE BACCHETTE 🌀", "Source: x\n\ntext", [("https://x.test/", "x")],
+                      source="web-fetch", force_sources=True, form="clip")
+    title = yaml.safe_load(note.split("---")[1])["title"]
+    assert title == "🌀 DOMANDE ALLE BACCHETTE 🌀"
+    title.encode("utf-8")
+

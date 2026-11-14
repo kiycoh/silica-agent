@@ -115,36 +115,43 @@ def local_stt_model(config: Any) -> str:
 # and the transcription that follows it a few seconds later would otherwise
 # each fetch the same 480 MB.
 _lock = threading.Lock()
-_models: dict[str, Any] = {}
+_models: dict[tuple[str, str], Any] = {}
+
+
+def _device() -> str:
+    """SILICA_STT_LOCAL_DEVICE, cpu unless set to cuda. CPU by default and not
+    "auto": ctranslate2 picks CUDA whenever a device is present, and then needs
+    cuDNN 9 and cuBLAS beside it, which `pip install faster-whisper` does not
+    install (its README); a fully local stack also already fills a 12 GB GPU."""
+    from silica.config import CONFIG
+
+    return "cuda" if (CONFIG.stt_local_device or "").strip().lower() == "cuda" else "cpu"
 
 
 def _load(model: str) -> Any:
+    key = (model, _device())
     with _lock:
-        if model not in _models:
+        if key not in _models:
             from faster_whisper import WhisperModel
 
-            # CPU and not "auto": ctranslate2 picks CUDA whenever a device is
-            # present, and then needs cuDNN 9 and cuBLAS beside it, which
-            # `pip install faster-whisper` does not install (its README); the
-            # default local stack also already fills a 12 GB GPU.
-            # ponytail: CPU only. Measured 2026-09-27 on a 32-thread laptop:
-            # 5.5 s for a 30 s Italian clip on CPU, 1.2 s on its RTX 4080
-            # (cuDNN there came with torch from [rerank]), 25 s for 170 s on
-            # CPU, 17 s to fetch and load once. Add SILICA_STT_LOCAL_DEVICE
-            # when a 30 s clip takes over 10 s on someone's CPU.
-            _models[model] = WhisperModel(model, device="cpu", compute_type="int8")
-        return _models[model]
+            # Measured 2026-11-14 on an RTX 4080 laptop, 171 s of Italian
+            # speech: small 24.0 s on CPU int8, 3.0 s on CUDA float16;
+            # large-v3-turbo 3.7 s on CUDA, punctuated where small was not.
+            # CUDA ran without torch imported (ctranslate2 4.x found cuDNN).
+            _models[key] = WhisperModel(model, device=key[1],
+                                        compute_type="float16" if key[1] == "cuda" else "int8")
+        return _models[key]
 
 
 def loaded(model: str) -> bool:
-    return model in _models
+    return (model, _device()) in _models
 
 
 def warm(model: str) -> None:
     """Load (and on first use download) the model in the background, so it is
     ready by the time the speaker stops. Called by the status probe, which the
     browser sends on the click that opens the microphone."""
-    if model in _models:
+    if loaded(model):
         return
     threading.Thread(target=_warm_quietly, args=(model,), daemon=True, name="stt-warm").start()
 

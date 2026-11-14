@@ -526,7 +526,7 @@ def _write_parent(rec: dict, topics: list[str]) -> None:
     today = datetime.date.today().isoformat()
     lines = [
         "---",
-        f"title: {json.dumps(rec['question'])}",
+        f"title: {json.dumps(rec['question'], ensure_ascii=False)}",  # see web_research.build_note
         "source: deep-research",
         f"shape: {rec['shape']}",
         "document: true",
