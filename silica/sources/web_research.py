@@ -1742,18 +1742,29 @@ def _first_line_of(text: str) -> str:
 
 
 def fetched_addresses() -> dict[str, str]:
-    """`{address: leaf}` for every page /fetch already read: the first line under
-    a leaf's frontmatter, which `fetch_to_inbox` writes as `Source: <address>`.
+    """`{address: leaf}` for every page /fetch already read and whose note is
+    still there: the first line under a leaf's frontmatter, which
+    `fetch_to_inbox` writes as `Source: <address>`.
 
-    The leaf and not the Inbox note, because /nucleate archives the note and
-    the leaf stays. A /web-search leaf whose first tool call was a fetch opens
-    the same way, so its first page counts as fetched too.
+    The leaf names the address and the note says it is still wanted. The leaf
+    alone, as until 2026-11-14 evening, kept 30 reels a person had deleted from
+    the Inbox out of every later list. The note is looked for in the Inbox and
+    in the archive, where /nucleate moves it under the same key; a note moved
+    anywhere else reads as deleted, so its address is fetched again. A
+    /web-search leaf whose first tool call was a fetch opens the same way, so
+    its first page counts as fetched too.
     """
     from silica.kernel.base.layout import SOURCES_DIR
+    from silica.kernel.base.manifest import active_done_dir, active_inbox_dir
 
-    root = Path(CONFIG.vault_path) / SOURCES_DIR
+    vault = Path(CONFIG.vault_path)
+    root = vault / SOURCES_DIR
+    homes = [d for d in (active_inbox_dir() or "Inbox", active_done_dir()) if d]
     found: dict[str, str] = {}
     for leaf in sorted(root.rglob("*.md")) if root.is_dir() else ():
+        key = leaf.relative_to(root).as_posix()
+        if not any((vault / home / key).exists() for home in homes):
+            continue
         try:
             with leaf.open(encoding="utf-8", errors="replace") as fh:
                 head = fh.read(4096)
@@ -1764,7 +1775,7 @@ def fetched_addresses() -> dict[str, str]:
         body = head.split("\n---\n", 1)[-1] if head.startswith("---\n") else head
         first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
         if first.startswith("Source: "):
-            found.setdefault(first.removeprefix("Source: ").strip(), leaf.relative_to(root).as_posix())
+            found.setdefault(first.removeprefix("Source: ").strip(), key)
     return found
 
 
