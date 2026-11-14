@@ -258,7 +258,7 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/decide <decision> [--why ...] [--expect ...] [--review YYYY-MM-DD] [--target DIR]` | write a decision as a note in Decisions/, as typed, no model involved |
 | `/outcome <note> <what happened> [--status kept\|changed\|reversed]` | add a dated outcome to a decision note |
 | `/decisions [open\|due\|all]` | list decision notes, those due for review first, with what was expected and the last outcome |
-| `/convert <file...> [--target=DIR]` | transcode a non-.md file (PDF) into a markdown note in the inbox |
+| `/convert <file\|folder...> [--target=DIR]` | transcode a non-.md file (PDF), or every one in a folder not converted yet, into a markdown note in the inbox |
 | `/web-search "<concept>" [--max-searches=N]` | research a concept on the web -> cited findings note in the Inbox (then /nucleate) |
 | `/keep` | save the last /web answer as a cited note in the Inbox (then /nucleate) |
 | `/fetch <url>` | read one URL (YouTube gives its transcript, Reddit its thread, GitHub its README, file or issue) -> verbatim note in the Inbox |

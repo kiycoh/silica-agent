@@ -308,8 +308,10 @@ def _note_dir(src: Path, inbox: str, beside: bool = False) -> str:
     A file the vault's + imported (`beside`) converts beside itself wherever it
     sits in the vault: the same rule against the vault root.
     ponytail: a source outside the inbox given to /convert still lands at the
-    inbox root, so two such sources with one name still collide; the upgrade is
-    `beside` for /convert too, due when a /convert of a library reports it.
+    inbox root, so two such sources with one name still collide. A /convert of
+    a folder leaves the second out and says so (ingest.convert_targets); two
+    such files named in turn still overwrite. The upgrade is `beside` for
+    /convert too, due when one person reports either case.
     """
     vault = Path(CONFIG.vault_path or ".").resolve()
     if beside:
@@ -334,6 +336,15 @@ def _note_dir(src: Path, inbox: str, beside: bool = False) -> str:
     except (ValueError, OSError):
         return inbox
     return inbox if rel == Path(".") else f"{inbox}/{rel.as_posix()}"
+
+
+def note_of(src: Path) -> str:
+    """The `<stem>.md` a convert() of `src` writes, with no `leaf` and no
+    `beside`: a one-part file's note, a longer one's list of its parts
+    (`_doc_to_md`). Two sources with one answer overwrite each other's notes."""
+    from silica.kernel.base.manifest import active_inbox_dir
+
+    return _in(_note_dir(src, active_inbox_dir() or "Inbox"), f"{source_stem(src)}.md")
 
 
 def _split_on_headings(md: str) -> list[str]:

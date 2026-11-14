@@ -249,10 +249,11 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/convert",
         group="direct",
-        usage="<file...> [--target=DIR]",
-        summary="turn a PDF or another document into a note in the Inbox, word for word",
+        usage="<file|folder...> [--target=DIR]",
+        summary="turn a PDF or another document, or every one in a folder, into a note in the Inbox, word for word",
         examples=(
             "/convert paper.pdf",
+            "/convert Inbox/lectures",
             "/convert paper.pdf --target=Concepts/AI",
         ),
         handler="silica.commands.ingress:convert", shlex=True, demo_off=True,

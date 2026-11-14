@@ -1551,7 +1551,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       pending.remove();
       drawJobAnswer(flow, d);
       outcome = "success";
-      announce("files queued for conversion");
+      announce(d.jobs.length ? "files queued for conversion" : "no file queued for conversion");
       return;
     }
     const reader = resp.body.getReader();
