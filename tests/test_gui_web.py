@@ -457,19 +457,32 @@ def test_a_list_pasted_again_skips_what_its_leaves_already_hold(client, monkeypa
     import silica.sources.web_research as wr
     from silica.config import CONFIG
 
-    leaves = Path(CONFIG.vault_path) / "sources"
-    leaves.mkdir(exist_ok=True)
-    (leaves / "Reel one.md").write_text(
-        "---\ndate: 2026-11-14\ntype: Source\n---\n\nSource: https://x.test/reel/a/\n\ntext\n", encoding="utf-8")
+    vault = Path(CONFIG.vault_path)
+    (vault / "sources").mkdir(exist_ok=True)
+    (vault / "Inbox").mkdir(exist_ok=True)
+    for name, code in (("Reel one.md", "a"), ("Reel deleted.md", "d")):
+        (vault / "sources" / name).write_text(
+            f"---\ndate: 2026-11-14\ntype: Source\n---\n\nSource: https://x.test/reel/{code}/\n\ntext\n",
+            encoding="utf-8")
+    (vault / "Inbox" / "Reel one.md").write_text("---\ntitle: one\n---\n", encoding="utf-8")
     asked = []
     monkeypatch.setattr(wr, "fetch_to_inbox", lambda url: asked.append(url) or "Inbox/b.md")
 
-    answer = _read_sse(tc.post("/chat", json={"text": "/fetch https://x.test/reel/a/ https://x.test/reel/b/"}))[-1]["answer"]
-    assert asked == ["https://x.test/reel/b/"]
-    assert "Already fetched: https://x.test/reel/a/" in answer and "1 of 2 saved, 1 already fetched." in answer
+    text = "/fetch https://x.test/reel/a/ https://x.test/reel/b/ https://x.test/reel/d/"
+    answer = _read_sse(tc.post("/chat", json={"text": text}))[-1]["answer"]
+    # d's note was deleted from the Inbox: its leaf alone does not keep it out
+    assert asked == ["https://x.test/reel/b/", "https://x.test/reel/d/"]
+    assert "Already fetched: https://x.test/reel/a/" in answer and "2 of 3 saved, 1 already fetched." in answer
     # one address is read again: asking for it is the point
     _read_sse(tc.post("/chat", json={"text": "/fetch https://x.test/reel/a/"}))
     assert asked[-1] == "https://x.test/reel/a/"
+    # /nucleate archives the note under the same key: still fetched
+    from silica.kernel.base.manifest import active_done_dir
+
+    (vault / active_done_dir()).mkdir(exist_ok=True)
+    (vault / "Inbox" / "Reel one.md").rename(vault / active_done_dir() / "Reel one.md")
+    answer = _read_sse(tc.post("/chat", json={"text": "/fetch https://x.test/reel/a/ https://x.test/reel/e/"}))[-1]["answer"]
+    assert "Already fetched: https://x.test/reel/a/" in answer
 
 
 def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypatch):
