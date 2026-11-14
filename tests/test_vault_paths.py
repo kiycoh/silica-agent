@@ -48,6 +48,21 @@ def test_the_model_cannot_convert_a_file_beside_the_vault(outside, monkeypatch):
     assert not _vault_holds_mark()
 
 
+def test_a_bare_name_the_model_gives_is_read_in_the_vault_not_the_cwd(outside, monkeypatch):
+    """The check took `data.csv` against the vault, where it is not, and
+    convert() then resolved it again and fell back to the cwd beside it."""
+    from silica.sources import ingest
+
+    def _no(*a, **k):
+        raise AssertionError("distilled a file found in the cwd")
+
+    monkeypatch.setattr(ingest, "distill", _no)
+    monkeypatch.chdir(outside)
+    res = ingest.run_injector(["data.csv"], "T")
+    assert "file not found" in res["error"]
+    assert not _vault_holds_mark()
+
+
 def test_a_folder_listing_stays_in_the_vault(outside):
     from silica.kernel.recall.listing import unconverted_under, vault_files_under
 

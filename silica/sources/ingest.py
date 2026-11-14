@@ -979,9 +979,13 @@ def run_injector(files: list[str], target_dir: str, *, hub: str = "", resume_run
     # the disk: converted, it lands in the vault and goes to the provider. Only
     # the person brings a file in from outside (ADR-0179 point 2).
     outside = []
+    # The path the check saw, handed to convert(): given the name as written,
+    # resolve_input looked again and fell back to the cwd when the vault had no
+    # such file, so `data.csv` read the one beside the process instead.
+    anchored: dict[str, str] = {}
     for f in files:
         try:
-            readable_in_vault(f, CONFIG.vault_path or ".")
+            anchored[f] = str(readable_in_vault(f, CONFIG.vault_path or "."))
         except ValueError:
             outside.append(f)
     if outside:
@@ -998,7 +1002,7 @@ def run_injector(files: list[str], target_dir: str, *, hub: str = "", resume_run
                 resolved.append(f)
                 continue
             try:
-                resolved.extend(convert(f, dest_dir=target_dir))
+                resolved.extend(convert(anchored[f], dest_dir=target_dir))
             except (ValueError, RuntimeError) as exc:
                 rejected.append(f"{f} ({exc})")
         if rejected:
