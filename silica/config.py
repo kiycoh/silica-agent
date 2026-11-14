@@ -894,8 +894,11 @@ class SilicaConfig:
     # Empty is fine — DuckDuckGo is the primary lane and needs no key.
     tavily_api_key: str = from_env("SILICA_TAVILY_API_KEY", aliases=("TAVILY_API_KEY",), doc=True)
 
-    # Maximum context tokens before the agent warns.
-    max_context_tokens: int = from_env("SILICA_MAX_CONTEXT", 60000, int, doc=True, hosted=True)
+    # The window a turn is cut to. Empty means the model's own window
+    # (session/meter.py): Settings writes it empty to unpin, and without
+    # blank_unset that line made int("") fail the next boot.
+    max_context_tokens: int = from_env("SILICA_MAX_CONTEXT", 60000, int, doc=True, hosted=True,
+                                       blank_unset=True)
 
     # Tool progress display level (REPL-runtime, cycled with /verbose)
     # off     — total silence, only the final response

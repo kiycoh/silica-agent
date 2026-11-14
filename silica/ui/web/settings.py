@@ -88,7 +88,7 @@ _EMBED_WARN = "changing this invalidates every stored vector"
 HOSTED_ROWS: dict[str, tuple[str, ...]] = {
     # General knowledge (ADR-0169 point 4) is the person's to turn off: a prompt
     # line, no endpoint and no cost.
-    "Session": ("SILICA_MODEL", "context", "SILICA_SHOW_THINKING", "SILICA_GENERAL_KNOWLEDGE"),
+    "Session": ("SILICA_MODEL", "SILICA_MAX_CONTEXT", "SILICA_SHOW_THINKING", "SILICA_GENERAL_KNOWLEDGE"),
     "Language": ("SILICA_STT_LANG", "SILICA_STT_BROWSER"),
     "Display": ("SILICA_USER_NAME", "SILICA_THEME", "SILICA_SHOW_THINKING",
                 "SILICA_GRAPH_PARTICLES", "SILICA_GRAPH_SHADING"),
@@ -118,7 +118,8 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 models_of="chat"),
             Row("SILICA_PROVIDER", "provider", "enum",
                 "where that model is served", options=providers),
-            Row("context", "context", "readonly", "tokens a turn is cut to"),
+            Row("SILICA_MAX_CONTEXT", "context", "int",
+                "tokens a turn is cut to · empty follows the model's own window"),
             Row("SILICA_SHOW_THINKING", "thinking", "toggle",
                 "show the model's reasoning as it works"),
             Row("SILICA_GENERAL_KNOWLEDGE", "general knowledge", "toggle",
@@ -205,8 +206,6 @@ def sections() -> dict[str, tuple[Row, ...]]:
             Row("SILICA_VAULT_BRIEF", "vault brief", "toggle",
                 "a written sentence about what the vault holds, which the agent "
                 "reads when it picks among vaults · one worker call"),
-            Row("SILICA_MAX_CONTEXT", "max context", "int",
-                "tokens before the transcript is compacted"),
             Row("SILICA_GRAPH_PARTICLES", "graph particles", "toggle",
                 "drifting dots along gap and similarity edges · off is quieter and cheaper"),
             Row("SILICA_GRAPH_SHADING", "3d graph shading", "toggle",
@@ -235,6 +234,10 @@ def _hosted_row(row: Row) -> Row:
         # Read-only by kind, not only by host.env's lock: a host.env that lost
         # the line would otherwise let a POST pick any model on the tenant's key.
         return replace(row, kind="readonly", models_of="")
+    if row.key == "SILICA_MAX_CONTEXT":
+        # The host's cap is a price decision (past 32k prompt tokens the
+        # pilot's endpoint bills 3.3x, context-cap-2026-10-13), not the tenant's.
+        return replace(row, kind="readonly")
     if row.key == "SILICA_STT_BROWSER":
         # "cloud" sends the audio to the browser's vendor, a recipient the
         # privacy notice does not name.
@@ -315,7 +318,7 @@ def _shown(row: Row) -> str:
 def _readonly_value(key: str) -> str:
     if key == "SILICA_MODEL":
         return CONFIG.model or ""
-    if key == "context":
+    if key == "SILICA_MAX_CONTEXT":
         # The window a turn is actually cut to, not the model's: since
         # 2026-10-27 a laptop's SILICA_MAX_CONTEXT holds on OpenRouter too, and
         # model_limits misses the dated id the host pins ((0, 0) for
@@ -402,7 +405,9 @@ def _env_text(row: Row, value: str) -> str:
     """How the value is spelled in the .env, which is what config.py parses back."""
     if row.kind == "toggle":
         return "True" if _truthy(value) else "False"
-    return str(value)
+    # A blank count is empty, or "  " reached os.environ and meter's int(pin)
+    # failed every later model change with a 500.
+    return str(value).strip() if row.kind == "int" else str(value)
 
 
 def _truthy(value) -> bool:
@@ -415,7 +420,9 @@ def _live_value(row: Row, value: str):
     """The value as the next boot reads it: the row's own type over the text the
     .env is given, so the live value and the one after a restart are one value
     (a name typed with a space was set with it until a restart)."""
-    return SETTINGS[row.key].type(_env_text(row, value))
+    setting, text = SETTINGS[row.key], _env_text(row, value)
+    # An emptied row is unset, read as the boot reads it: the default.
+    return setting.default if setting.blank_unset and not text.strip() else setting.type(text)
 
 
 def provider_group(provider: str) -> dict[str, str]:
@@ -474,6 +481,13 @@ def apply(key: str, value) -> dict:
         # The <select> is closed but a POST does not come from it, and on hosted
         # the narrowed set is the boundary (browser speech without "cloud").
         return {"ok": False, "error": f"{row.label}: one of {', '.join(_enum_options(row))}"}
+
+    if row.kind == "int" and str(value).strip():
+        try:
+            if int(str(value)) < 1:
+                return {"ok": False, "error": f"{row.label}: a whole number above 0, or empty"}
+        except ValueError:
+            return {"ok": False, "error": f"{row.label}: a whole number, or empty"}
 
     updates = provider_group(str(value)) if key == "SILICA_PROVIDER" else {}
     if not updates:

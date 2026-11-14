@@ -192,8 +192,11 @@ def set_setting(payload: dict):
     result = st.apply(key, payload.get("value", ""))
     if not result["ok"]:
         raise HTTPException(status_code=400, detail=result["error"])
-    if key in ("SILICA_MODEL", "SILICA_PROVIDER"):
+    if key in ("SILICA_MODEL", "SILICA_PROVIDER", "SILICA_MAX_CONTEXT"):
         meter.resolve_context_budget()  # the window the ring and the compaction budget read is the model's
+        # What the window came to, not what was typed: an emptied row reads as
+        # the model's window, a pin over OpenRouter's is cut to it.
+        result["values"]["SILICA_MAX_CONTEXT"] = str(CONFIG.max_context_tokens)
     if key == "SILICA_GENERAL_KNOWLEDGE":
         # The rule is in the seed's system prompt (ADR-0169), and the next new
         # chat starts from the seed built after the last turn, the rule's old state.

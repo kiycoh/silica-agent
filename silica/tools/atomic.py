@@ -616,6 +616,33 @@ READ_QUERY_WINDOWS, READ_QUERY_WIDTH = 3, 2000
 # (ADR-0113). 0 turns it off.
 READ_QUERY_RUN_ON = 800
 _HEADING = re.compile(r"^#{1,6} ", re.M)
+# A whole read's share of the window, in chars at the 2 a token new text is
+# counted at (model/limits.py). Whole had no ceiling: on 2026-11-14 seven
+# YouTube transcripts of 48k to 388k chars came back in one batch against a
+# 65,536-token window and fit_window stubbed every one before the model saw it;
+# the largest alone was ~100k tokens. A quarter keeps a ~15k-token seed and two
+# slices under the 0.9 fill (15k + 2 x 16.4k < 59k), so reading on does not
+# evict the slice before. At a 1M window it is 500k chars, no ceiling in practice.
+READ_WINDOW_SHARE = 0.25
+
+
+def _head_of(body: str, path: str) -> str | None:
+    """The whole lines of `body` that fit a read's share of the window, headed
+    by silica_read's `truncated`/`next_start` and the call that reads on.
+    None = the note fits whole."""
+    from silica.config import CONFIG
+    from silica.model.limits import TEXT_CHARS_PER_TOKEN
+
+    window = CONFIG.max_context_tokens
+    cap = int(window * TEXT_CHARS_PER_TOKEN * READ_WINDOW_SHARE)
+    if len(body) <= cap:
+        return None
+    cut = body.rfind("\n", 0, cap) + 1 or cap   # one line over the cap is cut inside it
+    nxt = body.count("\n", 0, cut) + 1          # the first line not served whole
+    return (f"[{path}: {body.count(chr(10)) + 1} lines, {len(body)} chars; truncated: true, served "
+            f"the first {cut} chars, a quarter of the {window}-token window. next_start: {nxt}. Read on "
+            f"with silica_read(path=\"{path}\", start={nxt}), or set `query` for the passages a "
+            "question needs.]\n\n" + body[:cut])
 
 
 def _run_on(body: str, spans: list[tuple[int, str]]) -> list[tuple[int, str]]:
@@ -665,7 +692,7 @@ def _narrow_to_query(name: str, body: str, path: str, query: str) -> str | None:
     head = (f"[{path}: {total} lines, {len(body)} chars. Served the {len(spans)} passages densest in "
             f"the terms of {query!r}. Not read: lines {', '.join(gaps) or 'none'}. Read them with "
             f"silica_read(path=\"{path}\", start=, end=), or call this tool with an empty query "
-            "for the whole note.]")
+            "to read it from the start.]")
     return head + "\n\n" + "\n\n".join(parts)
 
 
@@ -701,12 +728,15 @@ def silica_read_note(
                                             "'boosting adaboost'), not the note's name. Set it for a question about "
                                             "part of the note: a note over 8000 chars then comes back as the passages "
                                             "densest in these words plus the line ranges left out. Empty = the whole "
-                                            "note (summaries, edits, checks that need all of it).")] = "",
+                                            "note (summaries, edits, checks that need all of it); a note "
+                                            "over a quarter of the window comes back as its first lines "
+                                            "with next_start for silica_read.")] = "",
     vault: Annotated[str, Field(description='Read from another Silica vault (the `vault` or `memory_vault` a recall reply named). Read-only.')] = "",
 ) -> str:
     """Reads a note in the vault by name (wikilink-style resolution), not
     path; Folder/Name for a name notes share. `query` narrows a long note to
-    the passages that answer it; empty returns the complete content.
+    the passages that answer it; empty returns the complete content, or, past
+    a quarter of the window, its first lines with `next_start`.
     `vault=<path>` reads from another vault, read-only."""
     if vault.strip():
         from silica.config import CONFIG
@@ -741,6 +771,8 @@ def silica_read_note(
         # about when in doubt.
         if read_scope.wants_part(name, query):
             narrowed = _narrow_to_query(name, body, path, query)
+    if narrowed is None:
+        narrowed = _head_of(body, path)
     # Each read image's reading under its embed (ADR-0077): the agent knows what
     # a figure shows without looking. Added after narrowing, so the `[lines a-b]`
     # a window names still count lines of the file on disk.

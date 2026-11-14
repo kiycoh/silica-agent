@@ -287,7 +287,7 @@ def test_vault_origin_is_never_the_file():
 # Spelled out here rather than read off HOSTED_ROWS, so a key added to the
 # tuple by accident fails a test instead of reaching every tenant.
 _HOSTED_TABLE = {
-    "Session": ["SILICA_MODEL", "context", "SILICA_SHOW_THINKING", "SILICA_GENERAL_KNOWLEDGE"],
+    "Session": ["SILICA_MODEL", "SILICA_MAX_CONTEXT", "SILICA_SHOW_THINKING", "SILICA_GENERAL_KNOWLEDGE"],
     "Language": ["SILICA_STT_LANG", "SILICA_STT_BROWSER"],
     # the name the new chat greets with is the tenant's own to set
     "Display": ["SILICA_USER_NAME", "SILICA_THEME", "SILICA_SHOW_THINKING",
@@ -313,7 +313,8 @@ def test_hosted_get_lists_exactly_the_table(hosted_client, env_file):
     rows = {r["key"]: r for s in body["sections"] for r in s["rows"]}
     assert rows["SILICA_MODEL"]["kind"] == "readonly"
     assert rows["SILICA_STT_BROWSER"]["options"] == ["off", "on-device"]
-    assert rows["context"]["value"] == f"{CONFIG.max_context_tokens:,} tokens"
+    assert rows["SILICA_MAX_CONTEXT"]["kind"] == "readonly"
+    assert rows["SILICA_MAX_CONTEXT"]["value"] == f"{CONFIG.max_context_tokens:,} tokens"
 
 
 def test_hosted_refuses_every_write_outside_the_table(hosted_client, env_file):
@@ -357,6 +358,38 @@ def test_a_model_changed_in_settings_brings_its_window(client, env_file, monkeyp
     monkeypatch.setattr(CONFIG, "max_context_tokens", 8192)   # what a narrow model left
     assert tc.post("/settings", json={"key": "SILICA_MODEL", "value": "openrouter/x/other"}).status_code == 200
     assert CONFIG.max_context_tokens == 65536
+
+
+def test_the_context_row_pins_a_window_and_empty_follows_the_model(client, env_file, monkeypatch):
+    """The Session row was a readout, so a laptop's 65536 in the .env cut
+    DeepSeek's 1M window with no way back from the panel (2026-11-14). A number
+    pins it; empty unpins it, live and at the next boot."""
+    from silica.config import SETTINGS
+
+    tc, _ = client
+    monkeypatch.setattr(st, "SHELL_ENV", frozenset())
+    monkeypatch.setattr(CONFIG, "model", "openrouter/x/wide")
+    monkeypatch.setattr(CONFIG, "_provider", "openrouter")
+    monkeypatch.setattr(CONFIG, "max_context_tokens", 65536)
+    monkeypatch.setattr("silica.model.limits.model_limits", lambda provider, model: (1048576, 0))
+    monkeypatch.setenv("SILICA_MAX_CONTEXT", "65536")   # apply() writes os.environ: restored after
+    monkeypatch.setenv("SILICA_MODEL", "")
+
+    def post(value):
+        return tc.post("/settings", json={"key": "SILICA_MAX_CONTEXT", "value": value})
+
+    r = post("131072")
+    assert r.status_code == 200 and CONFIG.max_context_tokens == 131072
+    assert r.json()["values"]["SILICA_MAX_CONTEXT"] == "131072"
+    r = post("")
+    assert r.status_code == 200 and CONFIG.max_context_tokens == 1048576
+    assert r.json()["values"]["SILICA_MAX_CONTEXT"] == "1048576"
+    assert SETTINGS["SILICA_MAX_CONTEXT"].read() == 60000   # an emptied line boots as unset
+    for bad in ("0", "-5", "lots"):
+        assert post(bad).status_code == 400, bad
+    assert CONFIG.max_context_tokens == 1048576
+    assert post("  ").status_code == 200 and CONFIG.max_context_tokens == 1048576
+    assert tc.post("/settings", json={"key": "SILICA_MODEL", "value": "openrouter/x/other"}).status_code == 200
 
 
 def test_the_general_knowledge_switch_rebuilds_the_new_chat_seed(client, env_file, monkeypatch):

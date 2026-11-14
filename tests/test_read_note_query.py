@@ -5,11 +5,13 @@ Anything else reads the whole note. The decision itself is tested in
 test_read_scope.py; here it is a switch."""
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 
 import pytest
 
 from silica.agent import read_scope
+from silica.config import CONFIG
 from silica.driver.base import NoteContent, NoteRef
 from silica.kernel.recall import rerank
 from silica.kernel.write import provenance
@@ -120,3 +122,22 @@ def test_a_window_holding_a_heading_runs_on_to_the_formula_under_it(monkeypatch)
     two = atomic._run_on(body, [(0, body[:head + 30]), (head + 60, body[head + 60:head + 70])])
     assert two[0][1] == body[:head + 60]
     assert atomic._run_on(body, [(0, "x" * 20)]) == [(0, "x" * 20)]  # no heading, no run-on
+
+
+def test_a_note_past_a_quarter_of_the_window_comes_in_whole_lines_with_next_start(note, monkeypatch):
+    """2026-11-14: seven transcripts of 48k to 388k chars read whole in one
+    batch against a 65,536-token window were all stubbed before the model saw
+    them. A whole read stops at a quarter of the window, on a line, and names
+    the line silica_read picks up at."""
+    monkeypatch.setattr(CONFIG, "max_context_tokens", 2000)   # 2000 x 2 chars x 1/4: a 1000-char cap
+    note(LONG)
+    head, served = atomic.silica_read_note("Lezione 32").split("\n\n", 1)
+    nxt = int(re.search(r"next_start: (\d+)", head).group(1))
+    assert "truncated: true" in head and f'silica_read(path="F/L32.md", start={nxt})' in head
+    assert len(served) <= 1000 and served == "\n".join(LONG.split("\n")[:nxt - 1]) + "\n"
+
+
+def test_a_note_under_a_quarter_of_the_window_is_whole(note, monkeypatch):
+    monkeypatch.setattr(CONFIG, "max_context_tokens", 4 * len(LONG))
+    note(LONG)
+    assert atomic.silica_read_note("Lezione 32") == LONG
