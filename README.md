@@ -261,7 +261,7 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/convert <file...> [--target=DIR]` | transcode a non-.md file (PDF) into a markdown note in the inbox |
 | `/web-search "<concept>" [--max-searches=N]` | research a concept on the web -> cited findings note in the Inbox (then /nucleate) |
 | `/keep` | save the last /web answer as a cited note in the Inbox (then /nucleate) |
-| `/fetch <url>` | read one URL (YouTube gives its transcript, Reddit its thread, GitHub its README, file or issue) -> verbatim note in the Inbox |
+| `/fetch <url...>` | read one or more URLs, each in turn (YouTube gives its transcript, an Instagram reel its caption and transcribed speech, Reddit its thread, GitHub its README, file or issue) -> one verbatim note each in the Inbox |
 | `/status [run_id]` | progress digest of the last run |
 | `/embed [folder] [--force]` | build/update embedding index |
 | `/cooccur [folder] [--force]` | build/update co-occurrence index (without embedder) |
@@ -327,7 +327,7 @@ git clone https://github.com/kiycoh/silica-agent && cd silica-agent
 SILICA_VAULT_HOST=~/notes docker compose up -d gui   # http://localhost:8765; your OPENROUTER_API_KEY passes through
 ```
 
-**Extras**, combined like `"silica-agent[gui,mcp]"`: `gui` (web GUI), `mcp` (MCP client for `/connect`), `connect` (Obsidian bridge), `rerank` (local cross-encoder, pulls torch), `stt` (local dictation), `tables` (reads PDF tables as tables on this machine, weights downloaded on first use, with `SILICA_PDF_TABLES=1`), `youtube` (YouTube captions for `/fetch`, through yt-dlp), `all`. Scanned PDFs need OCR through [MinerU](https://github.com/opendatalab/MinerU), installed separately: `pip install 'mineru[full]'`, then `SILICA_PDF_PROVIDER=mineru`.
+**Extras**, combined like `"silica-agent[gui,mcp]"`: `gui` (web GUI), `mcp` (MCP client for `/connect`), `connect` (Obsidian bridge), `rerank` (local cross-encoder, pulls torch), `stt` (local dictation, and local transcription for `/convert` and Instagram reels with `SILICA_STT_PROVIDER=local`), `tables` (reads PDF tables as tables on this machine, weights downloaded on first use, with `SILICA_PDF_TABLES=1`), `youtube` (YouTube captions and Instagram reels for `/fetch`, through yt-dlp), `all`. Scanned PDFs need OCR through [MinerU](https://github.com/opendatalab/MinerU), installed separately: `pip install 'mineru[full]'`, then `SILICA_PDF_PROVIDER=mineru`.
 
 **Configuration** lives in `~/.silica/.env`, written by `silica init`; every variable and its default is in [`.env.example`](https://github.com/kiycoh/silica-agent/blob/main/.env.example). `silica doctor --live` checks the whole setup with one real request.
 

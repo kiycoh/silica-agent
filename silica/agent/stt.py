@@ -182,7 +182,12 @@ def _samples(wav: bytes):
 
 def transcribe_local(wav: bytes, *, lang: str, model: str) -> str:
     """One recorded clip to text, in process."""
-    audio = _samples(wav)
+    return "".join(s.text for s in local_segments(_samples(wav), lang=lang, model=model)).strip()
+
+
+def local_segments(audio: Any, *, lang: str, model: str) -> list[Any]:
+    """faster-whisper's timed segments of `audio`: samples, or the path of a wav
+    that is already 16 kHz mono, as /convert's ffmpeg writes it."""
     language = lang.strip()
     segments, _info = _load(model).transcribe(
         audio,
@@ -192,4 +197,4 @@ def transcribe_local(wav: bytes, *, lang: str, model: str) -> str:
         # silence before the model can hear it.
         vad_filter=True,
     )
-    return "".join(s.text for s in segments).strip()
+    return list(segments)

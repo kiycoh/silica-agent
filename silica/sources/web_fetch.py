@@ -114,6 +114,14 @@ _YT_SIGN_IN = "Sign in to confirm"
 # requested track was refused.
 _YT_TOO_MANY = "HTTP Error 429"
 YOUTUBE_COOKIES_ENV = "SILICA_YOUTUBE_COOKIES"
+IG_DOMAINS: tuple[str, ...] = ("instagram.com",)
+# One reel's audio, about 1 MB a minute; the transcription after it has its own clock.
+_IG_TIMEOUT = 120
+# Hashtags and mentions, which a caption's first line is often all of.
+_IG_TAG = re.compile(r"[#@][\w.]+")
+# A reel's or a post's path, with or without the handle in front
+# (/reel/C0de/, /p/C0de/, /tv/C0de/, /patty/reel/C0de/); a profile is not one.
+_IG_POST = re.compile(r"^/(?:[\w.]+/)?(?:reels?|p|tv)/[\w-]+")
 
 
 class WrongType(ValueError):
@@ -824,11 +832,22 @@ def fetch_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
     """
     if host_matches(url, *YT_DOMAINS):
         return _youtube_transcript(url)
+    from silica.sources import site_fetch
+
+    # Only for an address the person typed (/fetch): a reel has no subtitle
+    # track, so reading one is a download and a transcription, minutes that a
+    # model following a link it found must not spend. Its page as HTML otherwise.
+    if host_matches(url, *IG_DOMAINS) and site_fetch.PERSON_ASKED.get():
+        if not _IG_POST.match(urlsplit(url).path):
+            # yt-dlp's profile reader is marked broken (2026.10.26) and answers
+            # a profile with "please report this issue", which is not ours to say.
+            raise SiteRefused(f"{url} is not a reel or a post: /fetch reads one Instagram "
+                              "address at a time (instagram.com/reel/... or /p/...), "
+                              "several in one /fetch, and not a whole profile")
+        return _instagram_post(url)
     # A Reddit thread or a GitHub repository, file, issue or pull request, read
     # from the site's JSON (ADR-0162); None for any other page of those sites,
     # which takes the HTML path below.
-    from silica.sources import site_fetch
-
     if (site := site_fetch.page(url, headers)) is not None:
         return site
     if host_matches(url, *_WP_DOMAINS):
@@ -1064,3 +1083,71 @@ def _yt_info_title(tmp: Path) -> str:
         if title:
             return title[:_MAX_TITLE]
     return ""
+
+
+def _instagram_post(url: str) -> Page:
+    """A reel's or a video post's speech, transcribed, under its caption.
+
+    Instagram serves no subtitle track, so unlike YouTube the audio is
+    downloaded (`bestaudio`, never the video) and goes through /convert's
+    transcriber, with its admission and charge. An image post has no video,
+    and yt-dlp's error says so.
+
+    shortcut: a carousel gives its first item only (`--playlist-items 1`), so
+    one whose video is not first ends with no audio. Recheck by 2027-02-15:
+    count the "no audio came back" lines in the logs, and read every item
+    (`--playlist-items` dropped) from the first one that was a carousel.
+    """
+    exe = ytdlp()
+    if not exe:
+        raise ValueError("reading an Instagram reel needs yt-dlp: install silica with its "
+                         "`youtube` extra, or put yt-dlp on PATH")
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp)
+        proc = subprocess.run(
+            [exe, "-f", "bestaudio/best", "--write-info-json", "--no-write-playlist-metafiles",
+             "--no-playlist", "--playlist-items", "1", "-o", str(out / "post.%(ext)s"), "--", url],
+            capture_output=True, text=True, timeout=_IG_TIMEOUT,
+        )
+        media = [p for p in out.glob("post.*") if p.suffix not in (".json", ".part", ".ytdl")]
+        if not media:
+            raise ValueError(f"no audio came back from yt-dlp for {url}"
+                             + (f": {said}" if (said := _ytdlp_said(proc)) else ""))
+        info = _ig_info(out / "post.info.json")
+        from silica.sources.convert import transcribe_media
+
+        (out / "work").mkdir()
+        transcript = transcribe_media(media[0], out / "work").strip()
+    caption = str(info.get("description") or "").strip()
+    if not transcript and not caption:
+        raise ValueError(f"no speech and no caption in {url}")
+    handle = str(info.get("channel") or info.get("uploader") or "").strip()
+    raw_day = str(info.get("upload_date") or "")
+    day = f"{raw_day[:4]}-{raw_day[4:6]}-{raw_day[6:]}" if len(raw_day) == 8 else ""
+    posted = "Posted" + (f" by @{handle}" if handle else "") + (f" on {day}" if day else "") + "."
+    body = "\n\n".join(filter(None, (
+        posted,
+        f"## Caption\n\n{caption}" if caption else "",
+        f"## Transcript\n\n{transcript or 'No speech in the audio.'}",
+    )))
+    return Page(_render(url, truncate(body)), _ig_title(caption, handle, day, str(info.get("id") or "")))
+
+
+def _ig_info(path: Path) -> dict:
+    """The post's yt-dlp sidecar, {} when it is missing or unreadable: it
+    carries the caption and the date, and the transcript stands without them."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _ig_title(caption: str, handle: str, day: str, shortcode: str) -> str:
+    """The caption's first line with words in it, hashtags and mentions out;
+    else who and when. yt-dlp's own title is "Video by <handle>" for every
+    reel, so a profile's notes would all slug to one name plus a counter."""
+    for line in caption.splitlines():
+        if lead := " ".join(_IG_TAG.sub("", line).split()):
+            return textwrap.shorten(lead, _MAX_TITLE, placeholder="…")
+    return " ".join(filter(None, (handle, day, shortcode))) or "Instagram post"

@@ -433,6 +433,24 @@ def test_inline_slash_command_reports_its_failure_too(client, monkeypatch):
     assert "Not saved" in done["answer"] and "bot wall" in done["answer"]
 
 
+def test_fetch_of_many_addresses_saves_each_and_a_refusal_costs_none_after_it(client, monkeypatch):
+    """A profile's reels arrive as a list of addresses (2026-11-14)."""
+    tc, server = client
+    import silica.sources.web_research as wr
+
+    def one(url):
+        if "bad" in url:
+            raise ValueError("login required")
+        return f"Inbox/{url.rstrip('/').rsplit('/', 1)[-1]}.md"
+
+    monkeypatch.setattr(wr, "fetch_to_inbox", one)
+    text = "/fetch https://x.test/a/ https://x.test/bad/ https://x.test/c/"
+    answer = _read_sse(tc.post("/chat", json={"text": text}))[-1]["answer"]
+    assert "Inbox/a.md" in answer and "Inbox/c.md" in answer
+    assert "Not saved: https://x.test/bad/" in answer and "login required" in answer.lower()
+    assert "2 of 3 saved." in answer
+
+
 def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypatch):
     """/web is NOT a direct command: it runs the agent with web-only tools, so the
     answer arrives as markdown (not a fenced text block) and carries the Sources

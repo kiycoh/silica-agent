@@ -1073,3 +1073,94 @@ def test_alt_does_not_leak_into_the_title_harvest():
     html = ('<html><head><title>Real Title</title></head>'
             '<body><img alt="hero banner"><p>x</p></body></html>')
     assert wf.page_title(html) == "Real Title"
+
+
+def _fake_reel(monkeypatch, info: dict, transcript: str = "Ciao a tutti, oggi parliamo dei tarocchi."):
+    """yt-dlp writes the reel's audio and its sidecar; the transcriber is /convert's."""
+    from silica.sources import convert
+
+    monkeypatch.setattr(wf, "ytdlp", lambda: "/usr/bin/yt-dlp")
+    seen: dict = {}
+    real_run = wf.subprocess.run
+
+    def fake_run(argv, **kw):
+        if argv[0] != "/usr/bin/yt-dlp":  # the note's write runs its own
+            return real_run(argv, **kw)
+        seen["argv"] = argv
+        out = Path(argv[argv.index("-o") + 1]).parent
+        (out / "post.m4a").write_bytes(b"\0" * 64)
+        (out / "post.info.json").write_text(json.dumps(info), encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(wf.subprocess, "run", fake_run)
+    monkeypatch.setattr(convert, "transcribe_media", lambda src, workdir: transcript)
+    return seen
+
+
+def test_a_reel_typed_by_the_person_is_its_caption_and_its_transcribed_speech(monkeypatch, tmp_vault):
+    from silica.config import CONFIG
+    from silica.sources.web_research import fetch_to_inbox
+
+    seen = _fake_reel(monkeypatch, {
+        "id": "DAbc123", "channel": "patty_esoterica", "upload_date": "20261102",
+        "title": "Video by patty_esoterica",
+        "description": "#tarocchi #esoterismo\nIl significato della Torre\n\nSeguimi per altro",
+    })
+    rel = fetch_to_inbox("https://www.instagram.com/reel/DAbc123/")
+    note = (Path(CONFIG.vault_path) / rel).read_text(encoding="utf-8")
+
+    assert "Il significato della Torre" in rel  # the caption's first worded line, not "Video by"
+    assert "Posted by @patty_esoterica on 2026-11-02." in note
+    assert "## Caption\n\n#tarocchi #esoterismo\nIl significato della Torre" in note
+    assert "## Transcript\n\nCiao a tutti, oggi parliamo dei tarocchi." in note
+    assert seen["argv"][seen["argv"].index("-f") + 1] == "bestaudio/best"
+
+
+def test_a_reel_with_no_speech_keeps_its_caption_and_says_so(monkeypatch):
+    _fake_reel(monkeypatch, {"id": "x", "description": "La Luna in Scorpione"}, transcript="")
+    token = wf_site().PERSON_ASKED.set(True)
+    try:
+        page = wf.fetch_page("https://www.instagram.com/p/x/")
+    finally:
+        wf_site().PERSON_ASKED.reset(token)
+    assert "## Transcript\n\nNo speech in the audio." in page.text
+    assert page.title == "La Luna in Scorpione"
+
+
+def test_a_reel_a_model_found_is_never_downloaded(monkeypatch):
+    """Transcribing spends minutes, so only an address the person typed pays them."""
+    def boom(url):
+        raise AssertionError("a model's fetch must not download a reel")
+
+    monkeypatch.setattr(wf, "_instagram_post", boom)
+    monkeypatch.setattr(wf, "html_page", lambda url, headers=wf.HEADERS: wf.Page("Source: x\n\nlogin", ""))
+    assert wf.fetch_page("https://www.instagram.com/reel/abc/").text.endswith("login")
+
+
+def test_a_caption_of_hashtags_only_titles_the_note_by_who_and_when():
+    assert wf._ig_title("#tarocchi @amica", "patty_esoterica", "2026-11-02", "DAbc") == \
+        "patty_esoterica 2026-11-02 DAbc"
+    assert wf._ig_title("", "", "", "") == "Instagram post"
+
+
+def wf_site():
+    from silica.sources import site_fetch
+
+    return site_fetch
+
+
+@pytest.mark.parametrize("path", ["reel/DAbc_1-x/", "reels/DAbc/", "p/DAbc/", "tv/DAbc", "patty_esoterica/reel/DAbc/"])
+def test_a_reel_or_a_post_address_is_post_shaped(path):
+    assert wf._IG_POST.match("/" + path)
+
+
+def test_a_profile_is_refused_in_silicas_words_not_yt_dlps(monkeypatch):
+    """yt-dlp's profile reader is broken and asks to be reported (2026-11-14)."""
+    monkeypatch.setattr(wf, "_instagram_post", lambda url: pytest.fail("a profile reached yt-dlp"))
+    token = wf_site().PERSON_ASKED.set(True)
+    try:
+        for url in ("https://www.instagram.com/patty_esoterica/", "https://www.instagram.com/patty_esoterica/reels/"):
+            with pytest.raises(wf.SiteRefused, match="not a whole profile"):
+                wf.fetch_page(url)
+    finally:
+        wf_site().PERSON_ASKED.reset(token)
