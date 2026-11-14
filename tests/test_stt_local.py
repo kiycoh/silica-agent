@@ -102,3 +102,20 @@ def test_speech_lang_maps_the_vault_language_to_a_bcp47_tag(monkeypatch):
     # an unknown name is no tag at all: the browser's own default beats a guess
     monkeypatch.setattr(vault_language, "reply_language_for", lambda v: "klingon")
     assert stt_routes.speech_lang(cfg) == ""
+
+
+def test_the_device_setting_puts_the_local_transcriber_on_the_gpu(monkeypatch):
+    import faster_whisper
+
+    from silica.agent import stt
+    from silica.config import CONFIG
+
+    made = []
+    monkeypatch.setattr(faster_whisper, "WhisperModel", lambda model, **kw: made.append((model, kw)) or object())
+    monkeypatch.setattr(stt, "_models", {})
+    monkeypatch.setattr(CONFIG, "stt_local_device", "cuda")
+    stt._load("large-v3-turbo")
+    monkeypatch.setattr(CONFIG, "stt_local_device", "")
+    stt._load("large-v3-turbo")
+    assert made == [("large-v3-turbo", {"device": "cuda", "compute_type": "float16"}),
+                    ("large-v3-turbo", {"device": "cpu", "compute_type": "int8"})]

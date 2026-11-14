@@ -1144,10 +1144,14 @@ def _ig_info(path: Path) -> dict:
 
 
 def _ig_title(caption: str, handle: str, day: str, shortcode: str) -> str:
-    """The caption's first line with words in it, hashtags and mentions out;
-    else who and when. yt-dlp's own title is "Video by <handle>" for every
-    reel, so a profile's notes would all slug to one name plus a counter."""
+    """The caption's first line with words in it, hashtags and mentions out,
+    then the day; else who and when. yt-dlp's own title is "Video by <handle>"
+    for every reel, and a series opens every caption on one line ("FACCIAMO
+    QUALCHE DOMANDA ALLE BACCHETTE" on 17 of patty_esoterica's first 18,
+    2026-11-14), so without the day a profile's notes slug to one name and a
+    counter that says nothing about which reel is which."""
     for line in caption.splitlines():
         if lead := " ".join(_IG_TAG.sub("", line).split()):
-            return textwrap.shorten(lead, _MAX_TITLE, placeholder="…")
+            room = _MAX_TITLE - (len(day) + 1 if day else 0)
+            return " ".join(filter(None, (textwrap.shorten(lead, room, placeholder="…"), day)))
     return " ".join(filter(None, (handle, day, shortcode))) or "Instagram post"

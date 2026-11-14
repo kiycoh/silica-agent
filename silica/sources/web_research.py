@@ -1671,7 +1671,10 @@ def build_note(
             form_line += f"shape: {shape}\n"
     front = (
         "---\n"
-        f"title: {json.dumps(concept)}\n"
+        # ensure_ascii=False: an emoji escaped as a JSON surrogate pair came
+        # back from PyYAML as two lone surrogates that UTF-8 refuses (an
+        # Instagram caption's, 2026-11-14), as the rest of the vault writes it.
+        f"title: {json.dumps(concept, ensure_ascii=False)}\n"
         f"source: {source}\n"
         f"{form_line}"
         f"fetched: {today}\n"
