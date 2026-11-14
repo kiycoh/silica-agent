@@ -1741,6 +1741,33 @@ def _first_line_of(text: str) -> str:
     return ""
 
 
+def fetched_addresses() -> dict[str, str]:
+    """`{address: leaf}` for every page /fetch already read: the first line under
+    a leaf's frontmatter, which `fetch_to_inbox` writes as `Source: <address>`.
+
+    The leaf and not the Inbox note, because /nucleate archives the note and
+    the leaf stays. A /web-search leaf whose first tool call was a fetch opens
+    the same way, so its first page counts as fetched too.
+    """
+    from silica.kernel.base.layout import SOURCES_DIR
+
+    root = Path(CONFIG.vault_path) / SOURCES_DIR
+    found: dict[str, str] = {}
+    for leaf in sorted(root.rglob("*.md")) if root.is_dir() else ():
+        try:
+            with leaf.open(encoding="utf-8", errors="replace") as fh:
+                head = fh.read(4096)
+        except OSError:
+            # Tolerated: an unreadable leaf skips nothing, so its address is
+            # fetched again, which is what /fetch did before it resumed.
+            continue
+        body = head.split("\n---\n", 1)[-1] if head.startswith("---\n") else head
+        first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
+        if first.startswith("Source: "):
+            found.setdefault(first.removeprefix("Source: ").strip(), leaf.relative_to(root).as_posix())
+    return found
+
+
 def fetch_to_inbox(url: str) -> str:
     """`/fetch <url>` — read one page and drop it in the Inbox, verbatim.
 
