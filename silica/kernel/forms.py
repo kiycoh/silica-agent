@@ -110,18 +110,20 @@ def read_source_text(rel: str) -> str:
     """Read a nucleation source by vault-relative path, .txt included.
 
     DRIVER.read_note only reads notes; a `.txt` inbox source (the ep180 case)
-    needs the filesystem fallback or it can never be classified.
+    needs the filesystem fallback or it can never be classified. The fallback
+    is held to the vault as read_note is: joined onto it, an absolute path
+    dropped the vault's root, and the outline lane hands this text to the
+    model (ADR-0179 point 4). ValueError for a path outside it.
     """
     from silica.driver import DRIVER
 
     try:
         return DRIVER.read_note(rel).content or ""
     except Exception:
-        from pathlib import Path
-
         from silica.config import CONFIG
+        from silica.kernel.base.layout import readable_in_vault
 
-        return (Path(CONFIG.vault_path) / rel).read_text(
+        return readable_in_vault(rel, CONFIG.vault_path).read_text(
             encoding="utf-8", errors="replace"
         )
 

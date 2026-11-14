@@ -245,6 +245,15 @@ _ASR_TIMEOUT_S = 7200
 _ASR_PARAGRAPH_GAP_S = 2.0
 
 
+class OutsideVault(ValueError):
+    """A path outside the vault, typed on the server (ADR-0179 point 5). Its own
+    class so the chat's job row says why, not "it was not found"."""
+
+
+# The clause after a file's name, in the terminal's line and the chat's row.
+OUTSIDE_YOUR_VAULT = "it is outside your vault, so add it with + first"
+
+
 class GpuOutOfMemory(ValueError, RuntimeError):
     """The GPU was full: the next file fails the same way until something else
     lets go of it. Both bases, because a reader's failure reaches its callers as
@@ -3292,12 +3301,30 @@ def resolve_input(target: str) -> Path:
     live in the vault. A file to CONVERT is the opposite: a PDF sits where the
     user is standing (a download dir, a repo), not among the markdown — so cwd
     is a real fallback here, not just the no-vault special case.
+
+    That holds for a path the person types on their own computer. On the
+    server the account has only its vault, and a path outside it raises
+    OutsideVault (ADR-0179 point 5); a path the model names is held to the
+    vault before it gets here (ingest.run_injector).
     """
+    from silica.config import hosted
+
     p = Path(target)
+    vault = (CONFIG.vault_path or "").strip()
     if not p.is_absolute():
-        vault = (CONFIG.vault_path or "").strip()
-        tries = ([Path(vault) / target] if vault else []) + [Path.cwd() / target]
+        # No cwd on the server: the account has its vault and nothing else, and
+        # a missing vault file would otherwise read as one outside it.
+        tries = ([Path(vault) / target] if vault else []) + ([] if hosted() else [Path.cwd() / target])
         p = next((c for c in tries if c.exists()), tries[-1])
+    if hosted():
+        # Before the existence check, so a refusal says nothing about whether
+        # a host file is there (ADR-0179 point 5).
+        from silica.kernel.base.layout import readable_in_vault
+
+        try:
+            readable_in_vault(p, vault or ".")
+        except ValueError:
+            raise OutsideVault(OUTSIDE_YOUR_VAULT) from None
     if not p.exists():
         raise ValueError(f"file not found: {target}")
     return p

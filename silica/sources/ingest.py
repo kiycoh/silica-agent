@@ -971,9 +971,22 @@ def run_injector(files: list[str], target_dir: str, *, hub: str = "", resume_run
     # /convert", which in a REPL means telling the user to type, themselves, the
     # thing they just asked for — and in a library of 74 scanned books that
     # instruction stands between the user and the entire corpus.
+    from silica.kernel.base.layout import readable_in_vault
     from silica.kernel.base.manifest import get_active_manifest
     from silica.sources.registry import adapter_for
 
+    # The model names these paths, and a document it read can name any file on
+    # the disk: converted, it lands in the vault and goes to the provider. Only
+    # the person brings a file in from outside (ADR-0179 point 2).
+    outside = []
+    for f in files:
+        try:
+            readable_in_vault(f, CONFIG.vault_path or ".")
+        except ValueError:
+            outside.append(f)
+    if outside:
+        return {"error": f"{', '.join(outside)}: outside the vault, which this tool never reads past. "
+                         "The person can bring a file in themselves."}
     enabled = get_active_manifest().sources
     if any(adapter_for(f, enabled=enabled) is None for f in files):
         from silica.sources.convert import convert
@@ -1043,13 +1056,28 @@ def _nucleate_globs(files: list[str], console) -> tuple[list[str], bool]:
     # a literal and fall through to the agent, taking the one batch command
     # the docs advertise off the deterministic path.
     import glob as _glob
+
+    from silica.config import hosted
+    from silica.kernel.base.layout import readable_in_vault
+
+    def _in_vault(h: str) -> bool:
+        try:
+            readable_in_vault(h, CONFIG.vault_path.strip() or ".")
+            return True
+        except ValueError:
+            return False
+
     globbed: list[str] = []
     glob_miss = False
     for f in files:
         if any(ch in f for ch in "*?["):
+            # root_dir confines neither "../x/*" nor an absolute pattern. On the
+            # server their matches go before the count, so not even a host
+            # file's name is said (ADR-0179 point 5); a laptop keeps them.
             hits = sorted(
                 h.replace(os.sep, "/")
                 for h in _glob.glob(f, root_dir=CONFIG.vault_path.strip() or ".")
+                if not hosted() or _in_vault(h)
             )
             if hits:
                 console.print(f"  {f}: {_count(len(hits), 'file')} match")
@@ -1158,10 +1186,11 @@ def convert_targets(files: list[str]) -> tuple[list[str], list[tuple[str, str]]]
     (`documents_under`) that no earlier conversion made notes of. With what was
     not taken, as (name, why) clauses: the browser's skipped rows, and the
     terminal's lines."""
+    from silica.kernel.base.layout import readable_in_vault
     from silica.kernel.recall.listing import notes_under
-    from silica.sources.convert import note_of, resolve_input
+    from silica.sources.convert import OUTSIDE_YOUR_VAULT, OutsideVault, note_of, resolve_input
 
-    vault = Path(CONFIG.vault_path or ".").resolve()
+    vault = os.path.abspath(CONFIG.vault_path or ".")
     converted = functools.cache(prior_conversions)
     out: list[str] = []
     left: list[tuple[str, str]] = []
@@ -1174,20 +1203,27 @@ def convert_targets(files: list[str]) -> tuple[list[str], list[tuple[str, str]]]
     for f in files:
         try:
             src = resolve_input(f)
+        except OutsideVault:
+            left.append((f, OUTSIDE_YOUR_VAULT))  # the server's refusal, said before any conversion
+            continue
         except ValueError:
             src = None  # convert() names the missing file
         if src is None or not src.is_dir():
             out.append(f)
             continue
-        # The listing below is keyed vault-relative and reads only the vault, as
-        # /nucleate's does; a folder outside it would come back empty, and on the
-        # hosted server "../" would name another tenant's.
-        if not src.resolve().is_relative_to(vault):
+        if os.path.abspath(src) == vault:
+            left.append((f, "it is the whole vault, so name a folder in it"))
+            continue
+        # The listing below reads only the vault, as /nucleate's does (ADR-0179
+        # point 3): a folder outside it would come back empty.
+        try:
+            inside = readable_in_vault(src, vault)
+        except ValueError:
             left.append((f, "it is outside the vault, so name its files instead"))
             continue
         # Spelled as the listing keys it: "./Inbox/ml", or a folder found from
         # a cwd inside the vault, read as holding nothing.
-        rel = src.resolve().relative_to(vault).as_posix()
+        rel = inside.relative_to(vault).as_posix()
         notes = notes_under(rel)
         docs, skipped = documents_under(rel, notes)
         left += [(f"{what} in {f}", why) for what, why in skipped]

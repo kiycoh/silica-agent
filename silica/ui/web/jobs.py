@@ -567,7 +567,7 @@ def from_command(text: str, session: str | None) -> dict | None:
         return None  # the command's own parser names the unbalanced quote
     from silica.commands.ingress import read_words
     from silica.kernel.base.formats import DOC_EXTS
-    from silica.sources.convert import resolve_input
+    from silica.sources.convert import OUTSIDE_YOUR_VAULT, OutsideVault, resolve_input
     from silica.sources import ingest
 
     words = read_words(parts[1:])
@@ -597,6 +597,9 @@ def from_command(text: str, session: str | None) -> dict | None:
             continue
         try:
             src = resolve_input(f)
+        except OutsideVault:
+            skipped.append({"name": name, "reason": OUTSIDE_YOUR_VAULT})
+            continue
         except ValueError:
             skipped.append({"name": name, "reason": "it was not found"})
             continue

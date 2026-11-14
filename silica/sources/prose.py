@@ -5,9 +5,11 @@
 
 Distill lane: the Injector FSM owns destination and write; this adapter
 only classifies, reads (sanitized, zero-trust frontier per ADR-0009) and
-declares the lane. read() is total: unreadable targets yield an empty
-RawItem rather than raising, because the FSM re-reads through the driver
-anyway and dispatch must not block a batch on one bad path.
+declares the lane. read() is total for a file in the vault: an unreadable one
+yields an empty RawItem rather than raising, because the FSM re-reads through
+the driver anyway and dispatch must not block a batch on one bad path. A path
+outside the vault raises ValueError, which `registry.stage` reports and the
+batch goes on (ADR-0179 point 4).
 """
 from __future__ import annotations
 
@@ -26,10 +28,13 @@ class ProseAdapter:
         return target.lower().endswith(PROSE_EXTS)
 
     def read(self, target: str) -> RawItem:
-        p = Path(target)
-        if not p.is_absolute():
-            vault = (CONFIG.vault_path or "").strip()
-            p = (Path(vault) / target) if vault else (Path.cwd() / target)
+        from silica.kernel.base.layout import readable_in_vault
+
+        vault = (CONFIG.vault_path or "").strip()
+        try:
+            p = readable_in_vault(target, vault or Path.cwd())
+        except ValueError as e:
+            raise ValueError(f"it is {e}: put it in the Inbox, then nucleate it from there") from None
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:

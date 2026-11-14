@@ -49,7 +49,7 @@ from silica.driver.base import (
 from silica.kernel.base import frontmatter as fm
 from silica.kernel.base.layout import is_vault_artifact
 from silica.kernel.base.durable import atomic_write_bytes
-from silica.kernel.base.layout import contain_in_vault, is_source_leaf, walk_tree
+from silica.kernel.base.layout import contain_in_vault, is_source_leaf, readable_in_vault, walk_tree
 logger = logging.getLogger(__name__)
 
 # Per-note Hit ceiling for content search. The tool layer renders at most 3
@@ -601,21 +601,10 @@ class ObsidianFSBackend(GraphIndexMixin):
         S2): before this check `read_note` returned any file the process could
         read, keys included.
         """
-        full = self._resolve_unchecked(ref)
-        # Lexical, not contain_in_vault: a symlink the user put in the vault
-        # still reads, since only the user can create one. What this refuses
-        # is an absolute path, a `..`, or a cwd-relative file outside the vault.
-        root = Path(os.path.normpath(self.vault_path))
-        norm = Path(os.path.normpath(full))
-        if root not in norm.parents:
-            raise RuntimeError(f"Path {str(ref.path if isinstance(ref, NoteRef) else ref)!r} "
-                               f"is outside the vault {root.as_posix()!r}")
-        from silica.config import in_config_dir
-
-        if in_config_dir(norm):  # a vault at $HOME holds ~/.silica and its keys
-            raise RuntimeError(f"Path {str(ref.path if isinstance(ref, NoteRef) else ref)!r} "
-                               "is Silica's own configuration, not vault content")
-        return norm
+        try:
+            return readable_in_vault(self._resolve_unchecked(ref), self.vault_path)
+        except ValueError as e:
+            raise RuntimeError(f"Path {str(ref.path if isinstance(ref, NoteRef) else ref)!r} is {e}") from None
 
     def _resolve_unchecked(self, ref: NoteRef | str) -> Path:
         self._ensure_index()
