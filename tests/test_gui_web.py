@@ -451,6 +451,27 @@ def test_fetch_of_many_addresses_saves_each_and_a_refusal_costs_none_after_it(cl
     assert "2 of 3 saved." in answer
 
 
+def test_a_list_pasted_again_skips_what_its_leaves_already_hold(client, monkeypatch):
+    """A restart 24 reels into a list would have written those 24 twice (2026-11-14)."""
+    tc, server = client
+    import silica.sources.web_research as wr
+    from silica.config import CONFIG
+
+    leaves = Path(CONFIG.vault_path) / "sources"
+    leaves.mkdir(exist_ok=True)
+    (leaves / "Reel one.md").write_text(
+        "---\ndate: 2026-11-14\ntype: Source\n---\n\nSource: https://x.test/reel/a/\n\ntext\n", encoding="utf-8")
+    asked = []
+    monkeypatch.setattr(wr, "fetch_to_inbox", lambda url: asked.append(url) or "Inbox/b.md")
+
+    answer = _read_sse(tc.post("/chat", json={"text": "/fetch https://x.test/reel/a/ https://x.test/reel/b/"}))[-1]["answer"]
+    assert asked == ["https://x.test/reel/b/"]
+    assert "Already fetched: https://x.test/reel/a/" in answer and "1 of 2 saved, 1 already fetched." in answer
+    # one address is read again: asking for it is the point
+    _read_sse(tc.post("/chat", json={"text": "/fetch https://x.test/reel/a/"}))
+    assert asked[-1] == "https://x.test/reel/a/"
+
+
 def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypatch):
     """/web is NOT a direct command: it runs the agent with web-only tools, so the
     answer arrives as markdown (not a fenced text block) and carries the Sources

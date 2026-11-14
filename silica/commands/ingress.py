@@ -153,17 +153,27 @@ def web_search(c: Call) -> Result:
 def fetch(c: Call) -> Result:
     """/fetch <url...>: each page (or video transcript) into an inbox note, in
     turn: a profile's reels arrive as a list of addresses, and one refused
-    address must not cost the ones after it."""
+    address must not cost the ones after it.
+
+    A list resumes: an address a leaf already holds is skipped, because a list
+    stopped halfway (a restart, a login wall) is pasted again whole, and on
+    2026-11-14 a restart 24 reels into one would have written those 24 twice.
+    One address is always read again, since asking for it is the point."""
     args, out = c.args, c.out
     from rich.markup import escape
 
-    from silica.sources.web_research import fetch_to_inbox
+    from silica.sources.web_research import fetch_to_inbox, fetched_addresses
     urls = [a.strip() for a in args if a.strip()]
     if not urls:
         return out.refused(f"/fetch requires a URL. Usage: {c.row.synopsis}")
 
-    many, saved = len(urls) > 1, 0
+    many, saved, skipped = len(urls) > 1, 0, 0
+    done = fetched_addresses() if many else {}
     for url in urls:
+        if leaf := done.get(url if "://" in url else f"https://{url}"):
+            skipped += 1
+            out.print(f"  Already fetched: {escape(url)} (sources/{escape(leaf)}).")
+            continue
         try:
             note_rel = fetch_to_inbox(url)
             saved += 1
@@ -172,7 +182,8 @@ def fetch(c: Call) -> Result:
             said = f"Not saved: {escape(url)}." if many else "Not saved."
             out.print(f"  [yellow][bold]{said}[/bold] {_sentence(e)}[/]")
     if many:
-        out.print(f"  {saved} of {len(urls)} saved."
+        out.print(f"  {saved} of {len(urls)} saved"
+                  + (f", {skipped} already fetched." if skipped else ".")
                   + (" Read them, then /nucleate turns them into notes." if saved else ""))
     return out
 
