@@ -405,7 +405,9 @@ def _env_text(row: Row, value: str) -> str:
     """How the value is spelled in the .env, which is what config.py parses back."""
     if row.kind == "toggle":
         return "True" if _truthy(value) else "False"
-    return str(value)
+    # A blank count is empty, or "  " reached os.environ and meter's int(pin)
+    # failed every later model change with a 500.
+    return str(value).strip() if row.kind == "int" else str(value)
 
 
 def _truthy(value) -> bool:

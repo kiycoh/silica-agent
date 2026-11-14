@@ -373,6 +373,7 @@ def test_the_context_row_pins_a_window_and_empty_follows_the_model(client, env_f
     monkeypatch.setattr(CONFIG, "max_context_tokens", 65536)
     monkeypatch.setattr("silica.model.limits.model_limits", lambda provider, model: (1048576, 0))
     monkeypatch.setenv("SILICA_MAX_CONTEXT", "65536")   # apply() writes os.environ: restored after
+    monkeypatch.setenv("SILICA_MODEL", "")
 
     def post(value):
         return tc.post("/settings", json={"key": "SILICA_MAX_CONTEXT", "value": value})
@@ -387,6 +388,8 @@ def test_the_context_row_pins_a_window_and_empty_follows_the_model(client, env_f
     for bad in ("0", "-5", "lots"):
         assert post(bad).status_code == 400, bad
     assert CONFIG.max_context_tokens == 1048576
+    assert post("  ").status_code == 200 and CONFIG.max_context_tokens == 1048576
+    assert tc.post("/settings", json={"key": "SILICA_MODEL", "value": "openrouter/x/other"}).status_code == 200
 
 
 def test_the_general_knowledge_switch_rebuilds_the_new_chat_seed(client, env_file, monkeypatch):

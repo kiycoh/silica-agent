@@ -692,7 +692,7 @@ def _narrow_to_query(name: str, body: str, path: str, query: str) -> str | None:
     head = (f"[{path}: {total} lines, {len(body)} chars. Served the {len(spans)} passages densest in "
             f"the terms of {query!r}. Not read: lines {', '.join(gaps) or 'none'}. Read them with "
             f"silica_read(path=\"{path}\", start=, end=), or call this tool with an empty query "
-            "for the whole note.]")
+            "to read it from the start.]")
     return head + "\n\n" + "\n\n".join(parts)
 
 
