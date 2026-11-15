@@ -1172,7 +1172,7 @@ body.sidebar-collapsed #sidebar {
   color: var(--frost);
 }
 
-/* a plain notice's remedy (ADR-0172 point 2), in the words' own face; the
+/* a plain notice's remedy (ADR-0172 point 6), in the words' own face; the
    doctor's text under it stays in the grid font */
 .notice-fix {
   margin-top: 0.3rem;

@@ -1097,7 +1097,7 @@ document.addEventListener("keydown", (e) => {
   toggleHelpPanel();
 });
 
-// The doctor's rows in plain words (ADR-0172 point 2), by check name: its own
+// The doctor's rows in plain words (ADR-0172 point 6), by check name: its own
 // text is `silica doctor`'s too and names env vars and tool names, so it is kept
 // under "details" and rewritten here, not in checks.py. Each entry reads the
 // detail for the one branch of the check it describes and answers null for the

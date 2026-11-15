@@ -65,7 +65,7 @@ def test_a_step_that_waits_on_a_turn_has_a_link_out():
 
 
 def test_the_numbers_run_in_order_after_the_welcome_and_stop_at_eight_bubbles():
-    # ADR-0172 point 4: at most 8 stops, the welcome counted; a link's step
+    # ADR-0172 point 10: at most 8 stops, the welcome counted; a link's step
     # (fetch) stands in for the one it shares a number with.
     ns = [int(re.search(r"\bn: (\d)", body).group(1)) for body in _steps().values()]
     assert ns == sorted(ns) and set(ns) == set(range(max(ns) + 1))

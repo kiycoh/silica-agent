@@ -74,7 +74,7 @@ const postJson = (url, body) => fetch(url, {
 async function answerOf(r) {
   const data = await r.json().catch(() => ({})); // an empty or HTML body: the status still says what happened
   // A body with no sentence of its own (a proxy's page, a crash) still gives one,
-  // the status kept in it for whoever reports it (ADR-0172 point 5).
+  // the status kept in it for whoever reports it (ADR-0172 point 6).
   if (!r.ok) throw Object.assign(new Error(failureSaid(data, `The server refused this (HTTP ${r.status}). Try again, or reload the page.`)), { status: r.status, data });
   return data;
 }
@@ -119,7 +119,7 @@ function rollUpToasts() {
 // it reports (a tree delete's undo, ADR-0123). Such a toast is never deduped,
 // since its button belongs to one event, and it stays longer: the reader has
 // to find the button, not only read the line.
-// An error says what to do next (ADR-0172 point 2). Some 40 toasts read
+// An error says what to do next (ADR-0172 point 5). Some 40 toasts read
 // "couldn't <do something>" and stop, and the server's absence named no remedy:
 // the next step is added here, once, and never to a toast that already says
 // more than what failed (a colon, a second clause, a sentence of its own).

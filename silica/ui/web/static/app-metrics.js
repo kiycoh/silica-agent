@@ -1521,7 +1521,7 @@ function renderMetrics(d) {
   let firstRow = null;
   for (const [key, n, label, means] of signals) {
     // The review queue opens at zero too: its pane says what it is for and how
-    // to fill it (ADR-0172 point 3), and lists the accepted runs to revert.
+    // to fill it (ADR-0172 point 8), and lists the accepted runs to revert.
     const live = n > 0 || key === "review";
     // A row that goes nowhere stays a div: a button that does nothing is worse
     // than a line of text, and a zero has no evidence to show.
