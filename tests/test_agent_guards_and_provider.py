@@ -28,8 +28,13 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
         config.model = "lmstudio/anthropic/claude"
         self.assertEqual(config.provider, "lmstudio")
 
-        # Non-matching prefix falls back to lmstudio
+        # A prefix litellm routes is that provider, row or not (2026-11-15:
+        # read as lmstudio, anthropic/ vision calls hit the local embedder)
         config.model = "anthropic/claude"
+        self.assertEqual(config.provider, "anthropic")
+
+        # An org that is no provider falls back to lmstudio
+        config.model = "qwen/qwen3-30b-a3b"
         self.assertEqual(config.provider, "lmstudio")
 
     @patch("litellm.completion")

@@ -25,6 +25,17 @@ def test_empty_model_provider_falls_back_to_lmstudio(bare_env):
     assert SilicaConfig().provider == "lmstudio"
 
 
+def test_a_prefix_litellm_routes_is_the_provider_even_without_a_row():
+    """Read as lmstudio, an anthropic/ model's vision calls reached the local
+    embedder at :1234 (harness bench S0, 2026-11-15)."""
+    from silica.config import provider_of
+
+    assert provider_of("anthropic/claude-haiku-5-5") == "anthropic"
+    assert provider_of("openrouter/deepseek/deepseek-v4-flash") == "openrouter"
+    assert provider_of("qwen3.5-9b") == "lmstudio", "a bare id is a local server's"
+    assert provider_of("qwen/qwen3-30b-a3b") == "lmstudio", "an LM Studio org that is no provider"
+
+
 def test_exported_key_answers_for_an_unset_model(bare_env, monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
     model, source = model_from_env()

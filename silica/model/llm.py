@@ -943,6 +943,18 @@ def build_assistant_message(
 # key; raise this at the first "token limit" error on a reading job.
 ANTHROPIC_THINKING_ROOM = 6000
 
+
+@functools.lru_cache(maxsize=None)
+def _adaptive_thinking(model: str) -> bool:
+    """Whether litellm's model map says `model` thinks adaptively: the only
+    thinking type that takes block_binding, and one Haiku 4.5 and older refuse."""
+    try:
+        return bool(_litellm().get_model_info(model).get("supports_adaptive_thinking"))
+    except Exception:
+        # An id the map does not carry is sent as before: guessing adaptive
+        # would turn a model that never needed block_binding into a 400.
+        return False
+
 # An image part's share of the request, in tokens, for the output clamp. Its
 # base64 counted as text read a 120 KB page PNG (160k characters of data URL)
 # as about 80k tokens, left no window, and cut the reply to the clamp's 1024
@@ -1184,6 +1196,16 @@ def _call_llm(
         kwargs["response_format"] = response_format
     if temperature is not None:
         kwargs["temperature"] = temperature
+    if model.startswith("anthropic/") and _adaptive_thinking(model):
+        # The loop loads tools mid-turn (silica_load_tools), so the `tools` list
+        # a replayed thinking block was made under changes, and on an account
+        # Anthropic enforces the history check that is a 400 ("The `tools` list
+        # differs"): Haiku 5.5, harness bench, 2026-11-15. drop_block has the API
+        # discard those blocks and answer. Upgrade path, which keeps them: declare
+        # every tool at turn start and surface the rest with tool_addition.
+        kwargs["thinking"] = {"type": "adaptive",
+                              "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
+        kwargs["extra_headers"] = {"anthropic-beta": "thinking-binding-controls-2026-08-01"}
     if model.startswith("openrouter/"):
         if model in _REASONING_MANDATORY:
             reasoning = None  # the endpoint refused the knob once; don't re-pay the 400

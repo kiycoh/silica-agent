@@ -23,6 +23,7 @@ what `.env.example`, the Settings panel and the doctor are held to
 """
 from __future__ import annotations
 
+import functools
 import logging
 import os
 from collections.abc import Callable
@@ -427,9 +428,29 @@ def ensure_prefix(model: str, provider: str | None) -> str:
 
 
 def provider_of(model: str) -> str:
-    """The provider a `prefix/model` id names, lmstudio for a bare id or none."""
+    """The provider a `prefix/model` id names, lmstudio for a bare id or none.
+
+    A prefix with no row here but one litellm routes (anthropic/, bedrock/,
+    vertex_ai/) is that provider too. Read as lmstudio until 2026-11-15, it sent
+    an `anthropic/` model's vision, escalation and get_provider calls to
+    localhost:1234, where the embedder answered "conconcon..." (harness bench
+    S0). The cost: an LM Studio id whose org is also a litellm provider
+    (databricks/dbrx) now routes there; SILICA_PROVIDER=lmstudio pins it back.
+    """
     prefix, slash, _ = (model or "").partition("/")
-    return prefix if slash and prefix in PROVIDER_PREFIXES else "lmstudio"
+    if slash and (prefix in PROVIDER_PREFIXES or _litellm_routes(prefix)):
+        return prefix
+    return "lmstudio"
+
+
+@functools.lru_cache(maxsize=None)
+def _litellm_routes(prefix: str) -> bool:
+    # Imported here: config loads on every start, and only an id with an
+    # unlisted prefix pays for litellm, which its first call imports anyway.
+    import litellm
+
+    drop_foreign_env()  # litellm's import loads a cwd .env (see drop_foreign_env)
+    return prefix in {p.value for p in litellm.provider_list}
 
 
 # The config fields behind each model role: (model, provider). Here and not in
