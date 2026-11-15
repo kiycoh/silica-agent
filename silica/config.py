@@ -843,11 +843,12 @@ class SilicaConfig:
         "SILICA_CAPTURE_SESSIONS", False, true_word, doc=True, hosted=True
     )
 
-    # User memory (ADR-0076): the two files the chat seed shows and only an
-    # explicit ask writes. Default on, unlike capture above: nothing lands in
-    # them unless the user asked, so on costs nothing until they do. Off pauses
-    # (no snapshot, no write) and keeps the files; the Settings editor and its
-    # reset still work, because erasing must not depend on this switch.
+    # User memory (ADR-0076): the two files the chat seed shows. Since the
+    # amendment of 2026-10-23 the model saves to them unasked and says so, and
+    # the user checks after the write (the saved line's Undo, Settings > Memory)
+    # instead of being asked before it. Default on, unlike capture above. Off
+    # pauses (no snapshot, no write) and keeps the files; the Settings editor and
+    # its reset still work, because erasing must not depend on this switch.
     user_memory: bool = from_env("SILICA_MEMORY", True, true_word, doc=True)
 
     # ADR-0169: when the notes hold nothing on a question, the chat answers from

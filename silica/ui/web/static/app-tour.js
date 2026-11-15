@@ -1,4 +1,4 @@
-// --- the first-visit tour (ADR-0105, ADR-0172 point 4) ------------------------
+// --- the first-visit tour (ADR-0105, ADR-0172 point 10) -----------------------
 // Eight bubbles at most, the welcome counted, on the student's own file. The
 // first three are what a newcomer needs: bring in a file, ask about it, see the
 // notes the answer stands on. The four after them each name a part of the app in

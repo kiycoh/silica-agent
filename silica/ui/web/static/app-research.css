@@ -60,7 +60,7 @@
 .rs-n,
 .rs-pwhat {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--ash-dim);
 }
