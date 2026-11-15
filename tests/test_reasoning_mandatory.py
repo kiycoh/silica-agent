@@ -132,3 +132,18 @@ def test_a_model_on_anthropic_gets_room_for_the_thinking_the_knob_cannot_stop():
         assert completion.call_args.kwargs["max_tokens"] == 2200, "a caller that allows thinking set its own budget"
         call_llm(model="openrouter/test/room", messages=msgs, max_tokens=2200, reasoning=False)
         assert completion.call_args.kwargs["max_tokens"] == 2200, "there the knob does the work"
+
+
+def test_an_adaptive_anthropic_model_asks_the_api_to_drop_blocks_a_tool_change_voided():
+    """A tool loaded mid-turn changes `tools`, and Anthropic answered the replayed
+    thinking block with a 400 (Haiku 5.5, 2026-11-15)."""
+    msgs = [{"role": "user", "content": "hi"}]
+    with patch("litellm.completion", return_value=litellm_mock_response("ok")) as completion:
+        call_llm(model="anthropic/claude-haiku-5-5", messages=msgs)
+        kw = completion.call_args.kwargs
+        assert kw["thinking"]["block_binding"] == {"prefix_mismatch_behavior": "drop_block"}
+        assert kw["extra_headers"]["anthropic-beta"] == "thinking-binding-controls-2026-08-01"
+        call_llm(model="anthropic/claude-haiku-4-5", messages=msgs)
+        assert "thinking" not in completion.call_args.kwargs, "no adaptive thinking there, so no binding"
+        call_llm(model="openrouter/anthropic/claude-sonnet-5", messages=msgs)
+        assert "thinking" not in completion.call_args.kwargs
