@@ -33,7 +33,7 @@ _CLASSES: list[tuple[re.Pattern[str], str]] = [
     # endpoint failure (ADR-0092).
     (re.compile(r"not deleted: \d+ notes? links? to"),
      "Not deleted: other notes link to this note. Deleting it is yours to do, from its card or with /delete."),
-    # No model at all (ADR-0172 point 2): litellm's words for an empty model id,
+    # No model at all (ADR-0172 point 5): litellm's words for an empty model id,
     # and the live probe's skip. The chat shows its setup card while this holds.
     (re.compile(r"LLM Provider NOT provided|no model configured", re.I),
      "No model is set up yet. Open the chat to choose one."),

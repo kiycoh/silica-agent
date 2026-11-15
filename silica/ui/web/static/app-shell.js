@@ -415,7 +415,7 @@ $("#note-pin").addEventListener("click", () => togglePin(lastViewedPath));
 let greeted = ""; // the sentence on the landing, so a second call writes nothing
 let greetTimer = 0;
 // No note and no file in the tree (loadVaultInfo): the landing's one step is to
-// add some (ADR-0172 point 3), since a question about an empty vault finds nothing.
+// add some (ADR-0172 point 8), since a question about an empty vault finds nothing.
 let vaultEmpty = false;
 
 function greet(again = false) {

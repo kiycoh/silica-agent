@@ -578,7 +578,7 @@ a.dv-btn { text-decoration: none; }
 .dv-pop-d { font-size: var(--fs-meta); color: var(--ash-dim); }
 .dv-pop .dv-uncited .dv-pop-t { color: var(--ash); }
 .dv-pop .dv-uncited .dv-ico { opacity: .6; }
-.dv-pop-f { padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ash-dim); }
+.dv-pop-f { padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ash-dim); }
 
 .dv-skeleton { display: flex; flex-direction: column; gap: 10px; }
 

@@ -3110,7 +3110,7 @@ body.demo-card :is(#dock-composer, #vh-ideas) {
   color: var(--ash);
 }
 
-/* Explore on an empty vault (ADR-0172 point 3): the loading overlay's frame,
+/* Explore on an empty vault (ADR-0172 point 8): the loading overlay's frame,
    holding a sentence and the one first step instead of a wait */
 #graph-empty p {
   max-width: 28rem;

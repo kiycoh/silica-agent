@@ -318,7 +318,7 @@ function calRenderTitle() {
 }
 
 // Nothing at all in the days fetched, on any layer that is on by default: the
-// empty grid then says what it is for and the one first step (ADR-0172 point 3).
+// empty grid then says what it is for and the one first step (ADR-0172 point 8).
 function calNothing() {
   const rows = Object.values(calDays);
   return !!rows.length && !calPlans.length && rows.every((r) => !r.daily
