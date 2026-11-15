@@ -84,10 +84,18 @@ def vault_rel(path: str) -> str:
 def vault_files_under(scope: str) -> list[str]:
     """Vault-relative files under `scope`, dotfiles and dot-dirs skipped."""
     from silica.config import CONFIG
-    from silica.kernel.base.layout import walk_tree
+    from silica.kernel.base.layout import readable_in_vault, walk_tree
 
     root = Path(CONFIG.vault_path or "")
     base = root / scope
+    # vault_rel passes "../x" through, and the walk below read past the vault
+    # for the model's silica_files as for a folder the person named (ADR-0179
+    # point 3). "" is the whole vault, which the check, made for files, refuses.
+    if base.absolute() != root.absolute():
+        try:
+            readable_in_vault(scope, root)
+        except ValueError:
+            return []
     if not base.is_dir():
         return []
     out: list[str] = []

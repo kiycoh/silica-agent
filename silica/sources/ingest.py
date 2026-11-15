@@ -203,6 +203,25 @@ def _autolink_filed(note_rel: str, folder: str, console) -> None:
         console.print(f"  [dim]{note_rel}: linked the {_count(len(added), 'note')} it names.[/]")
 
 
+def source_file_of(rel: str) -> str:
+    """The source a note was converted from, as `resolve_input` spells it: the
+    `source_file` convert() stamps on every note it writes. "" for none."""
+    from silica.kernel.base import frontmatter
+
+    vault = Path(CONFIG.vault_path or "")
+    try:
+        data, _, _ = frontmatter.split((vault / rel).read_text(encoding="utf-8"))
+    except Exception:
+        return ""  # unreadable or gone since the listing: it names no source
+    src = str((data or {}).get("source_file") or "")
+    if "/" in src and not Path(src).is_absolute():
+        # The server's vault path (ADR-0129 point 1), keyed as `resolve_input`
+        # spells the same file; a bare name is an older server note whose file
+        # is gone, and matches nothing.
+        src = str(vault / src)
+    return src
+
+
 def prior_conversions() -> dict[str, dict]:
     """abspath of a converted source → {"inbox": [segment paths], "done": n}.
 
@@ -214,26 +233,14 @@ def prior_conversions() -> dict[str, dict]:
     """
     from silica.driver import DRIVER
     from silica.kernel.base.manifest import active_done_dir, active_inbox_dir
-    from silica.kernel.base import frontmatter
 
     out: dict[str, dict] = {}
-    vault = Path(CONFIG.vault_path or "")
 
     def _scan(rels: list[str], bucket: str) -> None:
         for rel in rels:
-            try:
-                data, _, _ = frontmatter.split(
-                    (vault / rel).read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            src = str((data or {}).get("source_file") or "")
+            src = source_file_of(rel)
             if not src:
                 continue
-            if "/" in src and not Path(src).is_absolute():
-                # The server's vault path (ADR-0129 point 1), keyed as
-                # `resolve_input` spells the same file; a bare name is an
-                # older server note whose file is gone, and matches nothing.
-                src = str(vault / src)
             entry = out.setdefault(src, {"inbox": [], "done": 0})
             if bucket == "inbox":
                 entry["inbox"].append(rel)
@@ -964,9 +971,26 @@ def run_injector(files: list[str], target_dir: str, *, hub: str = "", resume_run
     # /convert", which in a REPL means telling the user to type, themselves, the
     # thing they just asked for — and in a library of 74 scanned books that
     # instruction stands between the user and the entire corpus.
+    from silica.kernel.base.layout import readable_in_vault
     from silica.kernel.base.manifest import get_active_manifest
     from silica.sources.registry import adapter_for
 
+    # The model names these paths, and a document it read can name any file on
+    # the disk: converted, it lands in the vault and goes to the provider. Only
+    # the person brings a file in from outside (ADR-0179 point 2).
+    outside = []
+    # The path the check saw, handed to convert(): given the name as written,
+    # resolve_input looked again and fell back to the cwd when the vault had no
+    # such file, so `data.csv` read the one beside the process instead.
+    anchored: dict[str, str] = {}
+    for f in files:
+        try:
+            anchored[f] = str(readable_in_vault(f, CONFIG.vault_path or "."))
+        except ValueError:
+            outside.append(f)
+    if outside:
+        return {"error": f"{', '.join(outside)}: outside the vault, which this tool never reads past. "
+                         "The person can bring a file in themselves."}
     enabled = get_active_manifest().sources
     if any(adapter_for(f, enabled=enabled) is None for f in files):
         from silica.sources.convert import convert
@@ -978,7 +1002,7 @@ def run_injector(files: list[str], target_dir: str, *, hub: str = "", resume_run
                 resolved.append(f)
                 continue
             try:
-                resolved.extend(convert(f, dest_dir=target_dir))
+                resolved.extend(convert(anchored[f], dest_dir=target_dir))
             except (ValueError, RuntimeError) as exc:
                 rejected.append(f"{f} ({exc})")
         if rejected:
@@ -1036,13 +1060,28 @@ def _nucleate_globs(files: list[str], console) -> tuple[list[str], bool]:
     # a literal and fall through to the agent, taking the one batch command
     # the docs advertise off the deterministic path.
     import glob as _glob
+
+    from silica.config import hosted
+    from silica.kernel.base.layout import readable_in_vault
+
+    def _in_vault(h: str) -> bool:
+        try:
+            readable_in_vault(h, CONFIG.vault_path.strip() or ".")
+            return True
+        except ValueError:
+            return False
+
     globbed: list[str] = []
     glob_miss = False
     for f in files:
         if any(ch in f for ch in "*?["):
+            # root_dir confines neither "../x/*" nor an absolute pattern. On the
+            # server their matches go before the count, so not even a host
+            # file's name is said (ADR-0179 point 5); a laptop keeps them.
             hits = sorted(
                 h.replace(os.sep, "/")
                 for h in _glob.glob(f, root_dir=CONFIG.vault_path.strip() or ".")
+                if not hosted() or _in_vault(h)
             )
             if hits:
                 console.print(f"  {f}: {_count(len(hits), 'file')} match")
@@ -1091,38 +1130,9 @@ def _nucleate_expand_folders(
             # agent as an unresolvable name. Unconverted files are
             # first-class /nucleate input (each runs through convert below),
             # so a folder argument picks them up like it picks up notes.
-            from silica.kernel.base.formats import DOC_EXTS, IMG_EXTS
-            from silica.kernel.recall.listing import unconverted_under
-            pending = [
-                p for p in unconverted_under(f)
-                if Path(p).suffix.lower() in DOC_EXTS
-            ]
-            # Images stay batch input only inside the inbox (screenshots
-            # dropped there to OCR). In a SOURCE folder they are a book
-            # photographed page by page: converting each page as its own
-            # document is hundreds of one-page runs of garbage.
-            from silica.kernel.base.layout import is_inbox_path
-            if not is_inbox_path(f.rstrip("/") + "/x.md"):
-                photos = [p for p in pending
-                          if Path(p).suffix.lower() in IMG_EXTS]
-                if photos:
-                    pending = [p for p in pending if p not in photos]
-                    console.print(
-                        f"  [dim]{f}: left out {_count(len(photos), 'image')}: a photographed "
-                        f"book is read as one document. Name an image in /nucleate to read "
-                        f"it on its own.[/]"
-                    )
-            # A converted document's own figures are not sources: 14 lectures
-            # in Inbox/machine_learning queued the 129 images/ they embed as
-            # 129 more runs (2026-10-12). What a note of this batch embeds
-            # stays put; a screenshot no note embeds is still OCR input.
-            paths, names = _embedded_in(group)
-            figures = [p for p in pending
-                       if p in paths or Path(p).name.casefold() in names]
-            if figures:
-                pending = [p for p in pending if p not in figures]
-                console.print(f"  [dim]{f}: left out {_count(len(figures), 'file')} its "
-                              f"notes show inside them.[/]")
+            pending, left = documents_under(f, group)
+            for what, why in left:
+                console.print(f"  [dim]{f}: left out {what}: {why}.[/]")
             # A document converted earlier sits beside its notes, and those
             # notes ride the document's own unit (reused segments, in
             # plan_units). Listed here too, every lecture of a course
@@ -1140,6 +1150,111 @@ def _nucleate_expand_folders(
         expanded.extend(group or [f])
     files = list(dict.fromkeys(expanded))
     return files, run_root
+
+
+def documents_under(folder: str, notes: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
+    """The documents a folder argument reads, one rule for /nucleate and
+    /convert: its files a converter takes, less the photographs of a book and
+    the figures `notes` show. With what was left out, as (what, why) clauses
+    each caller words in its own line."""
+    from silica.kernel.base.formats import DOC_EXTS, IMG_EXTS
+    from silica.kernel.base.layout import is_inbox_path
+    from silica.kernel.recall.listing import unconverted_under
+
+    left: list[tuple[str, str]] = []
+    pending = [p for p in unconverted_under(folder) if Path(p).suffix.lower() in DOC_EXTS]
+    # Images stay batch input only inside the inbox (screenshots dropped there
+    # to OCR). In a SOURCE folder they are a book photographed page by page:
+    # converting each page as its own document is hundreds of one-page runs of
+    # garbage.
+    if not is_inbox_path(folder.rstrip("/") + "/x.md"):
+        photos = [p for p in pending if Path(p).suffix.lower() in IMG_EXTS]
+        if photos:
+            pending = [p for p in pending if p not in photos]
+            left.append((_count(len(photos), "image"), "a photographed book is read as one "
+                         "document, so name an image to read it on its own"))
+    # A converted document's own figures are not sources: 14 lectures in
+    # Inbox/machine_learning queued the 129 images/ they embed as 129 more runs
+    # (2026-10-12). What a note of this batch embeds stays put; a screenshot no
+    # note embeds is still OCR input.
+    paths, names = _embedded_in(notes)
+    figures = [p for p in pending if p in paths or Path(p).name.casefold() in names]
+    if figures:
+        pending = [p for p in pending if p not in figures]
+        left.append((_count(len(figures), "file"), "they are figures the folder's notes show"))
+    return pending, left
+
+
+def convert_targets(files: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
+    """/convert's files, each folder among them replaced by its documents
+    (`documents_under`) that no earlier conversion made notes of. With what was
+    not taken, as (name, why) clauses: the browser's skipped rows, and the
+    terminal's lines."""
+    from silica.kernel.base.layout import readable_in_vault
+    from silica.kernel.recall.listing import notes_under
+    from silica.sources.convert import OUTSIDE_YOUR_VAULT, OutsideVault, note_of, resolve_input
+
+    vault = os.path.abspath(CONFIG.vault_path or ".")
+    converted = functools.cache(prior_conversions)
+    out: list[str] = []
+    left: list[tuple[str, str]] = []
+    # A source outside the inbox converts to the inbox root (convert._note_dir),
+    # so Book A/Chapter 1.pdf and Book B/Chapter 1.pdf write one note, the
+    # second over the first: note path -> the document that claimed it, across
+    # every folder of the command, converted ones first.
+    owner: dict[str, str] = {}
+    fresh_of: list[tuple[str, list[str]]] = []
+    for f in files:
+        try:
+            src = resolve_input(f)
+        except OutsideVault:
+            left.append((f, OUTSIDE_YOUR_VAULT))  # the server's refusal, said before any conversion
+            continue
+        except ValueError:
+            src = None  # convert() names the missing file
+        if src is None or not src.is_dir():
+            out.append(f)
+            continue
+        if os.path.abspath(src) == vault:
+            left.append((f, "it is the whole vault, so name a folder in it"))
+            continue
+        # The listing below reads only the vault, as /nucleate's does (ADR-0179
+        # point 3): a folder outside it would come back empty.
+        try:
+            inside = readable_in_vault(src, vault)
+        except ValueError:
+            left.append((f, "it is outside the vault, so name its files instead"))
+            continue
+        # Spelled as the listing keys it: "./Inbox/ml", or a folder found from
+        # a cwd inside the vault, read as holding nothing.
+        rel = inside.relative_to(vault).as_posix()
+        notes = notes_under(rel)
+        docs, skipped = documents_under(rel, notes)
+        left += [(f"{what} in {f}", why) for what, why in skipped]
+        # A note the vault's + imported converts beside its source, where
+        # prior_conversions (inbox and done/) does not look.
+        named = {source_file_of(n) for n in notes}
+        fresh = [d for d in docs if resume_state(d, converted)[0] == "convert"
+                 and str(resolve_input(d)) not in named]
+        if len(fresh) < len(docs):
+            # /nucleate reuses them the same way: a folder of scanned books is
+            # minutes of OCR each, and a second /convert of it after a stop
+            # paid them all again. A file named on its own still re-converts.
+            left.append((f"{_count(len(docs) - len(fresh), 'file')} in {f}",
+                         "already converted, and naming a file converts it again"))
+        owner.update({note_of(resolve_input(d)): d for d in docs if d not in fresh})
+        fresh_of.append((f, fresh))
+        if not docs and not skipped:
+            left.append((f, "it holds no document Silica converts"))
+    for f, fresh in fresh_of:
+        for d in fresh:
+            taken = owner.setdefault(note_of(resolve_input(d)), d)
+            if taken == d:
+                out.append(d)
+            else:
+                left.append((d, f"its note would replace the one of {taken}, which has the same "
+                             "name, so rename one of them"))
+    return list(dict.fromkeys(out)), left
 
 
 def _converted_notes_of(sources: list[str]) -> set[str]:

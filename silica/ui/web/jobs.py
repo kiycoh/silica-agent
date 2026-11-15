@@ -548,8 +548,9 @@ def from_command(text: str, session: str | None) -> dict | None:
 
     /nucleate turns into jobs only for the files it names that need a
     conversion it has not had; it does not run now, and the jobs offer it.
-    ponytail: a folder, a glob or a Zotero key still converts inside the turn,
-    because only `ingest.nucleate` expands them. Its trigger fired on 2026-10-23
+    ponytail: for /nucleate a folder, a glob or a Zotero key still converts
+    inside the turn, because only `ingest.nucleate` expands them (/convert's
+    folders go through `ingest.convert_targets`). Its trigger fired on 2026-10-23
     (hosted t01, kind nucleate cut at 124,990 ms) and the turn's keepalive
     (sse._KEEPALIVE_S) answered the cut instead; a turn still dies with its
     tab and with a release. The upgrade is the same split after expansion, due
@@ -566,7 +567,7 @@ def from_command(text: str, session: str | None) -> dict | None:
         return None  # the command's own parser names the unbalanced quote
     from silica.commands.ingress import read_words
     from silica.kernel.base.formats import DOC_EXTS
-    from silica.sources.convert import resolve_input
+    from silica.sources.convert import OUTSIDE_YOUR_VAULT, OutsideVault, resolve_input
     from silica.sources import ingest
 
     words = read_words(parts[1:])
@@ -576,12 +577,18 @@ def from_command(text: str, session: str | None) -> dict | None:
     # The /nucleate each job offers once it is read, with the words typed after
     # the files: "Nucleate it" runs the command on the job's notes with them.
     flags = words.flags if word == "/nucleate" else []
+    skipped: list[dict] = []
     if word == "/nucleate":
         files = ingest.owed(files)
         if not files:
             return None
+    else:
+        # A folder is a job per document, by the rule the terminal's /convert
+        # reads it with: a folder of lectures converted inside the turn met
+        # the edge's 125 s cut.
+        files, left = ingest.convert_targets(files)
+        skipped = [{"name": name, "reason": why} for name, why in left]
     jobs: list[dict] = []
-    skipped: list[dict] = []
     for f in files:
         name = Path(f).name or f
         if Path(f).suffix.lower() not in DOC_EXTS:
@@ -590,6 +597,9 @@ def from_command(text: str, session: str | None) -> dict | None:
             continue
         try:
             src = resolve_input(f)
+        except OutsideVault:
+            skipped.append({"name": name, "reason": OUTSIDE_YOUR_VAULT})
+            continue
         except ValueError:
             skipped.append({"name": name, "reason": "it was not found"})
             continue

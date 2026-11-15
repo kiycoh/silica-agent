@@ -387,6 +387,30 @@ def contain_in_vault(path: str, vault: Path) -> str:
     return real.relative_to(real_root).as_posix()
 
 
+def readable_in_vault(path: str | Path, vault: str | Path) -> Path:
+    """`path` as a file of `vault` that may be read, or ``ValueError`` whose text
+    is the clause saying why not ("outside the vault ..."), for the caller to
+    word. Relative paths are taken against `vault`.
+
+    The check `read_note` made alone (audit 2026-10-09, S2), named once for
+    every reader a path reaches from the model or the person (ADR-0179 point 1).
+    Lexical, not contain_in_vault: a symlink the person put in the vault still
+    reads, since only they can create one (an upload cannot, ADR-0086). What it
+    refuses is an absolute path, a `..` or a cwd-relative file outside the vault,
+    and ~/.silica under a vault opened at home, whose .env holds every key.
+    """
+    from silica.config import in_config_dir
+
+    root = Path(os.path.abspath(vault))
+    p = Path(path)
+    norm = Path(os.path.abspath(p if p.is_absolute() else root / p))
+    if root not in norm.parents:
+        raise ValueError(f"outside the vault {root.as_posix()!r}")
+    if in_config_dir(norm):
+        raise ValueError("Silica's own configuration, not vault content")
+    return norm
+
+
 def to_vault_relative(path: str, *, ensure_md: bool = True) -> str:
     """Normalize an arbitrary note path to POSIX vault-relative form.
 

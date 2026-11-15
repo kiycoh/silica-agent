@@ -38,7 +38,7 @@ from silica.config import CONFIG, live_env
 from silica.kernel.write.gate import in_run, open_run
 from silica.kernel.write.ops import OpType
 from silica.kernel.write.ops_io import load_ops
-from silica.kernel.base.layout import to_vault_relative
+from silica.kernel.base.layout import readable_in_vault, to_vault_relative
 from silica.router.base_fsm import BaseFSM
 from silica.router.phases import InjectorState
 from silica.router.run_state import ChunkState, RunState
@@ -446,9 +446,12 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 content_hash = hashlib.sha256(content_bytes).hexdigest()
             except Exception:
                 try:
-                    content_bytes = open(inbox_file, "rb").read()
+                    # The path open() read before, cwd-relative, now refused
+                    # outside the vault as read_note is (ADR-0179 point 4);
+                    # provenance.content_sha256 reads the same way.
+                    content_bytes = readable_in_vault(os.path.abspath(inbox_file), CONFIG.vault_path).read_bytes()
                     content_hash = hashlib.sha256(content_bytes).hexdigest()
-                except OSError:
+                except (OSError, ValueError):
                     content_bytes = b""  # never carry the previous file's bytes forward
                     content_hash = ""
             self.file_content_hashes.append(content_hash)

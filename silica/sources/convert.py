@@ -245,6 +245,15 @@ _ASR_TIMEOUT_S = 7200
 _ASR_PARAGRAPH_GAP_S = 2.0
 
 
+class OutsideVault(ValueError):
+    """A path outside the vault, typed on the server (ADR-0179 point 5). Its own
+    class so the chat's job row says why, not "it was not found"."""
+
+
+# The clause after a file's name, in the terminal's line and the chat's row.
+OUTSIDE_YOUR_VAULT = "it is outside your vault, so add it with + first"
+
+
 class GpuOutOfMemory(ValueError, RuntimeError):
     """The GPU was full: the next file fails the same way until something else
     lets go of it. Both bases, because a reader's failure reaches its callers as
@@ -308,8 +317,10 @@ def _note_dir(src: Path, inbox: str, beside: bool = False) -> str:
     A file the vault's + imported (`beside`) converts beside itself wherever it
     sits in the vault: the same rule against the vault root.
     ponytail: a source outside the inbox given to /convert still lands at the
-    inbox root, so two such sources with one name still collide; the upgrade is
-    `beside` for /convert too, due when a /convert of a library reports it.
+    inbox root, so two such sources with one name still collide. A /convert of
+    a folder leaves the second out and says so (ingest.convert_targets); two
+    such files named in turn still overwrite. The upgrade is `beside` for
+    /convert too, due when one person reports either case.
     """
     vault = Path(CONFIG.vault_path or ".").resolve()
     if beside:
@@ -334,6 +345,15 @@ def _note_dir(src: Path, inbox: str, beside: bool = False) -> str:
     except (ValueError, OSError):
         return inbox
     return inbox if rel == Path(".") else f"{inbox}/{rel.as_posix()}"
+
+
+def note_of(src: Path) -> str:
+    """The `<stem>.md` a convert() of `src` writes, with no `leaf` and no
+    `beside`: a one-part file's note, a longer one's list of its parts
+    (`_doc_to_md`). Two sources with one answer overwrite each other's notes."""
+    from silica.kernel.base.manifest import active_inbox_dir
+
+    return _in(_note_dir(src, active_inbox_dir() or "Inbox"), f"{source_stem(src)}.md")
 
 
 def _split_on_headings(md: str) -> list[str]:
@@ -3307,12 +3327,30 @@ def resolve_input(target: str) -> Path:
     live in the vault. A file to CONVERT is the opposite: a PDF sits where the
     user is standing (a download dir, a repo), not among the markdown — so cwd
     is a real fallback here, not just the no-vault special case.
+
+    That holds for a path the person types on their own computer. On the
+    server the account has only its vault, and a path outside it raises
+    OutsideVault (ADR-0179 point 5); a path the model names is held to the
+    vault before it gets here (ingest.run_injector).
     """
+    from silica.config import hosted
+
     p = Path(target)
+    vault = (CONFIG.vault_path or "").strip()
     if not p.is_absolute():
-        vault = (CONFIG.vault_path or "").strip()
-        tries = ([Path(vault) / target] if vault else []) + [Path.cwd() / target]
+        # No cwd on the server: the account has its vault and nothing else, and
+        # a missing vault file would otherwise read as one outside it.
+        tries = ([Path(vault) / target] if vault else []) + ([] if hosted() else [Path.cwd() / target])
         p = next((c for c in tries if c.exists()), tries[-1])
+    if hosted():
+        # Before the existence check, so a refusal says nothing about whether
+        # a host file is there (ADR-0179 point 5).
+        from silica.kernel.base.layout import readable_in_vault
+
+        try:
+            readable_in_vault(p, vault or ".")
+        except ValueError:
+            raise OutsideVault(OUTSIDE_YOUR_VAULT) from None
     if not p.exists():
         raise ValueError(f"file not found: {target}")
     return p

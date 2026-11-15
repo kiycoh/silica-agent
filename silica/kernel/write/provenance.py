@@ -1272,9 +1272,13 @@ def content_sha256(source_path: str) -> str:
         return hashlib.sha256(content_bytes).hexdigest()
     except Exception:
         try:
-            content_bytes = Path(source_path).read_bytes()
+            from silica.config import CONFIG
+            from silica.kernel.base.layout import readable_in_vault
+
+            # cwd-relative as before, refused outside the vault (ADR-0179 point 4).
+            content_bytes = readable_in_vault(Path(source_path).absolute(), CONFIG.vault_path).read_bytes()
             return hashlib.sha256(content_bytes).hexdigest()
-        except OSError:
+        except (OSError, ValueError):
             return ""
 
 

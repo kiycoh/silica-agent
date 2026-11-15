@@ -618,6 +618,94 @@ def test_convert_command_no_files_errors():
     assert msg is not None and msg.startswith("/convert requires at least one file path")
 
 
+def _recording_convert(tmp_vault, monkeypatch) -> list[str]:
+    converted: list[str] = []
+
+    def _fake_convert(target, dest_dir=""):
+        converted.append(target)
+        return [f"Inbox/{Path(target).stem}.md"]
+
+    monkeypatch.setattr("silica.sources.convert.convert", _fake_convert)
+    return converted
+
+
+def test_convert_of_a_folder_converts_what_nucleate_would_read_and_was_not_converted(
+        tmp_vault, monkeypatch, capsys):
+    vault = Path(CONFIG.vault_path)
+    tmp_vault.note("Inbox/ml/guide.md", "# Guide\n\n![](images/a.jpg)\n")
+    tmp_vault.note("Inbox/ml/images/a.jpg", "img")
+    tmp_vault.note("Inbox/ml/shot.png", "img")
+    tmp_vault.note("Inbox/ml/L2.pdf", "%PDF")
+    tmp_vault.note("Inbox/ml/L2.md", f'---\nsource_file: "{vault}/Inbox/ml/L2.pdf"\n---\n\nbody\n')
+    tmp_vault.note("Inbox/ml/L3.pdf", "%PDF")
+    converted = _recording_convert(tmp_vault, monkeypatch)
+
+    assert expansion("/convert Inbox/ml") == ""
+
+    assert converted == ["Inbox/ml/L3.pdf", "Inbox/ml/shot.png"]
+    out = " ".join(capsys.readouterr().out.split())
+    assert "1 file in Inbox/ml: already converted, and naming a file converts it again." in out
+    assert "1 file in Inbox/ml: they are figures the folder's notes show." in out
+
+
+def test_convert_of_a_library_leaves_out_a_second_file_of_one_name_and_its_photos(
+        tmp_vault, monkeypatch, capsys):
+    """Outside the inbox every note lands at the inbox root (convert._note_dir),
+    so the second Ch1.pdf would overwrite the first one's note."""
+    vault = Path(CONFIG.vault_path)
+    for rel in ("Lib/A/Ch1.pdf", "Lib/B/Ch1.pdf", "Lib/page.jpg", "Lib/paper.pdf"):
+        tmp_vault.note(rel, "x")
+    # The vault's + converts a file beside itself, out of prior_conversions' sight.
+    tmp_vault.note("Lib/paper.md", f'---\nsource_file: "{vault}/Lib/paper.pdf"\n---\n\nbody\n')
+    converted = _recording_convert(tmp_vault, monkeypatch)
+
+    expansion("/convert Lib")
+
+    assert converted == ["Lib/A/Ch1.pdf"]
+    out = " ".join(capsys.readouterr().out.split())
+    assert "Lib/B/Ch1.pdf: its note would replace the one of Lib/A/Ch1.pdf" in out
+    assert "1 image in Lib: a photographed book is read as one document" in out
+    assert "1 file in Lib: already converted" in out
+
+    converted.clear()
+    expansion("/convert Lib/A Lib/B")  # one name across two folders collides too
+    assert converted == ["Lib/A/Ch1.pdf"]
+
+
+def test_convert_of_a_folder_stops_when_the_gpu_is_full(tmp_vault, monkeypatch, capsys):
+    from silica.sources.convert import GpuOutOfMemory
+
+    for n in (1, 2, 3):
+        tmp_vault.note(f"Inbox/scans/s{n}.pdf", "%PDF")
+    tried: list[str] = []
+
+    def _full(target, dest_dir=""):
+        tried.append(target)
+        raise GpuOutOfMemory("CUDA out of memory")
+
+    monkeypatch.setattr("silica.sources.convert.convert", _full)
+    expansion("/convert Inbox/scans")
+
+    assert tried == ["Inbox/scans/s1.pdf"]
+    assert "2 more files were left unread" in " ".join(capsys.readouterr().out.split())
+
+
+def test_convert_of_a_folder_outside_the_vault_or_empty_says_so(
+        tmp_vault, tmp_path, monkeypatch, capsys):
+    outside = tmp_path / "Downloads"
+    outside.mkdir()
+    (outside / "x.pdf").write_bytes(b"%PDF")
+    tmp_vault.note("Empty/notes.md", "# only a note\n")
+    converted = _recording_convert(tmp_vault, monkeypatch)
+
+    expansion(f"/convert {outside} Empty")
+
+    assert converted == []
+    out = " ".join(capsys.readouterr().out.split())
+    assert f"{outside}: it is outside the vault, so name its files instead." in out
+    assert "Empty: it holds no document Silica converts." in out
+
+
 # ---------------------------------------------------------------------------
 # Re-nucleate-of-modified-source warning (spec-hermes-coherence §3): a file
 # about to be staged whose basename is already registered in

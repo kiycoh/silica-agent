@@ -629,6 +629,22 @@ def test_convert_typed_in_the_chat_is_a_job(client):
     assert _record(body["jobs"][0]["id"])["state"] == "done"
 
 
+def test_convert_typed_in_the_chat_with_a_folder_is_a_job_per_document(client):
+    tc, _, ran = client
+    (_inbox() / "talks").mkdir(parents=True)
+    for n in ("a", "b"):
+        (_inbox() / "talks" / f"{n}.mp3").write_bytes(b"\0" * 16)
+    (_inbox() / "empty").mkdir()
+    r = tc.post("/chat", json={"text": "/convert Inbox/talks Inbox/empty"})
+    assert r.status_code == 202
+    body = r.json()
+    assert [j["source"]["name"] for j in body["jobs"]] == ["a.mp3", "b.mp3"]
+    assert body["skipped"] == [{"name": "Inbox/empty", "reason": "it holds no document Silica converts"}]
+    assert "text" not in ran
+    _drain()
+    assert [_record(j["id"])["state"] for j in body["jobs"]] == ["done", "done"]
+
+
 def test_nucleate_typed_with_a_file_to_convert_records_it_and_waits(client):
     from silica.ui.web import jobs
 

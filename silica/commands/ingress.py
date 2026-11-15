@@ -104,21 +104,31 @@ def _sentence(e: BaseException) -> str:
 
 
 def convert(c: Call) -> Result:
-    """/convert <file...> [--target=DIR] — document to inbox notes, no distillation."""
+    """/convert <file|folder...> [--target=DIR] — documents to inbox notes, no distillation."""
     out = c.out
     w = read_words(c.args)
     if not w.files:
         return out.refused(f"/convert requires at least one file path. Usage: {c.row.synopsis}")
     from rich.markup import escape
 
-    from silica.sources.convert import convert
-    for f in w.files:
+    from silica.sources.convert import GpuOutOfMemory, convert
+    files, left = ingest.convert_targets(w.files)
+    for name, why in left:
+        out.print(f"  [yellow][bold]Not converted.[/bold] {escape(name)}: {escape(why)}.[/]")
+    for i, f in enumerate(files):
         try:
             paths = convert(f, dest_dir=w.target)
             notes = ", ".join(f"[bold]{escape(p)}[/]" for p in paths)
             out.print(f"  {escape(f)} became {_notes(len(paths))}: {notes}")
         except ValueError as e:
             out.print(f"  [yellow][bold]Not converted.[/bold] {escape(f)}: {escape(str(e))}[/]")
+            # As /nucleate stops: the GPU stays full until something else lets
+            # go of it, so a folder's every later file would fail the same way.
+            if isinstance(e, GpuOutOfMemory) and (rest := len(files) - i - 1):
+                out.print(f"  [yellow][bold]Not read.[/bold] The graphics card ran out of memory, so "
+                          f"{rest} more {'file was' if rest == 1 else 'files were'} left unread. "
+                          f"Close what uses it and run /convert again.[/]")
+                break
     return out
 
 
