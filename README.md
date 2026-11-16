@@ -54,7 +54,7 @@ Then type `/report`. It is read-only: it writes one file, `GRAPH_REPORT.md`, and
 
 ## What you can do
 
-Silica is single-user: one person, one vault. There are no per-person permissions and no vault shared between people.
+Silica is single-user: one person, one vault, and no vault is shared between people. On the hosted service, a wiki made Private reaches only the readers its owner names, as a copy each saves into their own vault.
 
 **Bring documents in.** Slides, case files, papers and mail become notes in the source's own words, not a summary of them.
 
