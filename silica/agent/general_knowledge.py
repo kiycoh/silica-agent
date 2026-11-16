@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from silica.config import CONFIG
 from silica.kernel.base.syntax import LINK_RE
 from silica.prompts import GENERAL_MARK
 from silica.tools import TOOLS
@@ -27,6 +28,12 @@ LABEL = "partly from general knowledge"
 # note, with a block or without one: the owner's 2026-11-13 decision, "every
 # answer without citations says it is general knowledge and not the vault".
 UNCITED = "from general knowledge, not your notes"
+# The same line with general knowledge off (SILICA_GENERAL_KNOWLEDGE=False), where
+# the chat is told to answer cited or refuse: an answer citing no note there is
+# most often the refusal, which UNCITED would call the model's knowledge. Seen on
+# 2026-11-16 (harness bench D1 Q5), under "the files hold nothing on Orpheus
+# Telecom". These words hold for a refusal and for an uncited claim alike.
+UNCITED_STRICT = "cites none of your notes"
 IN_COMMAND = "this command answers from your notes alone; the general-knowledge block is not from them"
 # Said in the answer, where the block was: the history the next turn reads
 # carries it too, and the model then sees why its own answer is missing.
@@ -167,4 +174,4 @@ def uncited_notes(answer: str, reads=()) -> list[dict]:
     said = answer.replace(HELD_BACK, "").replace(HELD_BACK_UNSURE, "")
     if not said.strip() or has_general(said) or cites_a_note(said, reads):
         return []
-    return [{"kind": "general", "text": UNCITED}]
+    return [{"kind": "general", "text": UNCITED if CONFIG.general_knowledge else UNCITED_STRICT}]

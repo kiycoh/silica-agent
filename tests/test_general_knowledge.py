@@ -105,6 +105,13 @@ class TestAnAnswerThatCitesNoNote:
     def test_a_figure_embed_is_no_citation(self):
         assert gk.uncited_notes("Here it is.\n\n![[orbit.png]]") != []
 
+    def test_with_general_knowledge_off_the_line_says_no_note_is_cited(self, monkeypatch):
+        """Cited or refused: a refusal is no general knowledge (bench D1 Q5, 2026-11-16)."""
+        monkeypatch.setattr(CONFIG, "general_knowledge", False)
+        refusal = "The files in this folder do not contain anything about Orpheus Telecom."
+        assert gk.uncited_notes(refusal) == [{"kind": "general", "text": gk.UNCITED_STRICT}]
+        assert gk.uncited_notes("Galileo was born in 1564 [[Galileo Galilei]].") == []
+
 
 class TestCommandsStayInTheVault:
     def test_a_directive_carries_the_vault_only_line_while_the_rule_is_on(self, tmp_vault, monkeypatch):
