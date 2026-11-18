@@ -61,19 +61,17 @@ jobs:
       - name: Verify built version matches the tag
         run: ls -1 dist/ && uv run python -c "import pathlib,sys; t='${{ github.ref_name }}'.lstrip('v'); files=[p.name for p in pathlib.Path('dist').glob('*.whl')]; sys.exit(0 if any(t.replace('-','_') in f for f in files) else f'tag {t} not in {files}')"
 
-      - name: Verify the wheel ships runtime assets
-        # Guards the package-data config: a wheel that drops these crashes at
-        # runtime (recipes, prompts and web assets are loaded via Path(__file__)).
+      - name: Verify the wheel ships every tracked file of the package
+        # Guards the package-data config: a wheel that drops a prompt or a web
+        # asset crashes at runtime (they are loaded via Path(__file__)). Every
+        # tracked file under silica/ and not a list of names: the list named
+        # silica/recipes/*.yaml, which a4576b7 removed on 2026-11-06, so the
+        # first tag after it would have failed here on a wheel that was whole
+        # (caught by a local rehearsal on 2026-11-18, before v0.33.0).
         run: |
-          for f in \
-            silica/kernel/prompts/distiller_prompt.txt \
-            silica/recipes/injector.yaml \
-            silica/recipes/organizer.yaml \
-            silica/ui/web/static/index.html \
-            silica/.env.example; do
-            unzip -l dist/*.whl | grep -q "$f" || { echo "MISSING from wheel: $f"; exit 1; }
-          done
-          echo "all runtime assets present in wheel"
+          missing=$(comm -23 <(git ls-files silica | LC_ALL=C sort) <(unzip -Z1 dist/*.whl | LC_ALL=C sort))
+          if [ -n "$missing" ]; then echo "MISSING from wheel:"; echo "$missing"; exit 1; fi
+          echo "every tracked file under silica/ is in the wheel"
 
       - name: Publish to PyPI
         # Trusted Publishing via OIDC — the PyPI project must have this repo +
