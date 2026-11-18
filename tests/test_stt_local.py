@@ -105,13 +105,18 @@ def test_speech_lang_maps_the_vault_language_to_a_bcp47_tag(monkeypatch):
 
 
 def test_the_device_setting_puts_the_local_transcriber_on_the_gpu(monkeypatch):
-    import faster_whisper
+    import sys
+    import types
 
     from silica.agent import stt
     from silica.config import CONFIG
 
     made = []
-    monkeypatch.setattr(faster_whisper, "WhisperModel", lambda model, **kw: made.append((model, kw)) or object())
+    # A stand-in module, not the real one patched: CI installs no [stt] extra,
+    # so `import faster_whisper` here failed both test jobs on 2026-11-18, and
+    # what is pinned is the device and compute type, which need no model.
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(
+        WhisperModel=lambda model, **kw: made.append((model, kw)) or object()))
     monkeypatch.setattr(stt, "_models", {})
     monkeypatch.setattr(CONFIG, "stt_local_device", "cuda")
     stt._load("large-v3-turbo")
