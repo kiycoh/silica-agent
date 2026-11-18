@@ -450,7 +450,9 @@ def _litellm_routes(prefix: str) -> bool:
     import litellm
 
     drop_foreign_env()  # litellm's import loads a cwd .env (see drop_foreign_env)
-    return prefix in {p.value for p in litellm.provider_list}
+    # getattr, not .value: provider_list is typed LlmProviders | str, and a
+    # plain string in it has no .value to read.
+    return prefix in {getattr(p, "value", p) for p in litellm.provider_list}
 
 
 # The config fields behind each model role: (model, provider). Here and not in
