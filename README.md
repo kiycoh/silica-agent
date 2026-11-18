@@ -62,6 +62,7 @@ Silica is single-user: one person, one vault, and no vault is shared between peo
 - The vault's `+` imports files or a whole folder at the top of the vault, as they are, and a link into `Inbox/`, with no chat turn; move a folder into `Inbox/` and `/nucleate` it when you want it rewritten as notes. A YouTube link gives the video's transcript, a Reddit link the post and its top comments, and a GitHub link the repository's README, the file, or the issue or pull request with its comments (set `GITHUB_TOKEN` past GitHub's 60 reads an hour); `/fetch <url>` does the same from the chat. A file dropped on the chat stays that chat's until you press "add to vault".
 - A long document is split at its headings into parts of at most 40,000 characters. A PDF page with no text, or with formulas its text layer loses, is read from its image by the model, up to 60 pages a file.
 - A note keeps its source's DOI, arXiv id, authors and title, so it can be cited without reopening the document. With Zotero linked, a paper's note opens under its byline, with links to Zotero, the PDF and the DOI.
+- In the web app, the chat's `+` › deep research turns a question into sub-questions, at most 4, 8 or 12 by the depth you pick, for you to edit and approve; nothing is fetched before that. Each one then runs its own capped web research behind the chat and lands as a part, every citation naming the quote it stands on, under one note in `Inbox/`; when it is done you pick the parts to `/nucleate`. It runs on a hosted model only: a local one has not been measured on it.
 - `/mail import` keeps only the threads you took part in, from a mail client's export or Google Takeout, and writes nothing until `--apply`.
 - In a git repository, `/wiki` writes an `ARCHITECTURE.md` plus a note per subsystem under `docs/silica/`, and `/stale` flags the notes whose code changed shape since.
 
@@ -70,6 +71,7 @@ Silica is single-user: one person, one vault, and no vault is shared between peo
 - `/explain`, `/compare`, `/summarize` and the chat answer from your notes and cite them. When the notes hold nothing on a question, the chat says so in one line, then answers from the model's own knowledge inside a block headed "From general knowledge, not your notes", never mixed into cited sentences. The line under the answer says "partly from general knowledge", and warns when that block came before any search of your notes. Commands and Memorize answer from the notes alone. Turn off Settings › Session › general knowledge (`SILICA_GENERAL_KNOWLEDGE=False`) for the strict chat: cited or refused. `/web` answers from the web, cited from the pages it actually opened.
 - `/council "<question>"` puts one question to several models over one search of your notes. Each member answers from the same passages, with the same rules; the chat model then writes what they agree on, where they disagree and which member said what, every claim cited, with each member's own answer folded underneath. You name the members, 2 to 5, in `SILICA_COUNCIL_MODELS` or Settings › Brains; Silica picks none. A member that fails or runs out of time is named and skipped, and the line under the answer counts each member's calls and tokens. Not on the server in this version.
 - `/page "<what>"` builds a self-contained HTML page from your notes into `Pages/`, or a small site in `Pages/<name>/`, its CSS and scripts inline, with a footer naming the notes it came from. It opens in the drawer or full window, in a sandbox with no access to the app, your session or the network; a page that tries to send its frame to another site is stopped there. A page's address opened in a browser tab of its own keeps the sandbox but not that last guard. Its write card reverts it, and "Revise this page: ..." in the chat writes a new version with a card of its own.
+- In the web app, the chat's `+` › long document writes a book, a screenplay, a documentary script, an investigation, a decision record, an action plan or a speech only from the folders and workspaces you choose, up to 200 notes and files. It reads them, plans an outline you edit, then writes section by section into `Documents/`, each citation a footnote quoting its passage. It never searches the web: the plan lists what the notes do not cover, for a deep research to fill. A hosted model only, and a prototype: its quality has not been measured yet.
 - Each cited note gets a number. Clicking it opens the note at the line closest to the paragraph that cites it, when enough of their words match; pointing at it lights every paragraph that cites the same note.
 - A line under the answer counts the notes read, the steps and the seconds, and lists under "not cited" the notes it read and did not cite.
 - A number in the answer that is in no note the chat read and in nothing you typed is listed under it: "numbers not in what this turn read".
@@ -179,7 +181,7 @@ Checked on 2026-11-08 against each product's own docs and release notes, and for
 
 | | Licence | Price | Local models | Your folder, in place | PDF, DOCX, EPUB, PPTX | Phone | MCP |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Silica** 0.31.1 | AGPL-3.0 or commercial | Free | ✅ | ✅ | ✅ | 🟡 | ✅ |
+| **Silica** 0.33.0 | AGPL-3.0 or commercial | Free | ✅ | ✅ | ✅ | 🟡 | ✅ |
 | **Obsidian Copilot** 4.0.18 | AGPL-3.0, closed hosted backend | Free; Plus $139.99/yr | ✅ | ✅ | 🟡 | 🟡 | ❔ |
 | **Smart Connections** 4.7.2 | Source-available, not open source | Free; Pro $30/mo | 🟡 | ✅ | 🟡 | ✅ | 🟡 |
 | **Khoj** 2.0.0-beta.28 | AGPL-3.0 | Free | ✅ | 🟡 | 🟡 | ✅ | 🟡 |
@@ -219,7 +221,7 @@ Where Silica is behind: no native phone app, no audio or video overviews, and a 
 Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://github.com/kiycoh/silica-core), the retrieval engine Silica is built on, with no model in the loop.
 
 <details>
-<summary><b>All 69 commands</b></summary>
+<summary><b>All 73 commands</b></summary>
 
 <br/>
 
