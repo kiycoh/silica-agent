@@ -378,7 +378,7 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
     checkpoints = [
         PlanStep(id="audit",    kind="mechanical", objective="silica_vault_report"),
         PlanStep(id="remediate", kind="gate",      objective="silica_autolink"),
-        PlanStep(id="report",   kind="mechanical", objective="silica_ledger_digest"),
+        PlanStep(id="report",   kind="mechanical", objective="ledger digest"),
     ]
 
     return AnalystPlan(

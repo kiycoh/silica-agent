@@ -3,8 +3,8 @@
 
 """Pipeline tools: what the model can reach of the deferred-ops path.
 
-The bodies are silica.router.anneal's, below the tools because the FSM's
-boundary anneal calls them; the injector's own stages are plain functions the
+The body is silica.router.anneal's, below the tool because the FSM's
+boundary anneal calls it; the injector's own stages are plain functions the
 FSM calls. The full run lives in silica.tools.runners, exposed as
 silica_run_injector.
 """
@@ -18,18 +18,6 @@ from pydantic import Field
 
 from silica.router import anneal
 from silica.tools import tool
-
-
-@tool(cls="composed", collapse="eager", ingress=False, label=("deferred retry", None))
-def silica_deferred_retry(content_hash: Annotated[str, Field(description='Content hash of the deferred bundle to retry (from silica_deferred_list)')]) -> dict[str, Any]:
-    """Retry writing a deferred op bundle: re-validates against the current vault,
-    snapshots, writes the ops that now pass, and updates the bundle.
-
-    - Ops that pass validation are written immediately.
-    - Ops that still fail remain in the deferred store.
-    - If the bundle is fully cleared, it is removed from the deferred store.
-    """
-    return anneal.retry_bundle(content_hash)
 
 
 @tool(cls="composed", collapse="eager", ingress=False, label=("anneal", None))

@@ -370,18 +370,18 @@ def test_digest_graceful_without_task_ledger(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# silica_ledger_digest tool
+# ledger_digest, what /status <run> prints
 # ---------------------------------------------------------------------------
 
-def test_silica_ledger_digest_tool(tmp_path):
+def test_ledger_digest(tmp_path):
 
     p = ProgressLedger.new(mode="inject", inputs={"inbox_file": "Inbox/x.md"})
     p.add_task("recon", task_id="recon")
     p.set_status("recon", "done")
     p.save()
 
-    from silica.tools.runners import silica_ledger_digest
-    result = silica_ledger_digest(run_id=p.run_id)
+    from silica.tools.runners import ledger_digest
+    result = ledger_digest(run_id=p.run_id)
 
     assert "error" not in result
     assert result["run_id"] == p.run_id
@@ -389,22 +389,22 @@ def test_silica_ledger_digest_tool(tmp_path):
     assert p.run_id[:8] in result["digest"]
 
 
-def test_silica_ledger_digest_tool_latest_run(tmp_path):
+def test_ledger_digest_latest_run(tmp_path):
     """Passing run_id='' should pick the most recently modified run."""
 
     p = ProgressLedger.new(mode="inject", inputs={})
     p.add_task("recon", task_id="recon")
     p.save()
 
-    from silica.tools.runners import silica_ledger_digest
-    result = silica_ledger_digest(run_id="")
+    from silica.tools.runners import ledger_digest
+    result = ledger_digest(run_id="")
 
     assert "error" not in result
     assert result["run_id"] == p.run_id
 
 
-def test_silica_ledger_digest_tool_unknown_run(tmp_path):
+def test_ledger_digest_unknown_run(tmp_path):
 
-    from silica.tools.runners import silica_ledger_digest
-    result = silica_ledger_digest(run_id="doesnotexist")
+    from silica.tools.runners import ledger_digest
+    result = ledger_digest(run_id="doesnotexist")
     assert "error" in result

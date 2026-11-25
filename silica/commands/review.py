@@ -231,7 +231,7 @@ def aliases(c: Call) -> Result:
     scope = folder or "(vault)"
     mode = "applying" if apply else "dry-run (nothing is written)"
     out.print(f"  Alias consolidation on [bold]{scope}[/] — {mode}…")
-    res = answered(consolidation.silica_aliases, apply=apply, folder=folder)
+    res = answered(consolidation.consolidate_aliases, apply=apply, folder=folder)
     if "error" in res:
         out.print(f"  [yellow]{res['error']}[/]")
         return out

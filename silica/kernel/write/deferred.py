@@ -6,8 +6,8 @@
 When the VALIDATE gate rejects some ops in the injector pipeline, the LLM-
 generated content for those ops is saved here rather than discarded.  On the
 next run of the same source file the orchestrator surfaces the bundle so the
-model can retry autonomously (silica_deferred_retry) or the user can inspect
-and discard (silica_deferred_list / silica_deferred_flush).
+boundary anneal or /anneal can retry it (router/anneal.py) and /review can
+show or discard it (tools/review/deferred.py).
 
 Storage: ~/.silica/deferred/<content_hash>.json
 Bundle schema:
@@ -23,7 +23,7 @@ Bundle schema:
                      the forensic source of truth — this dict clobbers on key
                      collision across phases)
   payloads         — list[payload dict] the ops were originally validated
-                     against. Persisted so silica_deferred_retry re-validates
+                     against. Persisted so a retry (anneal.retry_bundle) re-validates
                      with the SAME grounding/heading/collision checks that
                      rejected the ops — the retry used to pass [] and admit on
                      strictly weaker validation (audit 2026-07-23, finding 2).

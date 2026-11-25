@@ -83,12 +83,12 @@ def graph_export(output_path: str, folder: str = "", title: str = "Vault Graph",
     return export_graph(output_path=output_path, folder=folder, title=title, knn_k=knn_k)
 
 
-@tool(cls="composed", ingress=False, note_args=("note_path",))
-def silica_mindmap(note_path: Annotated[str, Field(description='Vault-relative path of the note to root the map on')], force: Annotated[bool, Field(description='Overwrite an existing maps/<stem>.canvas (defaults to no-clobber)')] = False) -> dict[str, Any]:
-    """Radial mind-map rooted on one note, written to maps/<stem>.canvas
-    (editable in Obsidian). Deterministic: BFS over wikilinks plus the latent
-    relatedness leg, radial wedges by community. No-clobber: an existing map
-    needs force=True. Flat whole-vault network: silica_graph_export.
+def write_mindmap(note_path: str, force: bool = False) -> dict[str, Any]:
+    """/map: a radial mind-map rooted on one note (a path or a title), written
+    to maps/<stem>.canvas (editable in Obsidian). Deterministic: BFS over
+    wikilinks plus the latent relatedness leg, radial wedges by community.
+    No-clobber: an existing map needs force=True. A plain function and no
+    longer a registered tool (2026-11-25): no chat turn was offered it.
     """
     from pathlib import Path
 
@@ -121,7 +121,7 @@ def silica_mindmap(note_path: Annotated[str, Field(description='Vault-relative p
     import orjson
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(orjson.dumps(mapview_to_canvas(mv), option=orjson.OPT_INDENT_2))
-    logger.info("silica_mindmap: wrote %s — %d nodes, %d edges", out, len(mv.nodes), len(mv.edges))
+    logger.info("mindmap: wrote %s — %d nodes, %d edges", out, len(mv.nodes), len(mv.edges))
     return {"path": str(out), "nodes": len(mv.nodes), "edges": len(mv.edges)}
 
 
@@ -861,36 +861,3 @@ def silica_vault_report(
     result["next"] = _REPORT_NEXT
 
     return result
-
-
-@tool(cls="composed", ingress=False)
-def silica_health() -> dict[str, Any]:
-    """Retrieval + write-path health check, live: `fusion` (masked-wikilink
-    recovery — low recall or embed_coverage < 1.0 means related/semantic
-    search is degraded; refresh with silica_embed_refresh /
-    silica_cooccurrence_refresh and re-run) and `integrity` (differential lint
-    across the write-path transforms — under 1.0 the pipeline CORRUPTS note
-    bodies and writes should stop; null means the vault held no notes and
-    nothing was measured). Full-vault sweep, on demand, not a
-    per-write gate. Structural audit of content: silica_vault_report.
-    """
-    from pathlib import Path
-
-    from silica.config import CONFIG
-    from silica.kernel.recall.cooccurrence import get_cooccur_store
-    from silica.kernel.recall.embed import get_store
-    from silica.kernel.report.health import fusion_probe, integrity_probe
-
-    vault = Path(CONFIG.vault_path or "").expanduser()
-    if not vault.is_dir():
-        return {"error": "No vault configured."}
-
-    try:
-        store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-    except Exception as e:
-        store = None
-        fusion: dict[str, Any] = {"error": f"co-occurrence store unavailable ({e}) — run silica_cooccurrence_refresh"}
-    if store is not None:
-        fusion = fusion_probe(vault, store, embed_store=get_store())
-
-    return {"fusion": fusion, "integrity": integrity_probe(vault)}

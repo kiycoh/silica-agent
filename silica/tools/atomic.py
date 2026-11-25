@@ -1254,37 +1254,6 @@ def silica_exists(path: Annotated[str, Field(description='Relative path of the n
     return target.is_file()
 
 
-@tool(cls="atomic", ingress=False, label=("deferred list", None))
-def silica_deferred_list() -> list:
-    """List all pending deferred op bundles (concepts rejected by the validator in previous runs).
-
-    Returns summary rows — use silica_deferred_retry(content_hash) to attempt
-    writing them, or silica_deferred_flush(content_hash) to discard them.
-    """
-    from silica.kernel.write.deferred import get_deferred_store
-    return get_deferred_store().list_all()
-
-
-@tool(cls="atomic", collapse="eager", ingress=False, label=("deferred flush", None))
-def silica_deferred_flush(content_hash: Annotated[str, Field(description='Content hash of the deferred bundle to permanently discard')]) -> dict:
-    """Discard a deferred op bundle — marks those rejected ops as permanently skipped."""
-    from silica.kernel.write.deferred import get_deferred_store
-    removed = get_deferred_store().purge(content_hash)
-    if removed:
-        return {"removed": True, "content_hash": content_hash}
-    return {"removed": False, "error": f"No deferred bundle found for {content_hash[:8]}…"}
-
-
-@tool(cls="atomic", ingress=False, label=("inbox", None))
-def silica_inbox_ls() -> list:
-    """Lists all files in the Inbox folder (inbox_dir), including non-markdown
-    files (PDFs etc.). Non-markdown files cannot be read or nucleated directly:
-    ask the user to run `/convert <path>` first, then work on the resulting .md.
-    """
-    refs = DRIVER.list_inbox_files()
-    return [r.path for r in refs]
-
-
 @tool(cls="atomic", ingress=False, parallel_safe=True)
 def silica_graph_path(source: Annotated[str, Field(description='Source note name or vault-relative path')], target: Annotated[str, Field(description='Target note name or vault-relative path')], max_paths: Annotated[int, Field(description='Maximum number of shortest paths to return')] = 1) -> dict:
     """Shortest connection(s) between two notes over the resolved wikilink graph.

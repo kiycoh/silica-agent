@@ -103,6 +103,6 @@ def test_map_resolves_a_quoted_title_with_spaces(monkeypatch):
         seen["note"] = note_path
         return {"skipped": "maps/x.canvas", "reason": "exists"}
 
-    monkeypatch.setattr("silica.tools.graph.silica_mindmap", mindmap)
+    monkeypatch.setattr("silica.tools.graph.write_mindmap", mindmap)
     assert direct('/map "Galileo Galilei"', []) is True
     assert seen["note"] == "Galileo Galilei"

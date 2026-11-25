@@ -197,7 +197,7 @@ def test_write_gate_tools_are_classified_eager():
         "silica_flag_note", "silica_require", "silica_decide", "silica_write_page", "silica_event_create", "silica_event_update",
         "silica_autolink", "silica_backlink", "silica_embed_refresh",
         "silica_cooccurrence_refresh", "silica_lexical_refresh",
-        "silica_deferred_retry", "silica_deferred_flush", "silica_run_injector",
+        "silica_run_injector",
         "silica_anneal", "silica_rework",
     }
 

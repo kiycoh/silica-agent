@@ -54,7 +54,7 @@ def notes_under(folder: str) -> list[str]:
     if not paths and scope:
         inbox = active_inbox_dir()
         if inbox and in_folder(scope, inbox):
-            # .md only: the unconverted files (PDFs) are silica_inbox_ls's job,
+            # .md only: an unconverted file (a PDF) is not a note,
             # and a converted folder's Images/ leaves outnumber its notes 70:1.
             paths = [
                 r.path for r in DRIVER.list_inbox_files()

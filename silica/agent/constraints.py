@@ -57,7 +57,7 @@ class AgentConstraints:
 # turns that instruction into a dead end. That constraint is what keeps
 # silica_curate, silica_dedup and silica_graph_export reachable (loadable
 # since ADR-0050) despite each having a slash command, and why this list is
-# 12 entries rather than 30.
+# 4 entries rather than 30.
 #
 # silica_anneal was here until 2026-08-23 and is deliberately NOT: it is the
 # only tool that resolves a deferred bundle, and the nucleate summary tells the
@@ -68,17 +68,16 @@ class AgentConstraints:
 # ponytail: one explicit list, not a per-tool flag. A tool added later defaults
 # to being visible in chat, which costs tokens but never breaks — the safe
 # direction. Revisit if this grows past ~20 entries.
+#
+# Eight more names sat here until 2026-11-25 and are no longer tools at all
+# (deferred list, flush and retry, inbox ls, health; aliases, mindmap and the
+# ledger digest, which /aliases, /map and /status call as plain functions): no
+# directive named them and no model called one in 4,214 tool calls recorded on
+# the owner's machine, so they were schemas held for nobody. Excluded and still
+# registered, a tool is one direct call away from being offered (_in_play).
 _CHAT_EXCLUDED = frozenset({
-    "silica_aliases",            # /aliases
-    "silica_deferred_list",      # deferred-ops bookkeeping, surfaced by the FSM
-    "silica_deferred_flush",
-    "silica_deferred_retry",
     "silica_document",           # /wiki
     "silica_generate_taxonomy",  # /organize
-    "silica_health",             # /status
-    "silica_inbox_ls",
-    "silica_ledger_digest",      # /report runs it directly, no agent involved
-    "silica_mindmap",            # /map
     "silica_record_quiz",        # /quiz and /learn name it in their directives
     "silica_run_organizer",      # /organize
 })

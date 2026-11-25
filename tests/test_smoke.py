@@ -244,8 +244,7 @@ def test_list_inbox_files_fs(tmp_path):
 
 
 def test_new_tools_registration():
-    """Verify that silica_exists and silica_inbox_ls are registered in the registry."""
+    """silica_exists is registered in the registry."""
     from silica.tools import TOOLS
     import silica.tools.atomic  # noqa: F401
     assert "silica_exists" in TOOLS
-    assert "silica_inbox_ls" in TOOLS

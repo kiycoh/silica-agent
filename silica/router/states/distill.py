@@ -834,7 +834,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
         if fsm.defer_ops(deferred_ops, rejection_reasons, phase="VALIDATE"):
             logger.warning(
                 "VALIDATE: %d op(s) rejected and saved to deferred store (hash=%s…). "
-                "Use silica_deferred_retry to attempt them later.",
+                "/anneal attempts them later.",
                 len(rejected_raw),
                 fsm.current_content_hash[:8],
             )

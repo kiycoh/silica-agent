@@ -101,7 +101,7 @@ def status(c: Call) -> Result:
     from silica.tools import runners
 
     run_id = args[0] if (len(args) + 1) > 1 else ""
-    parsed = answered(runners.silica_ledger_digest, run_id=run_id)
+    parsed = answered(runners.ledger_digest, run_id=run_id)
     # A run that cannot be read is said as the JSON it always was.
     digest = parsed["digest"] if "digest" in parsed else json.dumps(parsed, ensure_ascii=False)
     # Preformatted plain text: Markdown would reflow every line into one

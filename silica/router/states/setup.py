@@ -54,8 +54,8 @@ def handle_recon(fsm: "InjectorFSM") -> None:
             if bundle:
                 rejected_count = len(bundle.get("rejected_ops", []))
                 logger.info(
-                    "RECON: %d deferred op(s) from a previous run of '%s' are waiting. "
-                    "Call silica_deferred_retry('%s') to attempt them.",
+                    "RECON: %d deferred op(s) from a previous run of '%s' are waiting "
+                    "(hash=%s…). /anneal attempts them.",
                     rejected_count, inbox_file, content_hash[:8],
                 )
                 fsm.run_state.deferred.append({

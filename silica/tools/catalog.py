@@ -24,7 +24,6 @@ _MODULES = (
     "silica.tools.notes",
     "silica.tools.events",
     "silica.tools.graph",
-    "silica.tools.aliases",
     "silica.tools.curate",
     "silica.tools.sessions",
     "silica.tools.rework",

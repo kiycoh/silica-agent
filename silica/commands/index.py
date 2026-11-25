@@ -117,7 +117,7 @@ def mind_map(c: Call) -> Result:
     if not note:
         out.print(f"  Usage: {c.row.synopsis}")
         return out
-    parsed = answered(graph_tools.silica_mindmap, note_path=note, force=force)
+    parsed = answered(graph_tools.write_mindmap, note_path=note, force=force)
     if parsed.get("skipped"):
         out.print(
             f"  [yellow]Map already present[/] ({parsed['skipped']}), not "
