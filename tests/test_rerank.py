@@ -62,16 +62,6 @@ def test_granularity_gate_lets_short_docs_rerank():
     assert fake.seen is not None
 
 
-def test_rerank_gate_probe_receives_median_and_fired(monkeypatch):
-    from silica.kernel.recall import rerank as rr_mod
-
-    seen = []
-    monkeypatch.setattr(rr_mod, "RERANK_GATE_PROBE", seen.append)
-    rerank_related(_Fake([0.1, 0.9]), "q", _ITEMS, k=2, document_of=_DOC)
-    assert seen and seen[0]["fired"] is False
-    assert seen[0]["median_len"] == 1               # docs are 1-char paths
-
-
 def test_abstains_when_reranker_returns_none_keeps_order():
     out = rerank_related(_Fake(None), "q", _ITEMS, k=3, document_of=_DOC)
     assert [i["path"] for i in out] == ["a", "b", "c"]

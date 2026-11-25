@@ -14,7 +14,6 @@ The reranker CLIENT lives in model/providers.py (Reranker/get_reranker); this mo
 holds only the note-aware reorder, so the client stays a plain HTTP provider.
 """
 import re
-import statistics
 from typing import Any, Callable
 
 from silica.kernel.base import notekey
@@ -27,14 +26,12 @@ _WINDOW_CHARS = 800  # cross-encoder document budget (chars): excerpt window + g
 # (LME min 9.2): every query where rerank damage was measured still fires, with
 # margin, while ~81% of vault queries keep the reranker; the ~19% vault tail that
 # fires holds >6.4k-char bodies, unreadable for the same reason chat sessions are.
+# The factor was frozen against the MEDIAN length; the gate votes on the MIN
+# (see rerank_related), which keeps every all-long pool firing — the LME chat
+# sessions the factor was calibrated on are uniformly 9.2k+ chars, so their min
+# fires too — while a pool holding even one window-sized note keeps its
+# cross-encoder scores.
 _RERANK_WINDOW_FACTOR = 8
-# Calibration hook: harnesses set it to capture {"median_len", "min_len",
-# "window", "fired"} per query; production leaves it None. The factor above was
-# frozen against the MEDIAN; the gate now votes on `min_len` (see rerank_related),
-# which keeps every all-long pool firing — the LME chat sessions the factor was
-# calibrated on are uniformly 9.2k+ chars, so their min fires too — while a pool
-# holding even one window-sized note keeps its cross-encoder scores.
-RERANK_GATE_PROBE: Callable[[dict], None] | None = None
 
 
 def _query_terms(query: str) -> set[str]:
@@ -292,12 +289,7 @@ def rerank_related(
     # note in the pool is enough for the reranker to produce a real ordering
     # (measured on the ML vault: same query, gold at rank 5 scoring 0.025
     # un-reranked, rank 1 scoring 0.9999 once the gate stopped firing).
-    min_len = min(lengths)
-    median_len = statistics.median(lengths)
-    fired = min_len > _RERANK_WINDOW_FACTOR * _WINDOW_CHARS
-    if RERANK_GATE_PROBE:
-        RERANK_GATE_PROBE({"median_len": median_len, "min_len": min_len,
-                           "window": _WINDOW_CHARS, "fired": fired})
+    fired = min(lengths) > _RERANK_WINDOW_FACTOR * _WINDOW_CHARS
     if stats is not None:
         stats["gate_fired"] = fired
         stats["reranked"] = not fired
