@@ -14,6 +14,8 @@ from unittest.mock import MagicMock, patch
 from silica.router.states import setup as st
 from silica.router.run_state import ChunkState, RunState
 
+import pytest
+
 
 def _recon_res(name="Inbox/f1.md"):
     return {"file": name, "collisions": [], "new_concepts": ["warm concept"]}
@@ -56,6 +58,7 @@ def _warm_stub(n_files=2, cur_fi=0):
     return fsm
 
 
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_warm_next_file_attaches_chunks_and_marks():
     fsm = _warm_stub()
     with patch.object(st, "recon_file", return_value=_recon_res()) as rec, \
@@ -73,10 +76,12 @@ def test_warm_next_file_attaches_chunks_and_marks():
     assert not hasattr(fsm, "chunk_idx") or fsm.chunk_idx == 0
 
 
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_warm_next_file_bails_on_recon_error():
     fsm = _warm_stub()
-    with patch.object(st, "recon_file", return_value={"error": "boom"}):
+    with patch.object(st, "recon_file", return_value={"error": "boom"}) as rec:
         assert st.warm_next_file(fsm) is False
+    rec.assert_called_once()  # the error is the reason: on the outline lane recon is never asked
     assert len(fsm.chunks) == 1
     assert 1 not in fsm.file_chunks
 

@@ -386,10 +386,6 @@ def set_parent(span_id: str | None):
     return _parent_var.set(span_id)
 
 
-def reset_parent(token) -> None:
-    _parent_var.reset(token)
-
-
 def read_beats(path: Path, *, from_seq: int = 0) -> Iterator[dict]:
     """Yield parsed beats with seq > from_seq, in file order.
 

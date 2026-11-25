@@ -9,6 +9,7 @@ previous file — the run just does the wrong thing on the NEXT run.
 """
 from unittest.mock import patch
 
+import pytest
 
 from silica.router.orchestrator import InjectorFSM
 from silica.router.phases import InjectorState
@@ -125,6 +126,7 @@ def test_payload_reassembles_a_file_whose_chunks_never_attached():
     assert fsm.chunk_flat_to_fi_ci[1] == (1, 0)
 
 
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_warm_next_file_reprepares_a_file_whose_chunks_never_attached():
     fsm = _payload_fsm()
     fsm.file_chunks[1] = {"source_file": "Inbox/b.md", "chunks": []}

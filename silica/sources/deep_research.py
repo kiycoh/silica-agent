@@ -63,9 +63,6 @@ DEPTHS = {
 }
 QUESTION_CHARS = 2000
 PART_CHARS = 300
-# A part with fewer banked quotes than this arrives unticked in the chooser:
-# it rests on too little to nucleate unread.
-THIN_QUOTES = 3
 
 _STOPS: dict[str, threading.Event] = {}
 

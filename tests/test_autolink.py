@@ -419,7 +419,7 @@ def test_autolink_escapes_the_alias_pipe_inside_a_table_row():
     tables already use it. Asserted through the linter, which is the instrument
     that has to agree.
     """
-    from silica.kernel.report.health import lint
+    from evals.golden.health import lint
 
     body = "| Concept | Note |\n| --- | --- |\n| neural networks | see above |\n"
     before = lint.totals(lint.scan(body, "Stem"))

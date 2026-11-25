@@ -186,6 +186,7 @@ def test_fsm_delegate_dated_doc_anchors_session_date(mock_run_distiller):
 @patch("silica.kernel.write.gate.lint_note")
 @patch("silica.kernel.write.gate.archive_source")
 @patch("silica.kernel.recall.embed.EmbedStore")
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_fsm_multi_chunk_loop(mock_embed_store, mock_cleanup, mock_lint, mock_snapshot, mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon, run_driver):
     # Setup mock payload with 2 chunks
     mock_embed_store.return_value.__len__ = lambda _: 0  # empty index → COLLISION skips early
@@ -535,6 +536,7 @@ def test_fsm_lint_gate_still_blocks_new_violations(mock_lint, run_driver):
 @patch("silica.router.states.write.build_txn")
 @patch("silica.kernel.write.gate.lint_note")
 @patch("silica.kernel.write.gate.archive_source")
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_fsm_recipe_end_to_end_flow(mock_cleanup, mock_lint, mock_snapshot, mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon, run_driver):
     # Setup mocks
     mock_recon.return_value = {"success": True}
@@ -1060,6 +1062,7 @@ def test_fsm_short_circuit_no_ops(mock_validate):
 @patch("silica.router.states.write.build_txn")
 @patch("silica.kernel.write.gate.apply_inverses")
 @patch("silica.kernel.write.gate.archive_source")
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_fsm_create_settle_timeout_rollback(mock_cleanup, mock_restore, mock_snapshot, mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon, run_driver):
     mock_recon.return_value = {"success": True}
     mock_payload.return_value = {"payload": {"chunk_id": 0}}

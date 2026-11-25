@@ -192,12 +192,13 @@ def _reset_run_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm_mod, "_run_cooldown", 0.0)
 
 
-@pytest.fixture(autouse=True)
-def _keyphrase_lane_under_test(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The FSM suites mock recon_file/payload_chunks and count their calls:
-    they test the keyphrase pipeline. The outline lane (the default since
-    2026-09-02) bypasses both, so it is opted into per test
-    (tests/test_outline_lane.py) instead of silently emptying these mocks."""
+@pytest.fixture
+def keyphrase_lane(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Documents on the keyphrase pipeline, for the suites that mock
+    recon_file/payload_chunks and count their calls. A module asks for it
+    (`pytestmark = pytest.mark.usefixtures("keyphrase_lane")`): until
+    2026-11-25 it was autouse, so every test ran on a lane documents left on
+    2026-09-02 and the default lane was covered only where a test opted in."""
     monkeypatch.setattr("silica.kernel.outline.DOCUMENT_LANE", "keyphrase")
 
 

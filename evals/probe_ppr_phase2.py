@@ -41,7 +41,7 @@ import time
 from pathlib import Path
 
 from evals.probe_ppr_phase0 import ppr
-from silica.kernel.report.health import K, eligible_pairs, wikilink_graph
+from evals.golden.health import K, eligible_pairs, wikilink_graph
 
 HOPS = 2          # fixed in phase 0 (section 5-bis): hops=3 is over the 50ms budget
 ALPHA = 0.5       # and buys no reach, the 3-hop closure is already saturated

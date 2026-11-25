@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from evals.longmemeval.probes import probe_question, run_probes
+from evals.longmemeval.probes import key_tokens, probe_question, run_probes
 
 
 def _fact(fid: str, key: str, runs: list[str], status: str = "live") -> dict:
@@ -375,5 +375,14 @@ def test_product_probe_reports_product_groups(tmp_path, monkeypatch):
     assert r["groups"] == 1
 
 
-
-
+def test_key_tokens_stemmed_entity_prefix_dropped():
+    # The probe-proven KU pair shares exactly two stemmed tokens.
+    shared = (key_tokens("user.fitness.tournament.date")
+              & key_tokens("user.tennis_tournament_date"))
+    assert len(shared) == 2
+    # Entity prefixes are dropped, never tokens.
+    assert not key_tokens("user.laundry.schedule") & {"user", "assist"}
+    # Morphological variants and user/assistant prefixes merge.
+    assert key_tokens("assistant.laundry.tips") == key_tokens("user.laundry.tip")
+    # Single-char tokens are noise, not alphabet.
+    assert key_tokens("user.a_b.c") == set()

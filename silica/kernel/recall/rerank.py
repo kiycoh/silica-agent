@@ -250,7 +250,7 @@ def rerank_related(
     flat on LME18 — so the deeper pool was selection damage again and the
     rule stands on two measurements, not one.
 
-    Granularity abstain (2b): when the median candidate body dwarfs the
+    Granularity abstain (2b): when every candidate body dwarfs the
     cross-encoder window, the model cannot read the evidence and its ordering
     is noise — skip the call, keep first-stage order.
 

@@ -89,6 +89,7 @@ class TestT1MultiFileInit:
     @patch("silica.router.states.setup.recon_file")
     @patch("silica.router.states.setup.payload_chunks")
     @patch("silica.kernel.write.ledger.get_ledger")
+    @pytest.mark.usefixtures("keyphrase_lane")
     def test_payload_produces_f0_and_f1_tasks(self, mock_ledger, mock_payload, mock_recon):
         """Per-file pipeline: each file's PAYLOAD pass registers its own f{fi}_* tasks."""
         mock_ledger.return_value.is_committed.return_value = False
@@ -183,6 +184,7 @@ class TestT2ChunkContainment:
     @patch("silica.kernel.write.gate.archive_source")
     @patch("silica.kernel.write.gate.apply_inverses")
     @patch("silica.kernel.write.ledger.get_ledger")
+    @pytest.mark.usefixtures("keyphrase_lane")
     def test_write_failure_contained_at_chunk_level(self, mock_ledger, mock_restore, mock_cleanup, mock_bulk_write, mock_snapshot, mock_validate, mock_sanitize, mock_distiller, mock_payload, mock_recon, run_driver):
         """Write failure on chunk 1 → chunk 0 stays committed, run='partial', no ERROR."""
         from silica.kernel.write.gate import AtomicBulkResult, NoteCommitResult
@@ -432,6 +434,7 @@ class TestT5DeadCodeRemoved:
     @patch("silica.router.states.setup.recon_file")
     @patch("silica.router.states.setup.payload_chunks")
     @patch("silica.kernel.write.ledger.get_ledger")
+    @pytest.mark.usefixtures("keyphrase_lane")
     def test_no_task_ledger_load_in_payload(self, mock_ledger, mock_payload, mock_recon, caplog):
         """No FileNotFoundError is swallowed during PAYLOAD phase."""
         import logging

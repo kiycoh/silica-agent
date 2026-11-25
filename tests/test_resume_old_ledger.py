@@ -88,6 +88,7 @@ def test_the_new_code_loads_what_the_old_code_wrote(old_run):
     assert stored == {f"f0_c0_{p.id}" for p in InjectorState.phases() if p.scope == "chunk"}
 
 
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_the_chunk_the_old_run_paid_for_is_not_distilled_again(old_run):
     distilled: list[list[str]] = []
 

@@ -22,9 +22,9 @@ import json
 import os
 from pathlib import Path
 
-# Gated probes (fusion_probe, integrity_probe) live in kernel.report.health;
+# Gated probes (fusion_probe, integrity_probe) live in evals.golden.health;
 # iter_notes re-exported so probes keep one source.
-from silica.kernel.report.health import fusion_probe, integrity_probe, iter_notes  # noqa: F401
+from evals.golden.health import fusion_probe, integrity_probe, iter_notes  # noqa: F401
 from evals.golden import (
     probe_classify,
     probe_correlate,

@@ -12,7 +12,7 @@ import pytest
 
 from silica.kernel.base import frontmatter
 from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
-from silica.kernel.report.health import integrity_probe, lint
+from evals.golden.health import integrity_probe, lint
 from evals.golden import probe_classify, probe_links
 
 
