@@ -89,13 +89,14 @@ _APPARATUS_VOCAB = frozenset((
 def is_apparatus(claim: str, source: str) -> bool:
     """Whether `claim` only restates the document header of `source`.
 
-    "The lecture is Lezione 14" and the lecturer's email came back as claims
-    on every file of the 2026-08-21 run. Mechanical containment test: every
-    content word of the claim already sits in the source's first lines or in
-    the closed furniture vocabulary. The prompt's own "skip noise" line cannot
-    carry this alone: pressed to skip the header, the model skimmed everything
-    (143 -> ~47 facts on the same source, twice). A source with no header
-    words has no apparatus."""
+    "The lecture is Lezione 14" and the lecturer's email were declared missing
+    on every file of the residue check's 2026-08-21 run, where this test was
+    written: header apparatus is dropped on purpose, so it is never a claim
+    to keep. Mechanical containment test: every content word of the claim
+    already sits in the source's first lines or in the closed furniture
+    vocabulary. A prompt-side exclusion was measured harmful there instead:
+    told to skip the header, the model skimmed everything (143 -> ~47 facts
+    on the same source, x2). A source with no header words has no apparatus."""
     head_lines = [l for l in source.splitlines() if l.strip()][:6]
     header_words = set(_APPARATUS_WORD.findall(" ".join(head_lines).lower()))
     words = set(_APPARATUS_WORD.findall(claim.lower()))
