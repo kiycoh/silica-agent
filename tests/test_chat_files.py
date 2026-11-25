@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from silica.sources import convert as conv
 from silica.sources import media_admission as adm
+from tests.agent_turn import open_turn
 
 
 def _wav(path: Path, seconds: float) -> Path:
@@ -249,7 +250,7 @@ def test_stop_leaves_a_model_call_within_a_second(monkeypatch):
     token = threading.Event()
     threading.Timer(0.3, token.set).start()
     t0 = time.monotonic()
-    out = loop.run_agent([{"role": "user", "content": "hi"}], "m", cancel_token=token)
+    out = loop.run_agent([{"role": "user", "content": "hi"}], "m", cancel_token=token, constraints=open_turn())
     assert out == "(silica: cancelled)" and time.monotonic() - t0 < 1.2
 
 
@@ -283,7 +284,7 @@ def test_stop_runs_no_further_tool_of_the_batch(monkeypatch):
 
     monkeypatch.setattr(loop, "call_llm", one_batch)
     monkeypatch.setattr(TOOLS["silica_exists"], "fn", fn)
-    out = loop.run_agent([{"role": "user", "content": "hi"}], "m", cancel_token=token)
+    out = loop.run_agent([{"role": "user", "content": "hi"}], "m", cancel_token=token, constraints=open_turn())
     assert out == "(silica: cancelled)" and ran == ["n0.md"]
 
 
@@ -321,7 +322,7 @@ def test_stop_in_a_block_of_reads_hands_back_only_what_came_before_it(monkeypatc
     messages = [{"role": "user", "content": "hi"}]
     monkeypatch.setattr(loop, "call_llm", one_batch)
     monkeypatch.setattr(TOOLS["silica_exists"], "fn", fn)
-    out = loop.run_agent(messages, "m", cancel_token=token)
+    out = loop.run_agent(messages, "m", cancel_token=token, constraints=open_turn())
     assert out == "(silica: cancelled)"
     assert [m for m in messages if m.get("role") == "tool"] == []
 

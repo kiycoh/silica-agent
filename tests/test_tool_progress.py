@@ -7,6 +7,7 @@ from silica.obs.events import ToolStartEvent, ToolCompleteEvent, ToolErrorEvent
 from silica.agent.loop import run_agent
 from silica.model.llm import LLMResponse, ToolCall
 from silica.tools import TOOLS
+from tests.agent_turn import open_turn
 
 def test_verbose_slash_command_cycle():
     orig_mode = CONFIG.tool_progress
@@ -82,7 +83,7 @@ def test_agent_loop_swallows_callback_exceptions(mock_call_llm):
             
         messages = [{"role": "user", "content": "hello"}]
         
-        ans = run_agent(messages, model="test_model", tool_progress_callback=bad_callback)
+        ans = run_agent(messages, model="test_model", tool_progress_callback=bad_callback, constraints=open_turn())
         assert ans == "Final answer"
 
 

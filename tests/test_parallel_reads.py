@@ -19,6 +19,7 @@ from silica.agent import loop
 from silica.obs.events import ToolCompleteEvent, ToolStartEvent
 from silica.tools import TOOLS, Tool
 from silica.agent import memory_gate
+from tests.agent_turn import open_turn
 
 
 class _Args(BaseModel):
@@ -41,7 +42,7 @@ def _run(names, register, *, callback=None):
     messages = [{"role": "user", "content": "hi"}]
     with patch("silica.agent.loop.call_llm", fake_call_llm):
         loop.run_agent(messages=messages, model="m", tool_progress_callback=callback,
-                       cancel_token=threading.Event())
+                       cancel_token=threading.Event(), constraints=open_turn())
     return [m for m in messages if m.get("role") == "tool"]
 
 

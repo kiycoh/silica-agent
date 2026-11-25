@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from silica.agent.constraints import AgentConstraints
 from silica.agent.loop import BUDGET_NOTICE_AT, _budget_notice, run_agent
 from silica.tools import TOOLS, Tool
+from tests.agent_turn import open_turn
 
 
 class _EmptyArgs(BaseModel):
@@ -194,7 +195,7 @@ def test_turn_prompt_budget_lands_the_turn_instead_of_spiralling(monkeypatch):
     monkeypatch.setattr(loop_mod, "TURN_PROMPT_BUDGET", 400_000)
     with patch.dict("silica.tools.TOOLS", {"fake_read": _Tool()}, clear=True), \
          patch("silica.agent.loop.call_llm", fake_call_llm):
-        out = run_agent(messages=[{"role": "user", "content": "q"}], model="m")
+        out = run_agent(messages=[{"role": "user", "content": "q"}], model="m", constraints=open_turn())
     assert out == "done"
     assert calls[-1] is None and len(calls) == 3  # 250k, 500k > budget, then the landing
 

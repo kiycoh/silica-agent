@@ -7,6 +7,7 @@ from silica.agent.loop import run_agent
 from silica.agent.constraints import AgentConstraints
 from silica.tools import TOOLS, Tool
 from pydantic import BaseModel
+from tests.agent_turn import open_turn
 
 
 class _EmptyArgs(BaseModel):
@@ -138,6 +139,6 @@ def test_no_constraints_unchanged():
         return _resp(text="normal")
 
     with patch("silica.agent.loop.call_llm", fake_call_llm):
-        result = run_agent(messages=[{"role": "user", "content": "hi"}], model="router")
+        result = run_agent(messages=[{"role": "user", "content": "hi"}], model="router", constraints=open_turn())
 
     assert result == "normal"

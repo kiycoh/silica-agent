@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 from silica.config import CONFIG
 from tests.llm_mocks import litellm_mock_response
+from tests.agent_turn import open_turn
 
 
 def _chunk(content=None, reasoning=None):
@@ -173,11 +174,11 @@ def test_run_agent_streams_only_with_callback(mock_call_llm):
     )
 
     run_agent([{"role": "user", "content": "x"}], model="m",
-              tool_progress_callback=lambda e: None)
+              tool_progress_callback=lambda e: None, constraints=open_turn())
     assert callable(mock_call_llm.call_args.kwargs["on_delta"])
 
     # Without a callback the kwarg is omitted entirely (bare-signature doubles keep working)
-    run_agent([{"role": "user", "content": "x"}], model="m")
+    run_agent([{"role": "user", "content": "x"}], model="m", constraints=open_turn())
     assert "on_delta" not in mock_call_llm.call_args.kwargs
 
 
@@ -220,7 +221,7 @@ def _run_collecting(events, **run_kw):
     tool.sensitive = False
     with patch.dict(TOOLS, {"silica_read_note": tool}):
         return run_agent([{"role": "user", "content": "x"}], model="m",
-                         tool_progress_callback=events.append, **run_kw)
+                         tool_progress_callback=events.append, **{"constraints": open_turn(), **run_kw})
 
 
 @patch("silica.agent.loop.call_llm")
