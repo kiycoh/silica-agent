@@ -223,7 +223,7 @@ def load_bodies(vault: Path) -> dict[str, dict]:
     while retrieval returns a path.
     """
     from silica.kernel.base import frontmatter
-    from silica.kernel.report.health import iter_notes
+    from evals.golden.health import iter_notes
 
     out: dict[str, dict] = {}
     for p in iter_notes(vault):

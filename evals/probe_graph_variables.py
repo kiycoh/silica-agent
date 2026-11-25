@@ -278,7 +278,7 @@ def check_reproduces_facade(keys, es, store, *, k: int = K) -> None:
 def run_structural(vault: Path) -> dict:
     import networkx as nx
 
-    from silica.kernel.report.health import wikilink_graph
+    from evals.golden.health import wikilink_graph
     from silica.kernel.recall.relatedness import related_notes
 
     store, es = _stores(vault)
@@ -348,7 +348,7 @@ def run_structural(vault: Path) -> dict:
     # Regression read on the golden metric: the eligible pairs stay >2 hops
     # apart once masked, so the leg cannot recover them by construction and
     # can only dilute. A drop here would fail the golden gate after wiring.
-    from silica.kernel.report.health import eligible_pairs
+    from evals.golden.health import eligible_pairs
 
     eligible = eligible_pairs(adj)
     ends = sorted({e for pr in eligible for e in pr})
@@ -380,7 +380,7 @@ def run_structural(vault: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 def run_coupling(vault: Path) -> dict:
-    from silica.kernel.report.health import eligible_pairs, wikilink_graph
+    from evals.golden.health import eligible_pairs, wikilink_graph
     from silica.kernel.recall.relatedness import related_notes
     from silica.kernel.report.graph_report import compute_report
 

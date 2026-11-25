@@ -199,7 +199,7 @@ def score_fixture(vault=None, *, recency_guard: bool = True, verbose: bool = Fal
     scoring a restatement of it here would measure the wrong thing.
     """
     from silica.kernel.base import frontmatter
-    from silica.kernel.report.health import iter_notes
+    from evals.golden.health import iter_notes
     from silica.kernel.write.contested import (
         contested_refs,
         reliability_tier,
@@ -265,7 +265,7 @@ def score_fixture(vault=None, *, recency_guard: bool = True, verbose: bool = Fal
 
 
 def run(vault, *, embed_store=None, cooccur_store=None, verbose: bool = False) -> dict:
-    from silica.kernel.report.health import iter_notes
+    from evals.golden.health import iter_notes
     from silica.kernel.write.contested import contested_refs, reliability_tier
 
     contested = 0

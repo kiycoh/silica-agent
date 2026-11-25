@@ -160,7 +160,7 @@ def sample_notes(vault: Path, store, n: int, seed: str) -> list[dict]:
     long thin tail would leave that correlation undefined at the top end, and an
     undefined correlation passes the gate for the wrong reason.
     """
-    from silica.kernel.report.health import iter_notes, wikilink_graph
+    from evals.golden.health import iter_notes, wikilink_graph
 
     adj = wikilink_graph(vault, store)
     rows: list[dict] = []

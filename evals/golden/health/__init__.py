@@ -3,10 +3,10 @@
 
 """L1 Health — the golden harness's gated metrics, callable on the live vault.
 
-The two GATED probes of the golden coherence harness (evals/golden),
-homed here for a silica_health tool that no chat turn was ever offered and
-that left on 2026-11-25: the harness runner (regression gate) is the one
-consumer left.
+The two GATED probes of the golden coherence harness (evals/golden). They
+lived in silica/kernel/report/health until 2026-11-25, for a silica_health
+tool no chat turn was ever offered: with the tool gone nothing in the product
+imported them, and the harness runner and the tests are their consumers.
 
 ``fusion_probe`` — masked-pair recovery through the FULL relatedness facade.
 For each human body-wikilink pair (A, B) that stays >2 hops apart once the
@@ -47,7 +47,7 @@ from silica.kernel.base import layout
 from silica.kernel.base import frontmatter
 from silica.kernel.base.syntax import WIKILINK_RE
 from silica.kernel.link.autolink import autolink, build_title_index
-from silica.kernel.report.health import lint
+from evals.golden.health import lint
 from silica.kernel.text.sanitize import normalize_ops
 
 # Facade depth measured; matches the k of every production related_notes surface.
@@ -208,8 +208,8 @@ def _t4_sanitize(body, stem) -> dict:
 
 
 def integrity_probe(vault: Path, *, verbose: bool = False) -> dict:
-    from silica.driver.fs_backend import ObsidianFSBackend  # lazy: kernel stays driver-free at import
-    from silica.kernel.report.health.preservation import preservation
+    from silica.driver.fs_backend import ObsidianFSBackend  # lazy: no driver at import
+    from evals.golden.health.preservation import preservation
     from silica.kernel.vault import Vault
 
     all_md = iter_notes(vault)
