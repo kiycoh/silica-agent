@@ -197,7 +197,7 @@ def normalize_key(key: str, *, lang: str = "english") -> str:
 
     `lang` is the store's frozen key language (EpisodicStore._freeze_lang).
     The default is english because the STRUCTURAL callers below
-    (`enforce_key_schema`'s prefixes, `key_tokens`) match against the
+    (`enforce_key_schema`'s prefixes) match against the
     `user.`/`assistant.` grammar the prompt mandates in English regardless of
     the vault's prose language. Only capture, which decides which keys merge,
     passes the store's own language: an italian store stemmed as english
@@ -261,49 +261,6 @@ def entity_key(key: str) -> str:
     thin to clear the write gate.
     """
     return ".".join(_entity_segments(key))
-
-
-def key_tokens(key: str) -> set[str]:
-    """Stemmed tokens of a key, entity prefix dropped: the shared alphabet
-    of the eval key-drift/clustering probes."""
-    segs = normalize_key(key).split(".")
-    if len(segs) > 1 and segs[0] in _ENTITY_PREFIXES:
-        segs = segs[1:]
-    return {t for s in segs for t in s.split("_") if len(t) > 1}
-
-
-def rare_token_components(keys: list[str], *,
-                          max_df: int | None = None) -> dict[str, str]:
-    """Connected components over shared key tokens: key -> root key.
-
-    With ``max_df``, a token forms edges only while its document frequency
-    over the (deduplicated) key set stays <= max_df; None means no filter
-    (the naive blob view kept for diagnostics). Pure function of the key
-    set: deterministic and order-independent."""
-    keys = sorted(set(keys))
-    toks = {k: key_tokens(k) for k in keys}
-    if max_df is not None:
-        df: dict[str, int] = {}
-        for ts in toks.values():
-            for t in ts:
-                df[t] = df.get(t, 0) + 1
-        toks = {k: {t for t in ts if df[t] <= max_df} for k, ts in toks.items()}
-    parent = {k: k for k in keys}
-
-    def find(k: str) -> str:
-        while parent[k] != k:
-            parent[k] = parent[parent[k]]
-            k = parent[k]
-        return k
-
-    owner: dict[str, str] = {}
-    for k in keys:
-        for t in toks[k]:
-            if t in owner:
-                parent[find(k)] = find(owner[t])
-            else:
-                owner[t] = k
-    return {k: find(k) for k in keys}
 
 
 def key_vocabulary(store: "EpisodicStore", *, cap: int = 60) -> list[str]:

@@ -43,6 +43,53 @@ def key_prefix(key: str, n: int = 2) -> str:
     return ".".join(key.split(".")[:n])
 
 
+# key_tokens and rare_token_components lived in silica/kernel/recall/episodic.py
+# until 2026-11-25: only these probes called them, so they moved to their caller.
+def key_tokens(key: str) -> set[str]:
+    """Stemmed tokens of a key, entity prefix dropped: the shared alphabet
+    of the key-drift and clustering probes."""
+    from silica.kernel.recall.episodic import _ENTITY_PREFIXES, normalize_key
+
+    segs = normalize_key(key).split(".")
+    if len(segs) > 1 and segs[0] in _ENTITY_PREFIXES:
+        segs = segs[1:]
+    return {t for s in segs for t in s.split("_") if len(t) > 1}
+
+
+def rare_token_components(keys: list[str], *,
+                          max_df: int | None = None) -> dict[str, str]:
+    """Connected components over shared key tokens: key -> root key.
+
+    With ``max_df``, a token forms edges only while its document frequency
+    over the (deduplicated) key set stays <= max_df; None means no filter
+    (the naive blob view kept for diagnostics). Pure function of the key
+    set: deterministic and order-independent."""
+    keys = sorted(set(keys))
+    toks = {k: key_tokens(k) for k in keys}
+    if max_df is not None:
+        df: dict[str, int] = {}
+        for ts in toks.values():
+            for t in ts:
+                df[t] = df.get(t, 0) + 1
+        toks = {k: {t for t in ts if df[t] <= max_df} for k, ts in toks.items()}
+    parent = {k: k for k in keys}
+
+    def find(k: str) -> str:
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    owner: dict[str, str] = {}
+    for k in keys:
+        for t in toks[k]:
+            if t in owner:
+                parent[find(k)] = find(owner[t])
+            else:
+                owner[t] = k
+    return {k: find(k) for k in keys}
+
+
 def cluster_keys(keys: list[str], *, max_df: int | None = None) -> dict[str, str]:
     """Post-hoc key clustering: connected components over shared stemmed tokens.
 
@@ -54,8 +101,6 @@ def cluster_keys(keys: list[str], *, max_df: int | None = None) -> dict[str, str
     frozen corpus covers 15/17 gold sessions at cluster sizes 2-10). Returns
     key -> component display name (lexicographically first member key,
     `(+N)` suffix for the rest)."""
-    from silica.kernel.recall.episodic import rare_token_components
-
     comp = rare_token_components(keys, max_df=max_df)
     members: dict[str, list[str]] = defaultdict(list)
     for k, root in comp.items():
@@ -197,8 +242,6 @@ _PROBE_MAX_GROUP = 12
 def product_groups(live: list[dict]) -> dict[str, str]:
     """fact id -> group display name via the (former) product regroup rule
     applied in memory to the live facts (a pure function of the key set)."""
-    from silica.kernel.recall.episodic import rare_token_components
-
     comp = rare_token_components([f["key"] for f in live], max_df=_PROBE_DF)
     members: dict[str, list[dict]] = defaultdict(list)
     for f in live:
