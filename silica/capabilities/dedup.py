@@ -85,7 +85,7 @@ def judge_pair(item: WorkItem[DedupJob], config: Any) -> DedupDecision:
 
     # The reason is read by a person in the queue, so its language is named.
     return _decide_dedup(config, concept=job.concept, excerpt=job.excerpt, candidate_name=job.candidate,
-                         candidate_body=body[:_CANDIDATE_BUDGET], score=job.score,
+                         candidate_body=body[:_CANDIDATE_BUDGET],
                          reason_language=language.named(body[:4000]))
 
 
@@ -112,9 +112,6 @@ def run_dedup(item: WorkItem[DedupJob | DedupFamily], config: Any) -> dict[str, 
         excerpt=job.excerpt,
         candidate_name=job.candidate,
         candidate_body=candidate_body[:budget],
-        score=job.score,
-        full_score=job.score if job.full_score is None else job.full_score,
-        title_score=job.title_score or 0.0,
         author_spoke=bool(job.target_dir),
         hub=job.hub,
     )
@@ -621,17 +618,14 @@ def _decide_dedup(
     excerpt: str,
     candidate_name: str,
     candidate_body: str,
-    score: float = 0.0,
-    full_score: float = 0.0,
-    title_score: float = 0.0,
     author_spoke: bool = False,
     hub: str | None = None,
     reason_language: str = "",
 ) -> DedupDecision:
-    """The ternary verdict on one pair. The cosine (`score`, `full_score`,
-    `title_score`) is not shown to the judge (ADR-0079 decision 3): a closeness
-    score in front of it pushed it to merge (ADR-0030). The arguments stay so
-    callers and probes keep their shape."""
+    """The ternary verdict on one pair. It takes no cosine: a closeness score
+    in front of the judge pushed it to merge (ADR-0030), so none is shown
+    (ADR-0079 decision 3), and until 2026-11-25 three score arguments were
+    still accepted here and read by nothing."""
     from silica.model.providers import get_provider
 
     prompt = load_prompt("dedup_prompt.txt")
