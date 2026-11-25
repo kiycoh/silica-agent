@@ -786,10 +786,10 @@ class SilicaConfig:
     worker_api_key: str | None = from_env("SILICA_WORKER_API_KEY", None, doc=True)
 
     # --- Judge model (epistemic-state spec M7) ---
-    # The verdicts (residue coverage in kernel/residue.py, dedup in
+    # The verdicts (Learn's grades in kernel/learn/grade.py, dedup in
     # capabilities/dedup.py) on a model other than the writer, so a verdict is
     # not the writer grading itself. Unset: every judge keeps the role it had
-    # (residue the router, dedup the worker), byte-identical behaviour.
+    # (grades the router, dedup the worker), byte-identical behaviour.
     judge_model: str | None = from_env("SILICA_JUDGE_MODEL", None)
     judge_provider: str | None = from_env("SILICA_JUDGE_PROVIDER", None)
 

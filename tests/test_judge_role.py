@@ -1,4 +1,4 @@
-"""M7 (docs/specs/epistemic-state.md): the judge (residue coverage, dedup
+"""M7 (docs/specs/epistemic-state.md): the judge (Learn's grades, dedup
 verdicts) can run on a model other than the writer. Default: unchanged.
 """
 from __future__ import annotations
@@ -43,9 +43,9 @@ def test_config_judge_model_is_none_when_unset(monkeypatch):
     assert not SilicaConfig().judge_model
 
 
-def test_residue_judge_calls_the_judge_model(monkeypatch):
+def test_a_judge_ask_calls_the_judge_model(monkeypatch):
     from silica import config as cfg_mod
-    from silica.kernel import residue
+    from silica.model.ask import ask_once
 
     seen = {}
 
@@ -56,10 +56,10 @@ def test_residue_judge_calls_the_judge_model(monkeypatch):
     monkeypatch.setattr("silica.model.llm.call_llm", fake_call_llm)
     monkeypatch.setattr(cfg_mod.CONFIG, "model", "writer")
     monkeypatch.setattr(cfg_mod.CONFIG, "judge_model", "openrouter/judge-small")
-    residue._llm("prompt", 10)
+    ask_once("prompt", max_tokens=10, role="judge")
     assert seen["model"] == "openrouter/judge-small"
     monkeypatch.setattr(cfg_mod.CONFIG, "judge_model", "")
-    residue._llm("prompt", 10)
+    ask_once("prompt", max_tokens=10, role="judge")
     assert seen["model"].endswith("writer")  # the router's, prefixed as get_provider always did
 
 
