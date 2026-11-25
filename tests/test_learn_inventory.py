@@ -321,6 +321,25 @@ def test_a_claim_restating_the_header_is_dropped_as_apparatus(tmp_vault):
     assert inv["dropped"] == [{"text": "Il docente è Mario Rossi", "reason": "header apparatus", "section": "Analisi 1"}]
 
 
+_HEADED = ("## Machine Learning (9 CFU)\n\nNicolò De Santis\n\nnicolo.desantis@example.edu\n\nLezione 14\n\n"
+           "## Back-propagation\n\nLa chain rule calcola i delta.")
+
+
+@pytest.mark.parametrize("claim,apparatus", [
+    ("The lecture is Lezione 14.", True),
+    ("The course is Machine Learning (9 CFU).", True),
+    ("Nicolò De Santis's email is nicolo.desantis@example.edu.", True),
+    ("La chain rule calcola i delta dei livelli nascosti.", False),
+    ("Δw = -η ∂E/∂w.", False),  # no word of 4+ letters: nothing to contain, so never apparatus
+])
+def test_apparatus_is_a_claim_made_only_of_header_and_furniture_words(claim, apparatus):
+    assert inventory.is_apparatus(claim, _HEADED) is apparatus
+
+
+def test_a_source_with_no_header_words_has_no_apparatus():
+    assert not inventory.is_apparatus("any fact", "   ")
+
+
 def test_every_heading_is_claimed_or_skipped(leaf):
     model = FakeModel(gap_skips=[])  # the coverage pass answers nothing for "Esempio"
     inv = inventory.build(LEAF_PATH, language="Italian", ask=model)

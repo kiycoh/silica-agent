@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Optional constraints that turn run_agent into a bounded worker loop.
+"""What a run_agent call may reach, stated by every caller: the loop has no
+toolset of its own, so a chat turn and a bounded worker differ only in what
+they name here.
 
-Carries only the three generic dials (tools, model, iteration cap). The leash is
+Carries only the generic dials (tools, model, iteration cap). The leash is
 deliberately NOT here — write safety lives inside the write tool / apply_op, so
 run_agent stays domain-agnostic (Rune 1 / ADR set).
 """

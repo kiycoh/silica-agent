@@ -9,6 +9,7 @@ from silica.agent.loop import run_agent
 from silica.tools import tool_failed
 from silica.tools import TOOLS, Tool
 from silica.kernel.prep_delegation import run_distiller
+from tests.agent_turn import open_turn
 
 
 class TestAgentGuardsAndProvider(unittest.TestCase):
@@ -277,7 +278,7 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
             # iteration cap does — a 47-step research run is salvaged as an
             # answer, not discarded as a RuntimeError (measured live: one
             # stubbornly re-paraphrased `remember` killed a 30-minute run).
-            result = run_agent(messages, model="test_model")
+            result = run_agent(messages, model="test_model", constraints=open_turn())
 
             self.assertEqual(result, "salvaged findings")
 

@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from silica.agent.loop import run_agent
+from tests.agent_turn import open_turn
 
 
 def _fake_resp(*, tool_calls=None, text="done"):
@@ -41,6 +42,7 @@ def test_cancel_before_first_iteration():
             messages=[{"role": "user", "content": "hi"}],
             model="test",
             cancel_token=token,
+            constraints=open_turn(),
         )
 
     assert result == "(silica: cancelled)"
@@ -80,6 +82,7 @@ def test_cancel_after_first_iteration():
             messages=[{"role": "user", "content": "hi"}],
             model="test",
             cancel_token=token,
+            constraints=open_turn(),
         )
 
     assert result == "(silica: cancelled)"
@@ -96,6 +99,7 @@ def test_no_cancel_token_runs_normally():
             messages=[{"role": "user", "content": "hi"}],
             model="test",
             cancel_token=None,
+            constraints=open_turn(),
         )
 
     assert result == "hello"
@@ -112,7 +116,7 @@ def test_llm_call_runs_on_daemon_thread():
         return _fake_resp()
 
     with patch("silica.agent.loop.call_llm", fake_call_llm):
-        run_agent(messages=[{"role": "user", "content": "hi"}], model="test")
+        run_agent(messages=[{"role": "user", "content": "hi"}], model="test", constraints=open_turn())
 
     assert seen.get("daemon") is True
 
@@ -129,7 +133,7 @@ def test_interrupt_sets_cancel_event_on_abandoned_call():
 
     with patch("silica.agent.loop.call_llm", fake_call_llm):
         with pytest.raises(KeyboardInterrupt):
-            run_agent(messages=[{"role": "user", "content": "hi"}], model="test")
+            run_agent(messages=[{"role": "user", "content": "hi"}], model="test", constraints=open_turn())
 
     assert captured.get("cancel") is not None, "call_llm never received a cancel event"
     assert captured["cancel"].is_set()
@@ -146,6 +150,7 @@ def test_the_callback_receives_events_during_run():
             messages=[{"role": "user", "content": "hi"}],
             model="test",
             tool_progress_callback=received.append,
+            constraints=open_turn(),
         )
 
     # At minimum ThinkingStartEvent and ThinkingEndEvent should arrive.

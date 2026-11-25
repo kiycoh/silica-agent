@@ -16,6 +16,7 @@ import pytest
 from silica.agent.compaction import dedup_recall_excerpts
 from silica.agent.loop import run_agent
 from silica.session import meter
+from tests.agent_turn import open_turn
 
 
 class _FakeTool:
@@ -77,7 +78,7 @@ def test_eager_tool_result_is_projected_in_history_but_full_in_event():
     messages = [{"role": "user", "content": "go"}]
     with patch.dict("silica.agent.loop.TOOLS", {"fake_write": tool}, clear=True), \
          patch("silica.agent.loop.call_llm", _two_turn_llm("fake_write")):
-        run_agent(messages, model="test", tool_progress_callback=events.append)
+        run_agent(messages, model="test", tool_progress_callback=events.append, constraints=open_turn())
 
     tool_msgs = [m for m in messages if m.get("role") == "tool"]
     # generic_projection: scalars kept, bulk collapsed to a count the model can
@@ -100,7 +101,7 @@ def test_lazy_tool_result_stays_verbatim_in_history():
     messages = [{"role": "user", "content": "go"}]
     with patch.dict("silica.agent.loop.TOOLS", {"fake_read": tool}, clear=True), \
          patch("silica.agent.loop.call_llm", _two_turn_llm("fake_read")):
-        run_agent(messages, model="test")
+        run_agent(messages, model="test", constraints=open_turn())
 
     tool_msgs = [m for m in messages if m.get("role") == "tool"]
     assert tool_msgs[0]["content"] == fat
@@ -176,7 +177,7 @@ def test_loop_compacts_between_its_own_iterations(monkeypatch):
     messages = [{"role": "user", "content": "q"}]
     with patch.dict("silica.tools.TOOLS", {"fake_read": tool}, clear=True):
         with patch("silica.agent.loop.call_llm", fake_call_llm):
-            run_agent(messages=messages, model="m")
+            run_agent(messages=messages, model="m", constraints=open_turn())
 
     bodies = [m["content"] for m in messages if m.get("role") == "tool"]
     assert any("re-call fake_read" in b for b in bodies), "no read was collapsed mid-turn"
@@ -284,7 +285,7 @@ def test_turn_memo_forgets_excerpts_the_compaction_collapsed(monkeypatch):
     messages = [{"role": "user", "content": "q"}]
     with patch.dict("silica.tools.TOOLS", {"silica_recall": tool}, clear=True):
         with patch("silica.agent.loop.call_llm", fake_call_llm):
-            run_agent(messages=messages, model="m")
+            run_agent(messages=messages, model="m", constraints=open_turn())
 
     bodies = [m["content"] for m in messages if m.get("role") == "tool"]
     assert any("re-call silica_recall" in b for b in bodies), "compaction never collapsed a recall"
@@ -337,7 +338,7 @@ def test_a_read_that_would_overflow_the_window_is_stubbed_before_the_next_call()
     with patch.dict("silica.agent.loop.TOOLS", {"fake_read": tool}, clear=True), \
          patch("silica.agent.loop.call_llm", call), \
          patch("silica.agent.loop.CONFIG.max_context_tokens", 5000):
-        run_agent(messages, model="test")
+        run_agent(messages, model="test", constraints=open_turn())
 
     second = [m for m in seen[1] if m.get("role") == "tool"]
     assert second[0]["content"].startswith("⟪silica: result elided to fit the context window")
@@ -380,7 +381,7 @@ def test_a_read_dense_in_tokens_is_stubbed_before_it_overflows():
     with patch.dict("silica.agent.loop.TOOLS", {"fake_read": tool}, clear=True), \
          patch("silica.agent.loop.call_llm", llm), \
          patch("silica.agent.loop.CONFIG.max_context_tokens", 10_000):
-        run_agent([{"role": "user", "content": "go"}], model="test")
+        run_agent([{"role": "user", "content": "go"}], model="test", constraints=open_turn())
 
     assert [m for m in seen[1] if m.get("role") == "tool"][0]["content"].startswith(_ELIDED)
 
@@ -393,7 +394,7 @@ def test_a_context_overflow_is_resent_once_with_the_reads_collapsed():
     with patch.dict("silica.agent.loop.TOOLS", {"fake_read": tool}, clear=True), \
          patch("silica.agent.loop.call_llm", llm), \
          patch("silica.agent.loop.CONFIG.max_context_tokens", 10**6):
-        answer = run_agent([{"role": "user", "content": "go"}], model="test")
+        answer = run_agent([{"role": "user", "content": "go"}], model="test", constraints=open_turn())
 
     assert answer == "done"
     rejected, resent = ([m for m in s if m.get("role") == "tool"][0]["content"] for s in seen[1:3])
@@ -409,7 +410,7 @@ def test_a_context_overflow_with_nothing_to_collapse_still_raises():
          patch("silica.agent.loop.call_llm", llm), \
          patch("silica.agent.loop.CONFIG.max_context_tokens", 10**6), \
          pytest.raises(RuntimeError, match="exceeds the available context"):
-        run_agent([{"role": "user", "content": "go"}], model="test")
+        run_agent([{"role": "user", "content": "go"}], model="test", constraints=open_turn())
 
 
 @pytest.mark.parametrize("window", [32_000, 64_000])
@@ -451,7 +452,7 @@ def test_hosted_t06s_turn_never_reads_its_chapter_as_unseen(monkeypatch, window)
              "fake_write": _FakeTool("fake_write", "eager", '{"success": true}')}
     with patch.dict("silica.tools.TOOLS", tools, clear=True):
         with patch("silica.agent.loop.call_llm", fake_call_llm):
-            run_agent(messages=[{"role": "user", "content": "rielabora il capitolo"}], model="m")
+            run_agent(messages=[{"role": "user", "content": "rielabora il capitolo"}], model="m", constraints=open_turn())
 
     [read] = [m["content"] for m in seen[-1] if m.get("tool_call_id") == "r"]
     if window == 64_000:

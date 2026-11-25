@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
+from collections.abc import Iterable
 from pathlib import Path
 
 K = 10
@@ -157,6 +159,39 @@ def _title(key: str) -> str:
     return key.rsplit("/", 1)[-1]
 
 
+def adamic_adar_ranking(
+    G, node: str, *, k: int, exclude: Iterable[str] = (),
+) -> list[tuple[str, float]] | None:
+    """Non-adjacent notes two hops from `node`, by Adamic-Adar score.
+
+    score(a, b) = sum over common neighbours z of 1 / log(deg z). Adamic-Adar
+    rather than a raw common-neighbour count because a hub is a common
+    neighbour of everything it links: the 1/log(deg) term is what keeps a MOC
+    from making all its members predicted neighbours of each other. None when
+    `node` is absent, isolated, or has no distance-2 candidate at all.
+
+    Lived in kernel/graph/signals.py until 2026-11-25: as a fusion leg it lost
+    its gate (0 wins, 417 losses, ADR-0027) and only this probe called it. The
+    product's V1 rows come from signals.structural_links, the all-pairs form.
+    """
+    if node not in G or G.degree(node) == 0:
+        return None
+    blocked = set(exclude) | {node}
+    scores: dict[str, float] = {}
+    for z in G.neighbors(node):
+        dz = G.degree(z)
+        if dz < 2:
+            continue  # cannot be a common neighbour of two distinct notes
+        w = 1.0 / math.log(dz)
+        for cand in G.neighbors(z):
+            if cand in blocked or G.has_edge(node, cand):
+                continue
+            scores[cand] = scores.get(cand, 0.0) + w
+    if not scores:
+        return None
+    return sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
+
+
 def _structural_ranking(graph, query_path: str, *, k: int, exclude: set[str]):
     """V1 leg: Adamic-Adar neighbours of `query_path` over the wikilink graph.
 
@@ -168,7 +203,6 @@ def _structural_ranking(graph, query_path: str, *, k: int, exclude: set[str]):
     if graph is None:
         return None
     from silica.kernel.base.notekey import store_key
-    from silica.kernel.graph.signals import adamic_adar_ranking
 
     key_of = {store_key(n): n for n in graph.nodes}
     gid = key_of.get(store_key(query_path))
@@ -246,7 +280,6 @@ def run_structural(vault: Path) -> dict:
 
     from silica.kernel.report.health import wikilink_graph
     from silica.kernel.recall.relatedness import related_notes
-    from silica.kernel.graph.signals import adamic_adar_ranking
 
     store, es = _stores(vault)
     adj = wikilink_graph(vault, store)

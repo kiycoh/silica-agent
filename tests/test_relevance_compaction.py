@@ -11,6 +11,7 @@ import pytest
 
 from silica.agent import relevance
 from silica.agent.loop import run_agent
+from tests.agent_turn import open_turn
 
 BIG = "lezione " * 400  # 3.2k chars, over MIN_CHARS
 TOOLS = {"silica_read_note": SimpleNamespace(collapse="lazy"),
@@ -107,5 +108,5 @@ def test_run_agent_judges_on_entry_of_an_interactive_turn():
     with patch("silica.agent.loop.compact_by_relevance",
                side_effect=lambda m, t: seen.append(len(m)) or []), \
          patch("silica.agent.loop.call_llm", return_value=final):
-        run_agent(messages=_history(), model="m")
+        run_agent(messages=_history(), model="m", constraints=open_turn())
     assert seen == [6]

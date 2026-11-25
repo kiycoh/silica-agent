@@ -20,6 +20,7 @@ import pytest
 from silica.config import CONFIG
 from silica.sources import web_research as wr
 from silica.tools import TOOLS
+from tests.agent_turn import open_turn
 
 
 @pytest.fixture(autouse=True)
@@ -779,7 +780,7 @@ def test_main_agent_default_toolset_excludes_web_fetch():
         )
 
     with patch("silica.agent.loop.call_llm", fake_call_llm):
-        run_agent(messages=[{"role": "user", "content": "hi"}], model="m")
+        run_agent(messages=[{"role": "user", "content": "hi"}], model="m", constraints=open_turn())
 
     names = {t["function"]["name"] for t in (captured["tools"] or [])}
     assert "web_fetch" not in names
@@ -872,7 +873,7 @@ def test_main_agent_default_toolset_excludes_web_search():
         )
 
     with patch("silica.agent.loop.call_llm", fake_call_llm):
-        run_agent(messages=[{"role": "user", "content": "hi"}], model="m")
+        run_agent(messages=[{"role": "user", "content": "hi"}], model="m", constraints=open_turn())
 
     names = {t["function"]["name"] for t in (captured["tools"] or [])}
     assert "web_search" not in names

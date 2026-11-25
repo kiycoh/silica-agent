@@ -17,6 +17,7 @@ from silica.kernel.link import mermaid
 from silica.kernel.link.mermaid import parse_errors
 from silica.tools import MODEL_CALL, TOOLS
 from silica.tools.notes import silica_write_note
+from tests.agent_turn import open_turn
 
 BROKEN = "```mermaid\nmindmap\n  root((ML))\n    i.i.d. ([[Lezione 5]], [[Lezione 6]])\n```\n"
 FIXED = '```mermaid\nmindmap\n  root((ML))\n    A["i.i.d. (Lezione 5, 6)"]\n```\n'
@@ -143,5 +144,5 @@ def test_the_loop_marks_the_call_it_runs_for_the_model():
 
     with patch.dict("silica.agent.loop.TOOLS", {"fake_write": _Recorder()}, clear=True), \
          patch("silica.agent.loop.call_llm", fake_call_llm):
-        run_agent([{"role": "user", "content": "go"}], model="test")
+        run_agent([{"role": "user", "content": "go"}], model="test", constraints=open_turn())
     assert seen == ["fake_write"] and MODEL_CALL.get() is None

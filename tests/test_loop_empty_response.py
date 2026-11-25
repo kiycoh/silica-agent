@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from silica.agent.loop import run_agent
+from tests.agent_turn import open_turn
 
 
 @pytest.mark.parametrize("text", [None, "", " ", "\n\t "])
@@ -25,6 +26,6 @@ def test_empty_completion_is_reported_not_swallowed(text):
         )
 
     with patch("silica.agent.loop.call_llm", _empty_resp):
-        result = run_agent(messages=[{"role": "user", "content": "hi"}], model="test")
+        result = run_agent(messages=[{"role": "user", "content": "hi"}], model="test", constraints=open_turn())
     assert result.strip(), "an empty completion must not return an empty string"
     assert "silica:" in result

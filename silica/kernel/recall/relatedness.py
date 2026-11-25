@@ -33,10 +33,8 @@ authoritative about vault structure.
 from __future__ import annotations
 
 import logging
-import statistics
 from dataclasses import dataclass
 from collections.abc import Mapping
-from typing import Callable
 
 from silica.kernel.recall.cooccurrence import CooccurStore
 from silica.kernel.base.notekey import store_key
@@ -64,16 +62,12 @@ _NOISE_FLOOR = 1e-6
 BM25_K1 = 1.2
 BM25_B = 0.75
 
-# Cooccur confidence gate (retrieval-gates spec 2026-07-14). ponytail: dormant —
-# 0.0 never fires. Phase-0 (2026-07-17, bench/phase0_gates.json) recorded the
-# no-fire reference only: vault coverage p10 0.259 / lme_s p10 0.432, so any
-# future threshold <=0.1 is home-turf-safe. The fire side (MuSiQue, vocabulary
-# mismatch) is no longer on disk; freeze only after a MuSiQue re-run, and shelve
-# the gate if that run shows no wide separation (spec abort criterion).
-_COOCCUR_MIN_CONFIDENCE = 0.0
-# Calibration hook: harnesses set it to capture per-query
-# {"coverage", "flatness", "fired"}; production leaves it None.
-COOCCUR_GATE_PROBE: Callable[[dict], None] | None = None
+# No confidence gate on this leg. One was wired at threshold 0.0 from the
+# retrieval-gates spec (2026-07-14) until 2026-11-25 and never fired: phase 0
+# (2026-07-17) recorded only the no-fire side (vault coverage p10 0.259, LME-S
+# p10 0.432, so a threshold <=0.1 would be safe at home), and the fire side
+# (MuSiQue, vocabulary mismatch) was never re-run. A gate comes back with that
+# run, as IDF-mass coverage of the profile by the top hit's stems.
 
 # Minimum per-leg candidate pool fed to RRF, independent of the caller's k, so
 # fusion has enough material to find agreement before the final top-k cut.
@@ -355,27 +349,7 @@ def _rank_cooccur_from_profile(
     note_scores = {p: s for p, s in note_scores.items() if s > 0.0}
     if not note_scores:
         return None
-    ranked = sorted(note_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
-    # Confidence gate is off in production (_COOCCUR_MIN_CONFIDENCE == 0.0, no probe),
-    # so skip the whole signal compute — an extra note_nodes() call plus two IDF sums
-    # per query — unless the experiment hook or a real threshold is active.
-    if COOCCUR_GATE_PROBE or _COOCCUR_MIN_CONFIDENCE > 0.0:
-        # Confidence signals (retrieval-gates spec): coverage measures the diagnosed
-        # cause (query/corpus vocabulary mismatch — IDF mass of profile stems the top
-        # hit actually matches), flatness the symptom (indiscriminate near-uniform
-        # scores). Values already in hand; no extra corpus pass.
-        total_mass = sum(w * idf.get(s, 0.0) for s, w in profile.items())
-        top_stems = set(cooccur_store.note_nodes(ranked[0][0]))
-        matched = sum(w * idf.get(s, 0.0) for s, w in profile.items() if s in top_stems)
-        coverage = (matched / total_mass) if total_mass > 0 else 0.0
-        scores = [s for _p, s in ranked]
-        flatness = scores[0] / statistics.median(scores)
-        fired = coverage < _COOCCUR_MIN_CONFIDENCE
-        if COOCCUR_GATE_PROBE:
-            COOCCUR_GATE_PROBE({"coverage": coverage, "flatness": flatness, "fired": fired})
-        if fired:
-            return None
-    return ranked
+    return sorted(note_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
 
 
 def cooccur_ranking(

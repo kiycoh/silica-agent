@@ -5,8 +5,8 @@
 
 Two mechanical kinds need no model: `cloze` blanks the head term of a
 footnoted claim line, `structure` asks a `## Relations` bullet back. The
-model kinds come from one batched call per session, parsed by markers the
-way the residue judge is parsed (never free JSON in a body). Every item
+model kinds come from one batched call per session, parsed by markers
+(never free JSON in a body). Every item
 rests on a span: the leaf under `sources/` that the claim's footnote names,
 located by line, and `grounded()` drops an item whose span the leaf does
 not hold or whose anchor the note lacks (nodus's rule made mechanical).

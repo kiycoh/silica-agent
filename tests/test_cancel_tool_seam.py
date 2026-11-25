@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from silica.agent.loop import run_agent
 from silica.tools import TOOLS, Tool
+from tests.agent_turn import open_turn
 
 
 class _Args(BaseModel):
@@ -46,7 +47,7 @@ def test_tool_receives_cancel_token_when_declared(monkeypatch):
         return _resp(text="done")
 
     with patch("silica.agent.loop.call_llm", fake_call_llm):
-        run_agent(messages=[{"role": "user", "content": "hi"}], model="m", cancel_token=token)
+        run_agent(messages=[{"role": "user", "content": "hi"}], model="m", cancel_token=token, constraints=open_turn())
 
     assert seen["token"] is token
 
@@ -73,6 +74,7 @@ def test_tool_without_cancel_token_is_unaffected(monkeypatch):
             messages=[{"role": "user", "content": "hi"}],
             model="m",
             cancel_token=threading.Event(),
+            constraints=open_turn(),
         )
 
     assert seen.get("ran") is True

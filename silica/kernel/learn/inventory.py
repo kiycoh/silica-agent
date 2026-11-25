@@ -41,9 +41,11 @@ MAX_SECTION_CHARS = 6000  # a judgment number: G0 records the recall of cut sect
 DECOMPOSE_TAG = "[silica study: decompose]"
 ASSIGN_TAG = "[silica study: assign]"
 
-# New, not residue's: that prompt returns bare fact lines, and the key needs
-# the span, kind, role and qualifiers of each. The language rule keeps parity
-# with residue.decompose_facts, which keeps parity with evals/factscore.py.
+# Not the bare fact lines of evals/factscore.py: the key needs the span, kind,
+# role and qualifiers of each claim. The language rule is measured: left to the
+# model, an Italian lecture came out as English facts that shared no words with
+# the Italian notes they were checked against (34 and 58 false "missing" on two
+# lectures, 2026-09-02, the residue harness this decomposition descends from).
 DECOMPOSE = DECOMPOSE_TAG + """
 You are given ONE section of a source document (markdown, LaTeX kept) and the ideas already identified in the whole document. Break the section into atomic claims: the answer key a student's notes will be checked against.
 
@@ -68,6 +70,37 @@ Emit ONLY a JSON object: {"assign": {"<claim id>": "<an idea title from the list
 
 _BLANK = re.compile(r"\n[ \t]*\n")
 _OWN_TEXT = re.compile(r"\A#{1,6}\s.*\n?")
+
+# 4+ chars: 3-letter tokens are dominated by function words ("the", "una")
+# whose absence from the header would shield an apparatus claim from the
+# containment test. Acronyms the cut drops (CFU) live in the vocabulary.
+_APPARATUS_WORD = re.compile(r"[a-zà-ÿ0-9]{4,}")
+# Closed cross-language vocabulary of document-furniture words: a claim built
+# ONLY of these plus words already in the source's header is apparatus.
+_APPARATUS_VOCAB = frozenset((
+    "course", "corso", "lecture", "lezione", "lecturer", "instructor",
+    "teacher", "docente", "professor", "professore", "email", "mail",
+    "contact", "contatto", "page", "pagina", "file", "titled", "title",
+    "titolo", "credits", "crediti", "cfu", "number", "numero", "type",
+    "tipo",
+))
+
+
+def is_apparatus(claim: str, source: str) -> bool:
+    """Whether `claim` only restates the document header of `source`.
+
+    "The lecture is Lezione 14" and the lecturer's email were declared missing
+    on every file of the residue check's 2026-08-21 run, where this test was
+    written: header apparatus is dropped on purpose, so it is never a claim
+    to keep. Mechanical containment test: every content word of the claim
+    already sits in the source's first lines or in the closed furniture
+    vocabulary. A prompt-side exclusion was measured harmful there instead:
+    told to skip the header, the model skimmed everything (143 -> ~47 facts
+    on the same source, x2). A source with no header words has no apparatus."""
+    head_lines = [l for l in source.splitlines() if l.strip()][:6]
+    header_words = set(_APPARATUS_WORD.findall(" ".join(head_lines).lower()))
+    words = set(_APPARATUS_WORD.findall(claim.lower()))
+    return bool(header_words) and bool(words) and words <= header_words | _APPARATUS_VOCAB
 
 
 def _sha(text: str) -> str:
@@ -256,7 +289,6 @@ def _relations(ideas: list[dict], secs: list[dict], stem: str) -> tuple[list[dic
 def _decompose(sec: dict, *, ideas: list[dict], language: str, ask: Callable[..., dict],
                stem: str, leaf_raw: str, body: str) -> dict:
     """One section -> {"claims", "dropped"}: grounded, vocabulary-closed, deduplicated."""
-    from silica.kernel.residue import drop_apparatus
     if not _OWN_TEXT.sub("", sec["text"], count=1).strip():
         return {"claims": [], "dropped": []}  # a title over its subsections says nothing of its own
     for _ in range(2):
@@ -287,7 +319,7 @@ def _decompose(sec: dict, *, ideas: list[dict], language: str, ask: Callable[...
         text = " ".join(str(c.get("text") or "").split())
         if not text:
             continue
-        if drop_apparatus([text], body)[1]:
+        if is_apparatus(text, body):
             dropped.append({"text": text, "reason": "header apparatus", "section": sec["section"]})
             continue
         line, span = ground(str(c.get("span") or ""), leaf_raw)

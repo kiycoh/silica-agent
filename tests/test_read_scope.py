@@ -12,6 +12,7 @@ from silica.driver.base import NoteContent, NoteRef
 from silica.kernel.recall import rerank
 from silica.kernel.write import provenance
 from silica.tools import atomic
+from tests.agent_turn import open_turn
 
 LONG = ("# Lezione 32\n\n" + "\n".join(f"riga {i} sul metodo knn" for i in range(400))
         + "\n\n## Boosting\n\nIl boosting combina classificatori deboli.\n")
@@ -107,5 +108,5 @@ def test_run_agent_hands_the_turns_requests_to_the_tools(monkeypatch):
                 {"role": "user", "content": "riassumi la Lezione 32"}]
     with patch.dict("silica.agent.loop.TOOLS", {"probe": Probe()}, clear=True), \
          patch("silica.agent.loop.call_llm", llm):
-        run_agent(messages, model="test")
+        run_agent(messages, model="test", constraints=open_turn())
     assert seen == [("prima", "riassumi la Lezione 32")]

@@ -186,31 +186,6 @@ def repair_tool_call_history(messages: list[dict]) -> int:
     return inserted
 
 
-def identical_prior_calls(messages: list[dict], name: str, args_str: str) -> int:
-    """How many times (name, args) already appears as an assistant tool_call.
-
-    Reuse probe: a result the chat computed, spent, and now asks for again. Reads
-    the history instead of a counter so it spans turns (the caller accumulates
-    `messages`), and `args_str` must be the canonical json.dumps(sort_keys=True)
-    form since providers echo their own spacing back.
-    """
-    n = 0
-    for m in messages:
-        if m.get("role") != "assistant":
-            continue
-        for tc in m.get("tool_calls") or []:
-            fn = tc.get("function") or {}
-            if fn.get("name") != name:
-                continue
-            try:
-                prior = json.loads(fn.get("arguments") or "{}")
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if json.dumps(prior, sort_keys=True) == args_str:
-                n += 1
-    return n
-
-
 # What an image part costs the window, in characters of the chars/4 estimate:
 # about 1,000 tokens, what Qwen-VL asks for at grounding resolution (ADR-0077).
 # Counted as its base64, a 200 KB PNG read as 70,000 tokens and collapsed the
@@ -279,7 +254,8 @@ def run_agent(
     model: str,
     tool_progress_callback: ToolProgressCallback = None,
     cancel_token: "threading.Event | None" = None,
-    constraints: "AgentConstraints | None" = None,
+    *,
+    constraints: AgentConstraints,
     temperature: float | None = None,
 ) -> str:
     """Execute the agentic loop until the model produces a text response.
@@ -291,24 +267,24 @@ def run_agent(
         messages: mutable conversation history (modified in-place)
         model: litellm model string
         tool_progress_callback: callback for tool progress events
+        constraints: the tools this run may offer and dispatch, and whether it
+            is a chat turn. Required: the loop has no toolset of its own, so
+            no caller gets "whatever is registered" by leaving it out
+            (non-ambient authority, ADR-0009 / ADR-0015). Until 2026-11-25
+            None meant every non-sensitive tool; no product or eval caller
+            used it.
 
     Returns:
         The model's final text response
     """
-    # A chat turn: no constraints at all, or a constrained caller that says so.
-    # Everything a chat turn has and a worker has not reads this one fact.
-    _interactive = constraints is None or constraints.interactive
+    # A chat turn is a caller that says so. Everything a chat turn has and a
+    # worker has not reads this one fact.
+    _interactive = constraints.interactive
 
-    if constraints is not None:
-        source = TOOLS if constraints.registry is None else constraints.registry
-        allowed: dict[str, "Tool"] = {
-            name: source[name] for name in constraints.tools if name in source
-        }
-    else:
-        # Non-ambient authority: the main agent's default toolset excludes
-        # sensitive tools (ADR-0009 / ADR-0015), reachable only when a caller
-        # names them in AgentConstraints.tools.
-        allowed = {n: t for n, t in TOOLS.items() if not t.sensitive}
+    source = TOOLS if constraints.registry is None else constraints.registry
+    allowed: dict[str, "Tool"] = {
+        name: source[name] for name in constraints.tools if name in source
+    }
 
     # Permitted, not offered (ADR-0050): a tool joins `allowed` and `schemas`
     # when silica_load_tools names it or the model calls it directly. Only
@@ -316,7 +292,7 @@ def run_agent(
     # still the head of this one and a prefix cache keeps it.
     deferred: dict[str, "Tool"] = (
         {n: TOOLS[n] for n in constraints.deferred if n in TOOLS and n not in allowed}
-        if constraints is not None and allowed else {})
+        if allowed else {})
     # What the turn can reach, offered or one load away: a schema's clause
     # that points at a tool outside it is cut (tools.pointed). Taken once, so
     # a load never changes a schema the last request already sent.
@@ -331,9 +307,7 @@ def run_agent(
             allowed[name] = tool
             schemas.append(tool.json_schema(reach))
 
-    effective_model = (
-        constraints.model if (constraints is not None and constraints.model) else model
-    )
+    effective_model = constraints.model or model
 
     # A33: a prior turn interrupted (Ctrl+C, BaseException) or convergence-aborted
     # mid-dispatch can leave an assistant tool_calls block with unanswered ids;
@@ -363,8 +337,7 @@ def run_agent(
 
     iteration = 0
     max_iterations = (
-        constraints.max_iterations
-        if (constraints is not None and constraints.max_iterations is not None)
+        constraints.max_iterations if constraints.max_iterations is not None
         else DEFAULT_MAX_ITERATIONS
     )
 
@@ -425,7 +398,7 @@ def run_agent(
         # pin 0.0 so a single-run A/B measures the lever, not sampling noise.
         _llm_kwargs["temperature"] = temperature
     if tool_progress_callback is not None and (
-            _interactive or (constraints is not None and constraints.stream)):
+            _interactive or constraints.stream):
         _llm_kwargs["on_delta"] = _stream_delta
 
     def _interruptible_llm(kwargs: dict):
@@ -637,16 +610,6 @@ def run_agent(
 
             args_str = json.dumps(tc.args, sort_keys=True)
             tool_key = (tc.name, args_str)
-
-            # Reuse probe. The current call is already in `messages`, so
-            # >1 means this exact result was produced earlier in the chat and is
-            # being recomputed — either a plain re-ask or compaction's read_stub
-            # telling the model to re-call. Grep "reuse-probe" over a session log
-            # to size the waste before caching anything.
-            _seen = identical_prior_calls(messages, tc.name, args_str)
-            if _seen > 1:
-                logger.info("reuse-probe: %s recomputed (call #%d) with identical args: %s",
-                            tc.name, _seen, args_str[:200])
 
             failed = False
             _load(tc.name)

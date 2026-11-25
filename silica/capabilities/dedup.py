@@ -744,7 +744,7 @@ def _decide_dedup(
         # hybrid model spends the budget on its trace and the JSON arrives
         # cut (finish=length, "Unterminated string", 2026-08-23 run on
         # deepseek-v4-flash). That trace had concluded "duplicate", and the
-        # parse fallback then wrote "distinct". Same knob as residue.py.
+        # parse fallback then wrote "distinct". Same knob as model.ask.ask_once.
         reasoning=False,
     )
     raw = response.text or ""

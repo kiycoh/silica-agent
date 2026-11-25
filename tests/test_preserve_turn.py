@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from silica.agent.loop import run_agent
 from silica.kernel.write import preserve
+from tests.agent_turn import open_turn
 
 
 def _answer(*a, **k):
@@ -21,7 +22,7 @@ def _answer(*a, **k):
 def test_a_chat_turn_opens_the_window(monkeypatch):
     monkeypatch.setattr(preserve, "_TURN_STARTED", preserve.ContextVar("t", default=None))
     with patch("silica.agent.loop.call_llm", _answer):
-        run_agent(messages=[{"role": "user", "content": "hi"}], model="test")
+        run_agent(messages=[{"role": "user", "content": "hi"}], model="test", constraints=open_turn())
     assert preserve._TURN_STARTED.get() is not None
 
 

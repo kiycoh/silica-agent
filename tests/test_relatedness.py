@@ -176,33 +176,6 @@ def test_cooccur_ranking_abstains_when_query_absent(tmp_path):
     assert cooccur_ranking(st, "UNKNOWN", k=5, exclude=set(), scope=None) is None
 
 
-def test_cooccur_gate_probe_receives_coverage_and_flatness(tmp_path, monkeypatch):
-    # Phase-0 calibration hook (retrieval-gates spec): per-query signals are
-    # emitted when the probe is set; the dormant gate must not fire.
-    from silica.kernel.recall import relatedness
-
-    st = _cooc_store(tmp_path)
-    seen = []
-    monkeypatch.setattr(relatedness, "COOCCUR_GATE_PROBE", seen.append)
-    ranking = cooccur_ranking(st, "A", k=5, exclude=set(), scope=None)
-    assert ranking is not None
-    sig = seen[0]
-    # top hit B matches beta+gamma but not alpha -> partial IDF-mass coverage
-    assert 0.0 < sig["coverage"] < 1.0
-    assert sig["flatness"] >= 1.0
-    assert sig["fired"] is False
-
-
-def test_cooccur_gate_abstains_below_threshold(tmp_path, monkeypatch):
-    # Gate plumbing: with a frozen threshold above the fixture's coverage the
-    # leg must abstain via the existing None protocol.
-    from silica.kernel.recall import relatedness
-
-    st = _cooc_store(tmp_path)
-    monkeypatch.setattr(relatedness, "_COOCCUR_MIN_CONFIDENCE", 0.99)
-    assert cooccur_ranking(st, "A", k=5, exclude=set(), scope=None) is None
-
-
 def test_cooccur_ranking_idf_beats_hub_over_rare_match(tmp_path):
     # 'hub' appears in every note (zero discriminating power); 'rare' is shared
     # by only the query and TWIN. IDF must rank the rare-sharing TWIN above a
@@ -410,15 +383,13 @@ def test_fuse_recall_leg_proposes_notes_absent_from_semantic_legs():
 # REFERENCE-EQUIVALENCE suite: the postings-backed implementations must
 # return IDENTICAL values (idf map / ranked list / None) to the old full-scan
 # implementations, reimplemented below as reference functions frozen at the
-# pre-refactor behavior. The coverage/flatness/gate tail is exercised through
-# the REAL `_rank_cooccur_from_profile`, not reimplemented, since it must stay
-# byte-identical rather than merely equivalent.
+# pre-refactor behavior, minus the confidence-gate tail both sides carried
+# until 2026-11-25 (threshold 0.0, never fired: the comment under BM25_B in
+# relatedness.py holds what a gate would need to come back).
 # ---------------------------------------------------------------------------
 
 import math as _math
-import statistics as _statistics
 
-from silica.kernel.recall import relatedness as _relatedness_mod
 from silica.kernel.base.layout import in_folder as _path_in_scope
 from silica.kernel.recall.relatedness import concept_idf, _rank_cooccur_from_profile
 
@@ -440,12 +411,7 @@ def _old_concept_idf(cooccur_store, stems, *, scope):
 
 
 def _old_rank_cooccur_from_profile(cooccur_store, profile, *, k, blocked, scope):
-    """Frozen copy of the pre-3.4 `_rank_cooccur_from_profile`: two full scans.
-
-    Reads `_COOCCUR_MIN_CONFIDENCE` off the live module (not a bound import) so
-    a test that monkeypatches the threshold affects this reference the same
-    way it affects the real function under test.
-    """
+    """Frozen copy of the pre-3.4 `_rank_cooccur_from_profile`: two full scans."""
     if not profile:
         return None
     idf = _old_concept_idf(cooccur_store, set(profile), scope=scope)
@@ -462,21 +428,7 @@ def _old_rank_cooccur_from_profile(cooccur_store, profile, *, k, blocked, scope)
             note_scores[path] = overlap
     if not note_scores:
         return None
-    ranked = sorted(note_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
-    total_mass = sum(w * idf.get(s, 0.0) for s, w in profile.items())
-    top_stems = set(cooccur_store.note_nodes(ranked[0][0]))
-    matched = sum(w * idf.get(s, 0.0) for s, w in profile.items() if s in top_stems)
-    coverage = (matched / total_mass) if total_mass > 0 else 0.0
-    scores = [s for _p, s in ranked]
-    # noqa on the next line, not a deletion: this whole function is a frozen
-    # byte-copy of the pre-3.4 implementation (see the block comment above), so
-    # a line the original computed and dropped has to stay computed and dropped
-    # or the reference stops being a reference.
-    flatness = scores[0] / _statistics.median(scores)  # noqa: F841
-    fired = coverage < _relatedness_mod._COOCCUR_MIN_CONFIDENCE
-    if fired:
-        return None
-    return ranked
+    return sorted(note_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
 
 
 def _dozen_notes_store(tmp_path) -> CooccurStore:
@@ -607,30 +559,6 @@ def test_rank_cooccur_reference_equivalence_k_larger_than_candidates(tmp_path):
     new = _rank_cooccur_from_profile(st, profile, k=1000, blocked=set(), scope=None)
     old = _old_rank_cooccur_from_profile(st, profile, k=1000, blocked=set(), scope=None)
     assert new is not None
-    assert new == old
-
-
-def test_rank_cooccur_reference_equivalence_gate_not_fired(tmp_path, monkeypatch):
-    # Dormant gate (default 0.0): must not fire, new == old, non-None.
-    monkeypatch.setattr(_relatedness_mod, "_COOCCUR_MIN_CONFIDENCE", 0.0)
-    st = _dozen_notes_store(tmp_path)
-    profile = _main_profile()
-    new = _rank_cooccur_from_profile(st, profile, k=100, blocked=set(), scope=None)
-    old = _old_rank_cooccur_from_profile(st, profile, k=100, blocked=set(), scope=None)
-    assert new is not None
-    assert new == old
-
-
-def test_rank_cooccur_reference_equivalence_gate_fires(tmp_path, monkeypatch):
-    # Coverage is a ratio <= 1.0 (matched/total_mass, matched <= total_mass);
-    # a threshold well above 1.0 is guaranteed to fire regardless of the
-    # fixture's actual coverage value.
-    monkeypatch.setattr(_relatedness_mod, "_COOCCUR_MIN_CONFIDENCE", 999.0)
-    st = _dozen_notes_store(tmp_path)
-    profile = _main_profile()
-    new = _rank_cooccur_from_profile(st, profile, k=100, blocked=set(), scope=None)
-    old = _old_rank_cooccur_from_profile(st, profile, k=100, blocked=set(), scope=None)
-    assert new is None
     assert new == old
 
 

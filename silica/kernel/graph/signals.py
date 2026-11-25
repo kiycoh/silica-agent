@@ -26,35 +26,6 @@ from silica.kernel.base import notekey
 # V1  Structural link prediction: Adamic-Adar over the wikilink graph
 # ---------------------------------------------------------------------------
 
-def adamic_adar_ranking(
-    G, node: str, *, k: int, exclude: Iterable[str] = (),
-) -> list[tuple[str, float]] | None:
-    """Non-adjacent notes two hops from `node`, by Adamic-Adar score.
-
-    score(a, b) = sum over common neighbours z of 1 / log(deg z). Adamic-Adar
-    rather than a raw common-neighbour count because a hub is a common
-    neighbour of everything it links: the 1/log(deg) term is what keeps a MOC
-    from making all its members predicted neighbours of each other. None when
-    `node` is absent, isolated, or has no distance-2 candidate at all.
-    """
-    if node not in G or G.degree(node) == 0:
-        return None
-    blocked = set(exclude) | {node}
-    scores: dict[str, float] = {}
-    for z in G.neighbors(node):
-        dz = G.degree(z)
-        if dz < 2:
-            continue  # cannot be a common neighbour of two distinct notes
-        w = 1.0 / math.log(dz)
-        for cand in G.neighbors(z):
-            if cand in blocked or G.has_edge(node, cand):
-                continue
-            scores[cand] = scores.get(cand, 0.0) + w
-    if not scores:
-        return None
-    return sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
-
-
 def structural_links(G, *, top_k: int) -> list[tuple[str, str, float, list[str]]]:
     """Every unlinked pair at distance 2, scored by Adamic-Adar, best first.
 
