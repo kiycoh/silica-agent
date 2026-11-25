@@ -983,13 +983,6 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
   <script type="application/json" id="vocab"></script>
   <script>const VOCAB = JSON.parse(document.getElementById("vocab").textContent);</script>
   <script src="/static/app-core.js"></script>
-  <!-- The prototype behind ADR-0048, kept as the record of the choice: inert
-       unless the URL carries ?presence=A|B|C, and then it draws its orb over
-       the landing. Before work.js like every app-*.js, which the tests pin.
-       document.write and not an appended element: the parser stops for it as it
-       does for a tag, so it holds this place in the order, and 43 KB nobody
-       asked for stays off every other page view. -->
-  <script>if (new URLSearchParams(location.search).get("presence")) document.write('<script src="/static/app-prototype-presence.js"><\/script>');</script>
   <script src="/static/app-chat.js"></script>
   <script src="/static/app-shell.js"></script>
   <script src="/static/app-explore.js"></script>
