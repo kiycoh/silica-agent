@@ -76,10 +76,12 @@ def test_warm_next_file_attaches_chunks_and_marks():
     assert not hasattr(fsm, "chunk_idx") or fsm.chunk_idx == 0
 
 
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_warm_next_file_bails_on_recon_error():
     fsm = _warm_stub()
-    with patch.object(st, "recon_file", return_value={"error": "boom"}):
+    with patch.object(st, "recon_file", return_value={"error": "boom"}) as rec:
         assert st.warm_next_file(fsm) is False
+    rec.assert_called_once()  # the error is the reason: on the outline lane recon is never asked
     assert len(fsm.chunks) == 1
     assert 1 not in fsm.file_chunks
 
