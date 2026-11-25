@@ -42,6 +42,14 @@ _CLASSES: list[tuple[re.Pattern[str], str]] = [
     # overflowing conversation.
     (re.compile(r"\b402\b|insufficient (credits|balance|funds)|more credits", re.I),
      "The provider says this account has no credit left. Add credit on its site, then try again."),
+    # Before the credentials row, whose "forbidden" this text carries: the
+    # loop's refusal of a tool the turn does not hold (agent/loop.py) read on
+    # its row as "The provider did not accept the API key" and sent the person
+    # to Settings over a key that was fine (seen 2026-11-25, a chat turn
+    # calling web_search). "here" and not "this chat": a connector's or a web
+    # research's own loop refuses in the same words.
+    (re.compile(r"Unknown or forbidden tool"),
+     "The model called a tool it does not have here, so nothing ran."),
     (re.compile(r"\b(401|403|unauthorized|forbidden|api[_ -]?key)\b", re.I),
      "The provider did not accept the API key. Check the key in Settings."),
     (re.compile(r"\b(429|rate limit)\b", re.I),
