@@ -298,8 +298,6 @@ LIVE: dict[str, Setting] = {row.key: row for row in (
     Setting("SILICA_DISTILL_TWO_PASS", type=not_zero, default=True),
     Setting("SILICA_META_SHAPE_CHECK", type=not_zero, default=True),
     Setting("SILICA_BOUNDARY_ANNEAL", type=not_zero, default=True),
-    # Any text turns it on, "0" included; nothing has ever set it but to "1".
-    Setting("SILICA_DEDUP_GATE", type=bool, default=False),
     Setting("SILICA_EXTRACTIVE_ENFORCE", type=strict_one, default=False),
     Setting("SILICA_MIN_WRITE_SNIPPET_CHARS", type=int, default=None),
     Setting("SILICA_EXTRACTIVE_MIN_SNIPPET_CHARS", type=int, default=None),
