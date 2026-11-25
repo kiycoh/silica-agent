@@ -378,7 +378,9 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
     checkpoints = [
         PlanStep(id="audit",    kind="mechanical", objective="silica_vault_report"),
         PlanStep(id="remediate", kind="gate",      objective="silica_autolink"),
-        PlanStep(id="report",   kind="mechanical", objective="ledger digest"),
+        # The objective is plan text a saved run wrote, not a tool reference
+        # (router/phases.py): the name stays though the tool left on 2026-11-25.
+        PlanStep(id="report",   kind="mechanical", objective="silica_ledger_digest"),
     ]
 
     return AnalystPlan(
