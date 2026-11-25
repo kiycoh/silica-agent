@@ -748,7 +748,6 @@ def test_default_ask_with_a_prefix_puts_the_source_in_the_system_message(monkeyp
 
 
 def test_lane_for_routes_document_profiles_to_outline(monkeypatch):
-    monkeypatch.setattr("silica.kernel.outline.DOCUMENT_LANE", "outline")
     assert ol.lane_for("default") == "outline"
     assert ol.lane_for(None) == "outline"
     assert ol.lane_for("transcript") == "outline"
@@ -886,7 +885,6 @@ def test_assemble_file_chunks_outline_lane_makes_one_full_text_chunk():
 
 
 def test_recon_skips_the_miner_on_the_outline_lane(monkeypatch):
-    monkeypatch.setattr("silica.kernel.outline.DOCUMENT_LANE", "outline")
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.state = InjectorState.RECON
     monkeypatch.setattr(states.setup, "_pin_file_profile",
@@ -907,7 +905,6 @@ def _pin(fsm, fi, profile, origin):
 
 
 def test_recon_keeps_the_miner_for_memory_forms(monkeypatch):
-    monkeypatch.setattr("silica.kernel.outline.DOCUMENT_LANE", "outline")
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.state = InjectorState.RECON
     monkeypatch.setattr(states.setup, "_pin_file_profile",
@@ -1041,7 +1038,6 @@ def test_default_ask_uses_a_response_schema_and_retries_once_on_no_json(monkeypa
 def test_recon_ignores_a_sniffed_clip_for_the_lane(monkeypatch):
     """The sniffer is an LLM call whose verdict changes run to run; only a
     stamp or the run-level profile may route a file off the outline lane."""
-    monkeypatch.setattr("silica.kernel.outline.DOCUMENT_LANE", "outline")
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.state = InjectorState.RECON
     monkeypatch.setattr(states.setup, "_pin_file_profile",

@@ -14,6 +14,8 @@ from unittest.mock import MagicMock, patch
 from silica.router.states import setup as st
 from silica.router.run_state import ChunkState, RunState
 
+import pytest
+
 
 def _recon_res(name="Inbox/f1.md"):
     return {"file": name, "collisions": [], "new_concepts": ["warm concept"]}
@@ -56,6 +58,7 @@ def _warm_stub(n_files=2, cur_fi=0):
     return fsm
 
 
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_warm_next_file_attaches_chunks_and_marks():
     fsm = _warm_stub()
     with patch.object(st, "recon_file", return_value=_recon_res()) as rec, \

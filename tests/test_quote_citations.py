@@ -79,7 +79,6 @@ def _nucleate(monkeypatch, files: list[str], ask) -> Any:
     from silica.router.orchestrator import InjectorFSM
     from silica.router.warning_ledger import WarningLedger
 
-    monkeypatch.setattr("silica.kernel.outline.DOCUMENT_LANE", "outline")
     monkeypatch.delenv("SILICA_OUTLINE_BODIES", raising=False)
     monkeypatch.delenv("SILICA_OUTLINE_CACHE", raising=False)
     monkeypatch.setattr(ol, "_default_ask", ask)

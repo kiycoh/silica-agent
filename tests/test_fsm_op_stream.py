@@ -138,6 +138,7 @@ def op_stream(monkeypatch):
     return _run
 
 
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_two_concepts_become_two_writes_plus_the_synthesised_hub(op_stream):
     """Baseline stream: VALIDATE prepends the hub note the target dir lacks."""
     stream = op_stream(_chunk(("Percettrone", BODY_A), ("Discesa del gradiente", BODY_B)))
@@ -149,6 +150,7 @@ def test_two_concepts_become_two_writes_plus_the_synthesised_hub(op_stream):
     ]
 
 
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_existing_hub_is_not_re_synthesised(op_stream):
     stream = op_stream(
         _chunk(("Percettrone", BODY_A)),
@@ -158,6 +160,7 @@ def test_existing_hub_is_not_re_synthesised(op_stream):
     assert stream == [("write", "Concepts/Percettrone.md")]
 
 
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_collision_drops_a_vault_near_dup_before_the_model_sees_it(op_stream):
     """The MinHash leg (embedder-free) defers a concept whose twin is already in
     the vault: it never reaches the distiller, so no op is emitted for it."""
@@ -169,6 +172,7 @@ def test_collision_drops_a_vault_near_dup_before_the_model_sees_it(op_stream):
     assert stream == [("write", "Concepts/Discesa del gradiente.md")]
 
 
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_write_to_an_existing_note_is_coerced_to_a_patch(op_stream):
     """Same title, unrelated content (so the near-dup leg leaves it alone):
     VALIDATE must coerce the write into a patch instead of clobbering the note."""
@@ -183,6 +187,7 @@ def test_write_to_an_existing_note_is_coerced_to_a_patch(op_stream):
     assert stream == [("patch", "Concepts/Percettrone.md")]
 
 
+@pytest.mark.usefixtures("keyphrase_lane")
 def test_the_same_concept_twice_collapses_to_one_write(op_stream):
     """The model repeating a concept must not write the note twice — VALIDATE
     dedupes by path and keeps the richest op."""
