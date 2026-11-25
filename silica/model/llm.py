@@ -614,8 +614,15 @@ def _cacheable(model: str) -> bool:
     m = model.lower()
     if any(k in m for k in _CACHEABLE_MODELS):
         return True
-    # ponytail: an env gate while the A/B runs (2026-10-15); drop it, and the
-    # check with it, once the arm is adopted or refuted.
+    # ponytail: an env gate since the A/B of 2026-10-15, and one undecided arm
+    # with SILICA_OUTLINE_CACHE and SILICA_OUTLINE_BODIES (kernel/outline.py).
+    # Kept on 2026-11-25, when the audit of that day had it down as a lost arm:
+    # with written bodies the breakpoint cut 8 lectures from $0.0336 to $0.0221
+    # on Qwen (ADR-0036), a translating vault writes its bodies again since
+    # 2026-10-23, and nothing was measured on the hosted model, DeepSeek V4
+    # Flash, which this check does not match. Ceiling: by 2026-12-31 either run
+    # evals/probe_ingest_ab's outline-cache arm on the hosted model over a
+    # translating vault and adopt what it shows, or delete the three names.
     return (live_env("SILICA_QWEN_CACHE") and m.startswith("openrouter/")
             and any(k in m for k in _OPENROUTER_CACHEABLE))
 

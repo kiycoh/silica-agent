@@ -303,6 +303,8 @@ LIVE: dict[str, Setting] = {row.key: row for row in (
     Setting("SILICA_EXTRACTIVE_MIN_SNIPPET_CHARS", type=int, default=None),
     Setting("SILICA_MAX_CONCEPTS", type=int, default=None),
     Setting("SILICA_TOKENS_PER_CONCEPT", type=int, default=None),
+    # One undecided arm with SILICA_QWEN_CACHE below: model/llm.py (_cacheable)
+    # says what was measured and the date it is decided by.
     Setting("SILICA_OUTLINE_CACHE", type=strict_one, default=False),
     Setting("SILICA_OUTLINE_BODIES"),
     Setting("SILICA_STUDY_OFFER", default="on", blank_unset=True),
