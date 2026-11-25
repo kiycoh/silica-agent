@@ -1,7 +1,7 @@
 """Expand capability — in-run retry for «snippet too short» rejections.
 
 The gate (MIN_WRITE_SNIPPET_CHARS) rejects distiller write ops with a thin
-body. Deterministic re-validation can never clear them (silica_deferred_retry
+body. Deterministic re-validation can never clear them (the anneal retry
 only re-validates), so without this worker every such op waits for a manual
 rewrite. The expand worker re-prompts the LLM with the concept's inbox excerpt
 (max 2 attempts), commits through the same gate, and cleans the deferred twin

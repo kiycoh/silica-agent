@@ -296,6 +296,6 @@ def test_dedup_title_gate_promotes_low_fullscore_pair():
     assert "Robotica/ROS" in pair_paths
     assert "Robotica/JSON in ROS 2" in pair_paths
 
-    # effective_score must be the title_score (0.85), not the full score (0.40)
+    # the pair's score must be the title_score (0.85), not the full score (0.40)
     assert items[0].context.score > 0.80
     assert items[0].context.title_score >= 0.80

@@ -354,16 +354,25 @@ class Outline:
         return [i.title for i in self.ideas]
 
 
+# Which DELEGATE input document-shaped sources get: "outline" (the model reads
+# the source whole and names the ideas) or "keyphrase" (recon + payload
+# windows). Measured 2026-09-02 on two SVM lectures: outline 100% section
+# provenance, 37 typed edges, 7 calls; keyphrase 0%, 0, and 53 min of wall
+# clock. A constant here and no longer a setting (SILICA_NUCLEATE_LANE until
+# 2026-11-25): it was the A/B rerun knob, and no eval, script or host file set
+# it. Only tests/conftest.py changes it, to keep the FSM suites on the keyphrase
+# pipeline they mock.
+DOCUMENT_LANE = "outline"
+
+
 def lane_for(profile: str | None) -> str:
     """'outline' for document-shaped sources, 'keyphrase' for the memory forms.
 
     clip and promotion carry episodic facts the distiller's ephemeral schema
     routes; the outline lane has no such channel, so they keep the keyphrase
-    pipeline. SILICA_NUCLEATE_LANE=keyphrase turns the lane off everywhere
-    (the A/B rerun knob).
+    pipeline whatever DOCUMENT_LANE says.
     """
-    from silica.config import CONFIG
-    if (CONFIG.nucleate_lane or "outline") != "outline":
+    if DOCUMENT_LANE != "outline":
         return "keyphrase"
     return "keyphrase" if (profile or "default") in ("clip", "promotion") else "outline"
 

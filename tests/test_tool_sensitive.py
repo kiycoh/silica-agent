@@ -85,7 +85,7 @@ def test_pipeline_stage_tools_are_not_registered():
                  "silica_recon", "silica_payload", "silica_sanitize", "silica_validate_ops",
                  "silica_bulk_write", "silica_lint", "silica_cleanup"):
         assert name not in TOOLS, name
-    for name in ("silica_run_injector", "silica_deferred_retry",
+    for name in ("silica_run_injector", "silica_anneal",
                  "silica_write_note", "silica_patch_note"):
         assert not TOOLS[name].sensitive, name
 

@@ -983,7 +983,7 @@ def record_recovered(txn: Txn, validated: list[Op], content_hash: str, bundle: d
     the FSM's `finally`, so its writes belong to the run the user just started:
     a fresh journal run carries a later `started_at`, `last_active_run` orders
     by that, and `/revert` therefore undid the handful of recovered notes and
-    left the whole nucleation on disk. Only a STANDALONE `silica_deferred_retry`
+    left the whole nucleation on disk. Only a STANDALONE retry (/anneal)
     — no run to join — opens its own revertible unit. Best-effort throughout:
     the notes are already on disk, and failing here must not undo them.
     """

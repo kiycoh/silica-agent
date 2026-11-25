@@ -198,7 +198,7 @@ def _keyphrase_lane_under_test(monkeypatch: pytest.MonkeyPatch) -> None:
     they test the keyphrase pipeline. The outline lane (the default since
     2026-09-02) bypasses both, so it is opted into per test
     (tests/test_outline_lane.py) instead of silently emptying these mocks."""
-    monkeypatch.setattr("silica.config.CONFIG.nucleate_lane", "keyphrase")
+    monkeypatch.setattr("silica.kernel.outline.DOCUMENT_LANE", "keyphrase")
 
 
 @pytest.fixture(autouse=True)

@@ -378,13 +378,13 @@ def test_open_drops_a_bundle_with_nothing_to_retry(tmp_path):
 def test_retry_over_a_bundle_with_no_ops_clears_it(tmp_path, monkeypatch):
     """Written after the store opened, the same bundle used to come back as
     "still rejected" with zero ops and stay on disk."""
-    from silica.tools.pipeline import silica_deferred_retry
+    from silica.router.anneal import retry_bundle
 
     store = DeferredStore(path=tmp_path / "deferred")
     (tmp_path / "deferred" / "legacy.json").write_bytes(_residue_only_bundle("legacy"))
     monkeypatch.setattr("silica.kernel.write.deferred.get_deferred_store", lambda: store)
 
-    res = silica_deferred_retry("legacy")
+    res = retry_bundle("legacy")
 
     assert res["success"] and res["bundle_cleared"], res
     assert store.queue_depth() == 0

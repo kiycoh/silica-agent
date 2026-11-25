@@ -1,10 +1,8 @@
-"""Near-title dedup WorkItems must carry the real fuzzy title ratio as
-title_score, so SILICA_DEDUP_GATE judges them on their true similarity instead
-of the degenerate score=0.0 (which force-routes every near-title pair distinct).
+"""Near-title dedup WorkItems carry the real fuzzy title ratio as title_score,
+so the run's ledger records how close the titles were and not a degenerate 0.0.
 """
 from types import SimpleNamespace
 
-from silica.capabilities.dedup import passes_dedup_gate
 from silica.router.states.distill import enqueue_near_title_dedups
 
 
@@ -24,7 +22,7 @@ def _fsm(queue):
     )
 
 
-def test_ratio_becomes_title_score_and_clears_gate():
+def test_ratio_becomes_title_score():
     q = _FakeQueue()
     rejected = [{
         "op": {"heading": "Beta", "snippet": "beta body"},
@@ -35,10 +33,6 @@ def test_ratio_becomes_title_score_and_clears_gate():
     assert len(q.items) == 1
     job = q.items[0].context
     assert job.title_score == 0.90              # real ratio, not 0.0
-    # ratio 0.90 >= 0.85 threshold, similar sizes -> reaches the LLM judge
-    assert passes_dedup_gate(job.title_score, 500, 600) is True
-    # sanity: the old degenerate score=0.0 would have force-gated it out
-    assert passes_dedup_gate(0.0, 500, 600) is False
 
 
 def test_missing_ratio_stays_zero():
@@ -68,7 +62,7 @@ def test_rejections_against_one_candidate_become_one_judge_call():
     by_path = {it.target_path: it for it in q.items}
     assert len(q.items) == 2
     family = by_path["TargetDir/Betas.md"]
-    # Two concepts, each keeping its own fuzzy ratio for the gate.
+    # Two concepts, each keeping its own fuzzy ratio.
     scores = sorted(c.title_score for c in family.context.members)
     assert scores == [0.88, 0.90]
     # The singleton passes through unbatched, shape unchanged.

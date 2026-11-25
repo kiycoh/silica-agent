@@ -115,7 +115,7 @@ def _land_recovered(validated: list[Op], content_hash: str, bundle: dict) -> Bul
 
 
 def retry_bundle(content_hash: str) -> dict[str, Any]:
-    """silica_deferred_retry: one bundle through the mechanical retry."""
+    """One bundle through the mechanical retry."""
     from silica.kernel.write.deferred import get_deferred_store
     from silica.kernel.write.validate import validate_operations
     from silica.kernel.write.ops_io import parse_ops
@@ -226,7 +226,7 @@ def repair_bundle(content_hash: str, ops: list[dict]) -> dict[str, Any]:
     fixed = [op for op in fixed if op.op != OpType.skip]
     if not fixed:
         return {"error": "no usable ops after parsing — check the op schema"}
-    # The bundle's ORIGINAL payloads, same as silica_deferred_retry (audit
+    # The bundle's ORIGINAL payloads, same as retry_bundle (audit
     # finding 2): an empty list re-admits the fix on strictly weaker validation
     # — measured live, a hallucinated op with zero grounded facts sailed
     # through and landed in the vault.

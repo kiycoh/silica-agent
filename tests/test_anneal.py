@@ -189,7 +189,7 @@ def test_anneal_retry_keeps_grounding_parity_with_persisted_payloads(tmp_vault, 
     # rejected on payload-grounded checks (unknown heading, collision paths)
     # passed on strictly weaker validation. With the bundle's original payloads
     # persisted, the same checks run again and the op stays deferred.
-    from silica.tools.pipeline import silica_deferred_retry
+    from silica.router.anneal import retry_bundle
 
     tmp_vault.note("Reti/Reti.md", "# Reti\n")
     store = _park(monkeypatch, tmp_path)
@@ -204,7 +204,7 @@ def test_anneal_retry_keeps_grounding_parity_with_persisted_payloads(tmp_vault, 
         payloads=payloads,
     )
 
-    res = silica_deferred_retry("eee5")
+    res = retry_bundle("eee5")
     assert res.get("success") is False
     assert any("not present in payload" in r["reason"] for r in res["rejected"])
     bundle = store.get("eee5")
@@ -217,7 +217,7 @@ def test_anneal_steer_validates_on_the_same_evidence_that_rejected(tmp_vault, tm
     # model's "fix" with EMPTY payloads, so a hallucinated op sailed through the
     # weaker gate. Measured live: a promotion bundle came back as an invented
     # encyclopedia note (in Danish) with zero facts from the source. The fix
-    # must pass the bundle's persisted payloads, same as silica_deferred_retry.
+    # must pass the bundle's persisted payloads, same as retry_bundle.
     from silica.tools import pipeline
 
     tmp_vault.note("Reti/Reti.md", "# Reti\n")
@@ -380,7 +380,7 @@ def test_anneal_steer_output_gets_the_sanitize_repairs(tmp_vault, tmp_path, monk
 def test_anneal_retry_without_payloads_keeps_legacy_behavior(tmp_vault, tmp_path, monkeypatch):
     # Old bundles (pre-schema) carry no payloads: retry still validates
     # payload-free, so they are not bricked by the schema addition.
-    from silica.tools.pipeline import silica_deferred_retry
+    from silica.router.anneal import retry_bundle
 
     tmp_vault.note("Reti/Reti.md", "# Reti\n")
     store = _park(monkeypatch, tmp_path)
@@ -391,7 +391,7 @@ def test_anneal_retry_without_payloads_keeps_legacy_behavior(tmp_vault, tmp_path
         phase="VALIDATE",
     )
 
-    res = silica_deferred_retry("fff6")
+    res = retry_bundle("fff6")
     assert res.get("success") is True and res["written"] == 1
 
 

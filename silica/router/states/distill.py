@@ -92,9 +92,8 @@ def enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed:
         candidate, candidate_path, ratio = near
         op = r.get("op", {}) or {}
         # The C3 title gate already computed the fuzzy ratio (validate.py band 2);
-        # carry it as the dedup title_score so SILICA_DEDUP_GATE judges these
-        # near-identical-title pairs on their real similarity instead of a
-        # degenerate 0.0 (which would force every one of them to "distinct").
+        # the job carries it as its title_score, so the run's ledger says how
+        # close the two titles were instead of a degenerate 0.0.
         title_score = ratio if ratio is not None else 0.0
         items.append(WorkItem(
             kind="dedup",
@@ -835,7 +834,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
         if fsm.defer_ops(deferred_ops, rejection_reasons, phase="VALIDATE"):
             logger.warning(
                 "VALIDATE: %d op(s) rejected and saved to deferred store (hash=%s…). "
-                "Use silica_deferred_retry to attempt them later.",
+                "/anneal attempts them later.",
                 len(rejected_raw),
                 fsm.current_content_hash[:8],
             )

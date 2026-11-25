@@ -62,12 +62,10 @@ def silica_run_injector(
                         keep_sources=keep_sources, cancel_token=cancel_token)
 
 
-@tool(cls="composed", ingress=False)
-def silica_ledger_digest(run_id: Annotated[str, Field(description='Run ID to inspect (latest saved run if empty)')] = "") -> dict[str, Any]:
-    """Compact summary of a run's plan and progress (< 500 tokens).
-
-    Use to inspect an nucleate/audit run before advancing it with
-    silica_ledger_next. Pass run_id="" for the most recently saved run.
+def ledger_digest(run_id: str = "") -> dict[str, Any]:
+    """/status <run>: a compact summary of a run's plan and progress, the most
+    recently saved run when `run_id` is empty. A plain function and no longer
+    a registered tool (2026-11-25): no chat turn was offered it.
     """
     from silica.kernel.progress import ProgressLedger, latest_run_id
 

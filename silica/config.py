@@ -298,13 +298,13 @@ LIVE: dict[str, Setting] = {row.key: row for row in (
     Setting("SILICA_DISTILL_TWO_PASS", type=not_zero, default=True),
     Setting("SILICA_META_SHAPE_CHECK", type=not_zero, default=True),
     Setting("SILICA_BOUNDARY_ANNEAL", type=not_zero, default=True),
-    # Any text turns it on, "0" included; nothing has ever set it but to "1".
-    Setting("SILICA_DEDUP_GATE", type=bool, default=False),
     Setting("SILICA_EXTRACTIVE_ENFORCE", type=strict_one, default=False),
     Setting("SILICA_MIN_WRITE_SNIPPET_CHARS", type=int, default=None),
     Setting("SILICA_EXTRACTIVE_MIN_SNIPPET_CHARS", type=int, default=None),
     Setting("SILICA_MAX_CONCEPTS", type=int, default=None),
     Setting("SILICA_TOKENS_PER_CONCEPT", type=int, default=None),
+    # One undecided arm with SILICA_QWEN_CACHE below: model/llm.py (_cacheable)
+    # says what was measured and the date it is decided by.
     Setting("SILICA_OUTLINE_CACHE", type=strict_one, default=False),
     Setting("SILICA_OUTLINE_BODIES"),
     Setting("SILICA_STUDY_OFFER", default="on", blank_unset=True),
@@ -773,13 +773,6 @@ class SilicaConfig:
     # The router (agent loop) uses `model`/`provider` above; sub-agents (dedup, refiner)
     # use these worker_* fields so they can run concurrently on a small local model.
     worker_model: str | None = from_env("SILICA_WORKER_MODEL", None, doc=True, hosted=True)
-    # Which DELEGATE input document-shaped sources get: "outline" (the model
-    # reads the source whole and names the ideas, kernel/outline.py) or
-    # "keyphrase" (recon + payload windows). Measured 2026-09-02 on two SVM
-    # lectures: outline 100% section provenance, 37 typed edges, 7 calls;
-    # keyphrase 0%, 0, and 53 min of wall clock. Memory forms (clip,
-    # promotion) stay on keyphrase whatever this says (outline.lane_for).
-    nucleate_lane: str = from_env("SILICA_NUCLEATE_LANE", "outline")
     # Worker provider preset name; falls back to "lmstudio" when unset.
     worker_provider: str | None = from_env("SILICA_WORKER_PROVIDER", None, doc=True)
     # Explicit API-key override for the worker model (endpoint comes from the preset).

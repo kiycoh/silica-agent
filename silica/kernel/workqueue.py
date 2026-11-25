@@ -175,11 +175,6 @@ class DedupJob(_Job):
         # The inbox path, so the key is the path under the inbox (ADR-0114).
         return _provenance(self.inbox_file, self.content_hash, self.run_id)
 
-    @property
-    def effective_score(self) -> float:
-        full = self.score if self.full_score is None else self.full_score
-        return max(full or 0.0, self.title_score or 0.0)
-
     def to_dict(self) -> dict[str, Any]:
         out = asdict(self)
         for key in ("full_score", "title_score"):

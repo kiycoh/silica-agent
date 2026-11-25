@@ -16,7 +16,6 @@ from typing import Any, Literal
 from pydantic import BaseModel
 from pydantic.json_schema import SkipJsonSchema
 
-from silica.config import live_env
 from silica.kernel.base.notekey import store_key
 from silica.kernel.write.gate import commit_ops
 from silica.kernel.write.ops import Op, OpType
@@ -70,26 +69,6 @@ class DedupBatchDecision(BaseModel):
     decisions: list[DedupDecision] = []
 
 
-def passes_dedup_gate(
-    score: float,
-    incoming_len: int,
-    candidate_len: int,
-    *,
-    threshold: float = 0.85,
-    max_ratio: float = 2.0,
-) -> bool:
-    """Cheap gate before the LLM judge (spec 2.1). True iff the effective cosine
-    clears `threshold` AND the two bodies are within `max_ratio` in size. The
-    size guard rejects the spoke-in-hub false positive (small spoke, big hub:
-    high cosine, huge size gap). Cosine is symmetric, so the spec's mutual
-    requirement is the single self-normalized score.
-    """
-    if score < threshold:
-        return False
-    small, large = sorted((max(incoming_len, 1), max(candidate_len, 1)))
-    return large / small <= max_ratio
-
-
 _CANDIDATE_BUDGET = 8000
 
 
@@ -126,15 +105,6 @@ def run_dedup(item: WorkItem[DedupJob | DedupFamily], config: Any) -> dict[str, 
     if isinstance(job, DedupFamily):
         return _run_batch(item, job, candidate_body[:budget], config)
 
-    if live_env("SILICA_DEDUP_GATE"):
-        if not passes_dedup_gate(job.effective_score, len(job.excerpt),
-                                 len(candidate_body[:budget])):
-            gate_decision = DedupDecision(
-                verdict="distinct",
-                rationale="dedup gate: below threshold or size guard",
-            )
-            return _route_verdict(item, job, gate_decision, config)
-
     emit_feedback(item, "calling_llm")
     decision = _decide_dedup(
         config,
@@ -161,18 +131,15 @@ def _run_batch(
     """Judge a family of concepts against one candidate in a single LLM call,
     then route every verdict through the exact same code as a single item."""
     emit_feedback(item, "calling_llm")
-    if live_env("SILICA_DEDUP_GATE"):
-        decisions = _gated_batch_decisions(config, family, candidate_body)
-    else:
-        lead = family.members[0]
-        decisions = _decide_dedup_batch(
-            config,
-            concepts=family.members,
-            candidate_name=lead.candidate,
-            candidate_body=candidate_body,
-            author_spoke=bool(lead.target_dir),
-            hub=lead.hub,
-        )
+    lead = family.members[0]
+    decisions = _decide_dedup_batch(
+        config,
+        concepts=family.members,
+        candidate_name=lead.candidate,
+        candidate_body=candidate_body,
+        author_spoke=bool(lead.target_dir),
+        hub=lead.hub,
+    )
     results: list[dict[str, Any]] = []
     for job, decision in zip(family.members, decisions):
         if item.cancel_token.is_set():
@@ -185,45 +152,6 @@ def _run_batch(
         "batch": len(results),
         "results": results,
     }
-
-
-def _gated_batch_decisions(
-    config: Any, family: DedupFamily, candidate_body: str
-) -> list[DedupDecision]:
-    """SILICA_DEDUP_GATE batch path: concepts failing the cheap cosine+size gate
-    skip the LLM and are pre-judged 'distinct' (clearly not duplicates); the rest
-    are judged in one batch call. Returned full-length and aligned to the
-    members, so the caller's zip stays correct and every gated-out concept still
-    routes through the normal distinct path (authoring its spoke for pipeline
-    items), identical to an LLM 'distinct'.
-    """
-    lead = family.members[0]
-    to_judge: list[DedupJob] = []
-    prejudged: dict[int, DedupDecision] = {}
-    for i, c in enumerate(family.members):
-        if passes_dedup_gate(c.effective_score, len(c.excerpt), len(candidate_body)):
-            to_judge.append(c)
-        else:
-            prejudged[i] = DedupDecision(
-                verdict="distinct",
-                rationale="dedup gate: below threshold or size guard",
-            )
-    judged = (
-        _decide_dedup_batch(
-            config,
-            concepts=to_judge,
-            candidate_name=lead.candidate,
-            candidate_body=candidate_body,
-            author_spoke=bool(lead.target_dir),
-            hub=lead.hub,
-        )
-        if to_judge else []
-    )
-    judged_iter = iter(judged)
-    return [
-        prejudged[i] if i in prejudged else next(judged_iter, DedupDecision())
-        for i in range(len(family.members))
-    ]
 
 
 def _incoming_side(job: DedupJob, source_basename: str) -> tuple[int, str | None]:
