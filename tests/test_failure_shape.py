@@ -69,6 +69,19 @@ def test_refused_keeps_a_routes_words_where_explain_would_rewrite_them():
     assert failures.refusal(said)["error"] == said
 
 
+def test_a_tool_the_turn_does_not_hold_is_not_a_refused_api_key():
+    """The loop's own refusal carries the word "forbidden", which is also how a
+    provider's 403 reads: the row told the person to check a key that was fine."""
+    from silica.agent import loop
+    import inspect
+
+    raw = "Unknown or forbidden tool: web_search"
+    assert raw.rsplit(":", 1)[0] in inspect.getsource(loop.run_agent)  # the text the loop really emits
+    said = failures.sentence(raw)
+    assert "API key" not in said and "tool" in said
+    assert "API key" in failures.sentence("403 Forbidden")  # a provider's 403 keeps its sentence
+
+
 def test_a_status_with_nothing_to_say_keeps_fastapis_body(tc):
     """A withheld route answers exactly as a missing one does (ADR-0140 point 4),
     so neither can grow a key the other lacks."""
