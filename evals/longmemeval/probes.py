@@ -45,10 +45,13 @@ def key_prefix(key: str, n: int = 2) -> str:
 
 # key_tokens and rare_token_components lived in silica/kernel/recall/episodic.py
 # until 2026-11-25: only these probes called them, so they moved to their caller.
+_ENTITY_PREFIXES = {"user", "assist"}  # canonical forms of user. / assistant.
+
+
 def key_tokens(key: str) -> set[str]:
     """Stemmed tokens of a key, entity prefix dropped: the shared alphabet
     of the key-drift and clustering probes."""
-    from silica.kernel.recall.episodic import _ENTITY_PREFIXES, normalize_key
+    from silica.kernel.recall.episodic import normalize_key
 
     segs = normalize_key(key).split(".")
     if len(segs) > 1 and segs[0] in _ENTITY_PREFIXES:

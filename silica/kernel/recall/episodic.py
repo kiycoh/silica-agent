@@ -219,9 +219,6 @@ def normalize_key(key: str, *, lang: str = "english") -> str:
     return ".".join(segs)
 
 
-_ENTITY_PREFIXES = {"user", "assist"}  # canonical forms of user. / assistant.
-
-
 def enforce_key_schema(key: str, schema) -> str:
     """Structural write-time enforcement of the declared key grammar
     (ADR-0021): unknown first segment folds under `schema.default_prefix`,
